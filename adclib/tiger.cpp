@@ -76,9 +76,9 @@
 
 #define tiger_compress_macro(str, state) \
      { \
-     register unsigned long long a, b, c, tmpa; \
+     unsigned long long a, b, c, tmpa; \
      unsigned long long aa, bb, cc; \
-     register unsigned long long x0, x1, x2, x3, x4, x5, x6, x7; \
+     unsigned long long x0, x1, x2, x3, x4, x5, x6, x7; \
      int pass_no; \
      \
      a = state[0]; \
