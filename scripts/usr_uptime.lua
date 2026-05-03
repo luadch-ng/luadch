@@ -136,19 +136,18 @@ local new_entry = function( user )
             uptime_tbl = {}
             util.savetable( uptime_tbl, "uptime", uptime_file )
             if opchat then opchat.feed( msg_err ) end
-        else
-            local month, year = tonumber( os.date( "%m" ) ), tonumber( os.date( "%Y" ) )
-            if type( uptime_tbl[ user:firstnick() ] ) == "nil" then
-                uptime_tbl[ user:firstnick() ] = {}
-            end
-            if type( uptime_tbl[ user:firstnick() ][ year ] ) == "nil" then
-                uptime_tbl[ user:firstnick() ][ year ] = {}
-            end
-            if type( uptime_tbl[ user:firstnick() ][ year ][ month ] ) == "nil" then
-                uptime_tbl[ user:firstnick() ][ year ][ month ] = {}
-                uptime_tbl[ user:firstnick() ][ year ][ month ][ "session_start" ] = os.time()
-                uptime_tbl[ user:firstnick() ][ year ][ month ][ "complete" ] = 0
-            end
+        end
+        local month, year = tonumber( os.date( "%m" ) ), tonumber( os.date( "%Y" ) )
+        if type( uptime_tbl[ user:firstnick() ] ) == "nil" then
+            uptime_tbl[ user:firstnick() ] = {}
+        end
+        if type( uptime_tbl[ user:firstnick() ][ year ] ) == "nil" then
+            uptime_tbl[ user:firstnick() ][ year ] = {}
+        end
+        if type( uptime_tbl[ user:firstnick() ][ year ][ month ] ) == "nil" then
+            uptime_tbl[ user:firstnick() ][ year ][ month ] = {}
+            uptime_tbl[ user:firstnick() ][ year ][ month ][ "session_start" ] = os.time()
+            uptime_tbl[ user:firstnick() ][ year ][ month ][ "complete" ] = 0
         end
     end
 end
