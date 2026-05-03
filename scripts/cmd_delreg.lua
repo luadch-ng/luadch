@@ -151,7 +151,7 @@ local msg_notfound = lang.msg_notfound or "[ DELREG ]--> User is not registered.
 
 local help_title = lang.help_title or "delreg"
 local help_usage = lang.help_usage or "[+!#]delreg nick <NICK>  /  or del with blacklist entry:  [+!#]delreg nick <NICK> <DESCRIPTION>"
-local help_desc = lang.help_desc or "delregs a new user by nick or cid"
+local help_desc = lang.help_desc or "delregs an existing user by nick or cid"
 
 local ucmd_menu_ct1 = lang.ucmd_menu_ct1 or { "User", "Control", "Delreg", "by NICK" }
 local ucmd_menu_ct2 = lang.ucmd_menu_ct2 or { "Delreg", "OK" }
