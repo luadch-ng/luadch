@@ -82,7 +82,7 @@ xcopy %openssl_libs%\libcrypto-3-x64.dll "%hub%\" /y /f
 cd %root%\lua\src
 @echo Building lua.dll...
 gcc -O2 -Wall -DLUA_BUILD_AS_DLL -DLUA_COMPAT_ALL -c *.c
-gcc -shared -o lua.dll lapi.o lcode.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmem.o lobject.o lopcodes.o lparser.o lstate.o lstring.o ltable.o ltm.o lundump.o lvm.o lzio.o lauxlib.o lbaselib.o ldblib.o liolib.o lmathlib.o loslib.o ltablib.o lstrlib.o loadlib.o linit.o
+gcc -shared -o lua.dll lapi.o lcode.o lctype.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmem.o lobject.o lopcodes.o lparser.o lstate.o lstring.o ltable.o ltm.o lundump.o lvm.o lzio.o lauxlib.o lbaselib.o lcorolib.o ldblib.o liolib.o lmathlib.o loadlib.o loslib.o lstrlib.o ltablib.o lutf8lib.o linit.o
 strip --strip-unneeded lua.dll
 xcopy lua.dll "%hub%\*.*" /y /f
 del *.o
@@ -112,14 +112,8 @@ xcopy Luadch.exe "%hub%\*.*" /y /f
 del *.exe
 del *.o
 
-cd %root%\slnunicode
-@echo Building unicode.dll...
-gcc -O2 -Wall -c -I%include% slnunico.c slnudata.c
-gcc -shared -o unicode.dll slnunico.o slnudata.o -L%lib% -llua
-strip --strip-unneeded unicode.dll
-xcopy unicode.dll "%hub%\lib\unicode\*.*" /y /f
-del unicode.dll
-del *.o
+@echo Installing unicode.lua shim (replaces unmaintained slnunicode C module)...
+xcopy %root%\slnunicode\unicode.lua "%hub%\lib\unicode\*.*" /y /f
 
 cd %root%\luasocket\src
 gcc -DLUASOCKET_INET_PTON -DWINVER=0x0501 -DLUASO -w -fno-common -fvisibility=hidden  -c -I%include% mime.c compat.c

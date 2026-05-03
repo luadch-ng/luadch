@@ -55,10 +55,8 @@ cd "$ROOT"/adclib
 make -j CXX="$CXX" LUAINCLUDE_DIR="$LUA_DIR" LUALIB_DIR="$INSTALL_DIR" INSTALL_DIR="$INSTALL_DIR"/lib/adclib/adclib.so
 clean $1
 
-echo Building slnunicode...
-cd "$ROOT"/slnunicode
-make -j CC="$CC" LUAINCLUDE_DIR="$LUA_DIR" LUALIB_DIR="$INSTALL_DIR" INSTALL_DIR="$INSTALL_DIR"/lib/unicode/unicode.so
-clean $1
+echo Installing unicode.lua shim, replaces unmaintained slnunicode C module...
+cp "$ROOT"/slnunicode/unicode.lua "$INSTALL_DIR"/lib/unicode/unicode.lua
 
 echo Building luasocket...
 cd "$ROOT"/luasocket/

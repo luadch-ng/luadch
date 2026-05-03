@@ -239,7 +239,7 @@ int unescape(lua_State* L)
     return 1;
 }
 
-static const luaL_reg adclib[] = {
+static const luaL_Reg adclib[] = {
     {"hash", hash_pid},
     {"hashpas", hash_pas},
     {"hasholdpas", hash_pas_oldschool},
@@ -252,7 +252,7 @@ static const luaL_reg adclib[] = {
 
 extern "C" int luaopen_adclib(lua_State* L)
 {
-    luaL_register(L, "adclib", adclib);
-    return 0;
+    luaL_newlib(L, adclib);
+    return 1;
 }
 

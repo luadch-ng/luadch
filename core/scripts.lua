@@ -15,7 +15,6 @@ local error = use "error"
 local pairs = use "pairs"
 local pcall = use "pcall"
 local ipairs = use "ipairs"
-local setfenv = use "setfenv"
 local loadfile = use "loadfile"
 local tostring = use "tostring"
 local setmetatable = use "setmetatable"
@@ -173,40 +172,42 @@ startscripts = function( hub )
         if not ret then
             out_error( "scripts.lua: format error in script '", scriptname, "': ", err )
         else
-            ret, err = loadfile( path )
+            -- Build the script's _ENV table BEFORE loadfile, so we can pass it
+            -- as the 3rd loadfile argument (Lua 5.4 idiom; setfenv is gone).
+            local hubobject = { }
+            for name, method in pairs( hub ) do
+                if utf_sub( name, 1, 1 ) ~= "_" then    -- no "hidden" functions...
+                    hubobject[ name ] = method
+                end
+            end
+            local key = _len + 1
+            hubobject.setlistener = listenermethod( "set", key )    -- this is needed to execute listeners in script order
+            hubobject.getlistener = listenermethod( "get", key )
+            local env =  { }
+
+            --// useful constants //--
+
+            --env.DISPATCH_HUB = _code.hubdispatch
+            --env.DISCARD_HUB = _code.hubbypass
+            --env.DISPATCH_SCRIPTS = _code.scriptsdispatch
+            --env.DISCARD_SCRIPTS = _code.scriptsbypass
+
+            env.PROCESSED = _code.scriptsbypass + _code.hubbypass    -- should be enough
+
+            for i, k in pairs( _G ) do
+                env[ i ] = k
+            end
+            env.hub = hubobject
+            env.utf = utf
+            env.string = utf
+            if cfg_get "no_global_scripting" then
+                setenv( env )
+            end
+
+            ret, err = loadfile( path, "t", env )
             if not ret then
                 out_error( "scripts.lua: syntax error in script '", scriptname, "': ", err )
             else
-                local hubobject = { }
-                for name, method in pairs( hub ) do
-                    if utf_sub( name, 1, 1 ) ~= "_" then    -- no "hidden" functions...
-                        hubobject[ name ] = method
-                    end
-                end
-                local key = _len + 1
-                hubobject.setlistener = listenermethod( "set", key )    -- this is needed to execute listeners in script order
-                hubobject.getlistener = listenermethod( "get", key )
-                local env =  { }
-
-                --// useful constants //--
-
-                --env.DISPATCH_HUB = _code.hubdispatch
-                --env.DISCARD_HUB = _code.hubbypass
-                --env.DISPATCH_SCRIPTS = _code.scriptsdispatch
-                --env.DISCARD_SCRIPTS = _code.scriptsbypass
-
-                env.PROCESSED = _code.scriptsbypass + _code.hubbypass    -- should be enough
-
-                for i, k in pairs( _G ) do
-                    env[ i ] = k
-                end
-                env.hub = hubobject
-                env.utf = utf
-                env.string = utf
-                if cfg_get "no_global_scripting" then
-                    setenv( env )
-                end
-                setfenv( ret, env )
                 local bol, ret = pcall( ret )
                 if not bol then
                     out_error( "scripts.lua: lua error in script '", scriptname, "': ", ret )

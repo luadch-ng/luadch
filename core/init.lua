@@ -22,7 +22,6 @@ local pcall = pcall
 local ipairs = ipairs
 local assert = assert
 local require = require
-local setfenv = setfenv
 local loadfile = loadfile
 local tostring = tostring
 local setmetatable = setmetatable
@@ -109,9 +108,9 @@ loadscript = function( name )    -- this function loads a certain core script
         return nil
     end
     assert( not _global[ name ], "fatal error: namespace '" .. name .. "' already exists" )    -- UNSAFE: program termination
-    local script, err = loadfile( _path .. name .. ".lua" )
+    -- Lua 5.4: pass env as the 3rd loadfile arg; it becomes _ENV in the chunk.
+    local script, err = loadfile( _path .. name .. ".lua", "t", _env )
     assert( script, err )    -- UNSAFE: program termination
-    setfenv( script, _env )
     _global[ name ] = script( )
     write( "\ninit.lua: loaded '" .. name .. "'" )
     return _global[ name ]
