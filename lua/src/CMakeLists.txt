@@ -45,9 +45,12 @@ if(UNIX)
     target_link_libraries(lua PRIVATE m ${CMAKE_DL_LIBS})
 endif()
 
-# Match Phase 1 build-output spec: liblua.so / lua.dll at install root
+# Match Phase 1 build-output spec: liblua.so / lua.dll at install root.
+# We deliberately do NOT install ARCHIVE (the MinGW import lib
+# liblua.dll.a) - it is a build-time linker input, not a runtime
+# artefact, and our in-tree consumers (adclib, luasocket, luasec, hub)
+# link via the `lua` CMake target rather than the installed import lib.
 install(TARGETS lua
     RUNTIME DESTINATION .         # lua.dll on Windows
     LIBRARY DESTINATION .         # liblua.so on Linux
-    ARCHIVE DESTINATION .         # liblua.dll.a (Windows import lib) — staged for downstream
 )
