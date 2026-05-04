@@ -5,6 +5,7 @@
 # POSIX shell scripts and Unix-built toolchain files must stay LF, even on
 # Windows checkouts. Otherwise the shebang (#!/bin/sh\r) breaks the WSL build.
 *.sh        text eol=lf
+*.py        text eol=lf
 compile     text eol=lf
 cleanall    text eol=lf
 Makefile    text eol=lf
