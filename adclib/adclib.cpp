@@ -26,6 +26,14 @@ extern "C" {
 
 enum {SIZE = 192/8};
 
+// Bounded buffer sizes for the Tiger hash inputs. The legitimate ADC
+// CID is exactly SIZE (24) bytes; the legitimate ADC salt is bounded by
+// adclib.createsalt's default of 10 base32 chars (~6 bytes). MAX_SALT_BYTES
+// is set well above that so any reasonable future tuning of createsalt
+// fits, while still preventing the attacker-sized VLA stack-DoS flagged
+// as F-C-1 in the Phase 7 audit.
+enum {MAX_SALT_BYTES = 64};
+
 int utf8ToWc(const char* str, wchar_t& c) {
         const auto c0 = static_cast<uint8_t>(str[0]);
         const auto bytes = 2 + !!(c0 & 0x20) + ((c0 & 0x30) == 0x30);
@@ -137,13 +145,20 @@ int is_valid_utf8(lua_State* L)
     return 1;
 }
 
+// All three hash_* functions take Lua strings that may legitimately
+// contain embedded NUL bytes (passwords, binary CID/PID material), so
+// they use luaL_checklstring with explicit length to avoid the silent
+// truncation flagged as F-C-3. Salt and CID are also bounded against
+// the attacker-sized-VLA stack-DoS flagged as F-C-1.
+
 int hash_pid(lua_State* L)
 {
-    std::string pid = (std::string) luaL_checkstring(L, 1);
+    size_t pid_len;
+    const char* pid_data = luaL_checklstring(L, 1, &pid_len);
     unsigned char cid[SIZE];
 
     memset(cid, 0, sizeof(cid));
-    ADCLIB::BASE32::FROMBASE32(pid.c_str(), cid, sizeof(cid));
+    ADCLIB::BASE32::FROMBASE32(pid_data, cid, sizeof(cid));
     ADCLIB::TigerHash Tiger;
     Tiger.update(cid, SIZE);
     Tiger.finalize();
@@ -154,15 +169,21 @@ int hash_pid(lua_State* L)
 
 int hash_pas(lua_State* L)
 {
-    std::string password = (std::string) luaL_checkstring(L, 1);
-    std::string salt = (std::string) luaL_checkstring(L, 2);
-    size_t saltBytes = salt.size()*5/8;
-    unsigned char chunk[saltBytes];
+    size_t pass_len, salt_len;
+    const char* pass_data = luaL_checklstring(L, 1, &pass_len);
+    const char* salt_data = luaL_checklstring(L, 2, &salt_len);
+
+    size_t saltBytes = salt_len * 5 / 8;
+    if (saltBytes == 0 || saltBytes > MAX_SALT_BYTES) {
+        return luaL_error(L, "hashpas: salt length %zu out of range",
+                          saltBytes);
+    }
+    unsigned char chunk[MAX_SALT_BYTES];
 
     memset(chunk, 0, saltBytes);
-    ADCLIB::BASE32::FROMBASE32(salt.c_str(), chunk, saltBytes);
+    ADCLIB::BASE32::FROMBASE32(salt_data, chunk, saltBytes);
     ADCLIB::TigerHash Tiger;
-    Tiger.update(password.data(), password.length());
+    Tiger.update(pass_data, pass_len);
     Tiger.update(chunk, saltBytes);
     Tiger.finalize();
     std::string result = ADCLIB::BASE32::TOBASE32(Tiger.getResult(), ADCLIB::TigerHash::HASH_SIZE);
@@ -172,19 +193,25 @@ int hash_pas(lua_State* L)
 
 int hash_pas_oldschool(lua_State* L)
 {
-    std::string password = (std::string) luaL_checkstring(L, 1);
-    std::string salt = (std::string) luaL_checkstring(L, 2);
-    std::string cid = (std::string) luaL_checkstring(L, 3);
-    size_t saltBytes = salt.size()*5/8;
-    unsigned char chunk1[saltBytes];
+    size_t pass_len, salt_len, cid_len;
+    const char* pass_data = luaL_checklstring(L, 1, &pass_len);
+    const char* salt_data = luaL_checklstring(L, 2, &salt_len);
+    const char* cid_data = luaL_checklstring(L, 3, &cid_len);
+
+    size_t saltBytes = salt_len * 5 / 8;
+    if (saltBytes == 0 || saltBytes > MAX_SALT_BYTES) {
+        return luaL_error(L, "hasholdpas: salt length %zu out of range",
+                          saltBytes);
+    }
+    unsigned char chunk1[MAX_SALT_BYTES];
     unsigned char chunk2[SIZE];
     memset(chunk1, 0, saltBytes);
     memset(chunk2, 0, sizeof(chunk2));
-    ADCLIB::BASE32::FROMBASE32(salt.c_str(), chunk1, saltBytes);
-    ADCLIB::BASE32::FROMBASE32(cid.c_str(), chunk2, sizeof(chunk2));
+    ADCLIB::BASE32::FROMBASE32(salt_data, chunk1, saltBytes);
+    ADCLIB::BASE32::FROMBASE32(cid_data, chunk2, sizeof(chunk2));
     ADCLIB::TigerHash Tiger;
     Tiger.update(chunk2, SIZE);
-    Tiger.update(password.data(), password.length());
+    Tiger.update(pass_data, pass_len);
     Tiger.update(chunk1, saltBytes);
     Tiger.finalize();
     std::string result = ADCLIB::BASE32::TOBASE32(Tiger.getResult(), ADCLIB::TigerHash::HASH_SIZE);
