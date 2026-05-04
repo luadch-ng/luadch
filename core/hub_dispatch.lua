@@ -42,6 +42,7 @@ local tablesize = use "tablesize"
 
 local adclib = use "adclib"
 local cfg = use "cfg"
+local ratelimit = use "ratelimit"
 local scripts = use "scripts"
 local signal = use "signal"
 local unicode = use "unicode"
@@ -59,6 +60,10 @@ local escapefrom = adclib.unescape
 
 local cfg_get = cfg.get
 local cfg_saveusers = cfg.saveusers
+
+local ratelimit_user_msg = ratelimit.user_msg
+local ratelimit_user_search = ratelimit.user_search
+local ratelimit_record_authfail = ratelimit.record_authfail
 
 local scripts_firelistener = scripts.firelistener
 local signal_get = signal.get
@@ -367,6 +372,10 @@ _verify = {
         local hubhashold = adclib_hasholdpas( pass, salt, usercid )
         if ( userhash ~= hubhash ) and ( userhash ~= hubhashold ) then
             profile.badpassword = ( profile.badpassword or 0 ) + 1
+            -- Phase 7c F-AUTH-3: also count this against the offending
+            -- IP so cross-account fishing is throttled, not just the
+            -- per-account counter that an attacker can cycle through.
+            ratelimit_record_authfail( userip )
             user:kill( "ISTA 223 " .. _i18n_invalid_pass .. "\n", "TL-1" )
             scripts_firelistener( "onFailedAuth", profile.nick, userip, usercid, escapefrom( _i18n_invalid_pass ) )
         else
@@ -390,6 +399,19 @@ _verify = {
 
 }
 
+-- Phase 7c F-RL-1 / F-RL-2 helpers. Token-bucket-protected entry points
+-- to the BMSG / EMSG / DMSG / *SCH listeners. Returning `true` from the
+-- handler tells incoming() the message has been handled (so the
+-- broadcast / fan-out is suppressed) without disconnecting the user.
+-- Op-level users (>= ratelimit_bypass_level) bypass the check inside
+-- ratelimit.user_msg / user_search.
+local function rl_msg_drop( user )
+    return not ratelimit_user_msg( user.cid( ), user.level( ) )
+end
+local function rl_search_drop( user )
+    return not ratelimit_user_search( user.cid( ), user.level( ) )
+end
+
 _normal = {
     -- ADC: 6.3.4. INF
     BINF = function( user, adccmd )
@@ -397,15 +419,18 @@ _normal = {
     end,
     -- ADC: 6.3.5. MSG
     BMSG = function( user, adccmd )
+        if rl_msg_drop( user ) then return true end
         return scripts_firelistener( "onBroadcast", user, adccmd, escapefrom( adccmd[ 6 ] ) )
     end,
     --FMSG = function( user, adccmd )  -- cannot see a good scenario for FMSG; why should a user want to send mainchat messages to clients with specific features only?
     --    return scripts_firelistener( "onBroadcast", user, adccmd, escapefrom( adccmd[ 8 ] ) )
     --end,
     EMSG = function( user, adccmd, targetuser )
+        if rl_msg_drop( user ) then return true end
         return scripts_firelistener( "onPrivateMessage", user, targetuser, adccmd, escapefrom( adccmd[ 8 ] ) )
     end,
     DMSG = function( user, adccmd, targetuser )
+        if rl_msg_drop( user ) then return true end
         return scripts_firelistener( "onPrivateMessage", user, targetuser, adccmd, escapefrom( adccmd[ 8 ] ) )
     end,
     -- ADC: 6.3.8. CTM
@@ -424,12 +449,15 @@ _normal = {
     --end,
     -- ADC: 6.3.6. SCH
     BSCH = function( user, adccmd )
+        if rl_search_drop( user ) then return true end
         return scripts_firelistener( "onSearch", user, adccmd )
     end,
     FSCH = function( user, adccmd )
+        if rl_search_drop( user ) then return true end
         return scripts_firelistener( "onSearch", user, adccmd )
      end,
     DSCH = function( user, adccmd, targetuser )
+        if rl_search_drop( user ) then return true end
         return scripts_firelistener( "onSearch", user, adccmd )
     end,
     -- ADC: 6.3.7. RES

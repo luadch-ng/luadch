@@ -87,6 +87,7 @@ local cfg = use "cfg"
 local out = use "out"
 local mem = use "mem"
 local signal = use "signal"
+local ratelimit = use "ratelimit"
 
 --// core methods //--
 
@@ -96,6 +97,12 @@ local mem_free = mem.free
 local out_error = out.error
 local signal_set = signal.set
 local signal_get = signal.get
+local ratelimit_accept_ip = ratelimit.accept_ip
+local ratelimit_release_ip = ratelimit.release_ip
+local ratelimit_handshake_started = ratelimit.handshake_started
+local ratelimit_handshake_finished = ratelimit.handshake_finished
+local ratelimit_expired_handshakes = ratelimit.expired_handshakes
+local ratelimit_tick = ratelimit.tick
 
 --// functions //--
 
@@ -334,15 +341,26 @@ wrapserver = function( listeners, socket, serverip, serverport, pattern, sslctx,
         local client, err = accept( socket )    -- try to accept
         if client then
             local clientip, clientport = client:getpeername( )
+            -- Phase 7c F-NET-1: per-IP parallel-socket cap and per-IP
+            -- accept-rate cap. Refuse pre-wrap so the offending IP cannot
+            -- consume FDs / slot-list entries.
+            local ok, rl_err = ratelimit_accept_ip( clientip )
+            if not ok then
+                out_put( "server.lua: function 'wrapserver': rate-limit refused ", clientip, ": ", rl_err )
+                client:close( )
+                return false
+            end
             client:settimeout( 0 )
             local _, err = client:setoption( "reuseaddr", true )
             local _, err2 = client:setoption( "keepalive", true )
             if err or err2 then
                 out_put( "server.lua: function 'wrapserver', luasocket socket setoption: ", err or err2 )
+                ratelimit_release_ip( clientip )
                 return false
             end
             local handler, client, err = wrapconnection( handler, listeners, client, serverip, clientip, serverport, clientport, pattern, sslctx, startssl )    -- wrap new client socket
             if err then    -- error while wrapping ssl socket
+                ratelimit_release_ip( clientip )
                 return false
             end
             connections = connections + 1
@@ -433,11 +451,13 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
         _writetimes[ handler ] = nil
         _activitytimes[ handler ] = nil
         _closelist[ handler ] = nil
+        ratelimit_handshake_finished( handler )
         socket:close( )
         handler = nil
         socket = nil
         mem_free( )
         _ = server and server.remove( )
+        ratelimit_release_ip( clientip )    -- Phase 7c F-NET-1: free per-IP slot
         out_put "server.lua: function 'wrapconnection': closed client handler and removed socket from lists"
     end
     handler.close = function( forced )
@@ -606,12 +626,14 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
     if sslctx then    -- ssl?
         ssl = true
         local wrote
+        ratelimit_handshake_started( handler )    -- Phase 7c F-NET-2: handshake-deadline tracking
         local handshake = coroutine_wrap( function( client )    -- create handshake coroutine
                 local err
                 for i = 1, 20 do    -- 20 handshake attemps
                     _, err = client:dohandshake( )
                     if not err then
                         out_put( "server.lua: function 'wrapconnection': ssl handshake done" )
+                        ratelimit_handshake_finished( handler )    -- Phase 7c F-NET-2
                         _sendlistlen = ( wrote and removesocket( _sendlist, socket, _sendlistlen ) ) or _sendlistlen
                         handler.readbuffer = handle_read_event   -- when handshake is done, replace the handshake function with regular functions
                         handler.sendbuffer = handle_write_event
@@ -969,6 +991,14 @@ addtimer( function( )
                     handler.close( "timeout" )    -- forced disconnect
                 end
             end
+            -- Phase 7c F-NET-2: kill TLS connections stuck in handshake.
+            local expired = ratelimit_expired_handshakes( )
+            if expired then
+                for _, h in ipairs( expired ) do
+                    h.close( "handshake timeout" )
+                end
+            end
+            ratelimit_tick( )    -- prune stale token buckets
         end
     end
 )

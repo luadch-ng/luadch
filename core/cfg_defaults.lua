@@ -3022,6 +3022,98 @@ local defaults = {
         end
     },
 
+    --// RATE-LIMIT / DOS-HARDENING //--
+    --
+    -- Phase 7c. All defaults are conservative; tune to traffic profile.
+    -- Op-level users (level >= ratelimit_bypass_level) bypass every
+    -- per-user check below. Per-IP checks always apply.
+    --
+    -- Each "rate" key is integer per-second tokens (or bursts/window
+    -- where noted). The "burst" key is the bucket capacity, allowing
+    -- short spikes above the steady rate.
+
+    ratelimit_activate = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    ratelimit_bypass_level = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Per-IP parallel-socket cap. Connection refused at accept time.
+    -- Default 16 accommodates small-office NAT / CGNAT deployments
+    -- where many users share one public IP. Lower for tighter hubs.
+    ratelimit_perip_max_conns = { 16,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Per-IP new-connection rate (tokens/second + burst).
+    -- Defaults sized for NAT bursts (e.g. an office reconnecting after
+    -- internet flap). Burst >= max_conns so the parallel-cap is the
+    -- binding limit at steady-state, not the rate-bucket.
+    ratelimit_perip_conn_rate = { 10,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    ratelimit_perip_conn_burst = { 30,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- TLS handshake wallclock deadline (seconds). 0 disables.
+    ratelimit_handshake_timeout = { 10,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Per-IP bad-auth attempts. Per-account counter still applies on
+    -- top of this (max_bad_password / bad_pass_timeout).
+    ratelimit_perip_authfail_rate = { 10,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    ratelimit_perip_authfail_burst = { 5,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- When an IP exceeds the per-IP authfail rate above, block all
+    -- further accepts from it for this many seconds (independent of
+    -- the per-account bad_pass_timeout).
+    ratelimit_authfail_lockout = { 300,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Per-user chat (BMSG / EMSG / DMSG) rate.
+    ratelimit_user_msg_rate = { 5,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    ratelimit_user_msg_burst = { 10,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Per-user search (BSCH / FSCH / DSCH) cooldown. The bucket fills
+    -- at one token every ratelimit_user_search_period seconds.
+    ratelimit_user_search_period = { 2,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    ratelimit_user_search_burst = { 3,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
     --// PING //--
 
     use_ping = { true,

@@ -449,6 +449,49 @@ def test_csprng_salt_uniqueness():
         raise TestFailure(f"salt collision in {N} draws: {dupes!r}")
 
 
+def test_perip_connection_cap():
+    """Open more parallel TCP connections from one IP than ratelimit_perip_max_conns
+    (default 16). The N+1th accept must fail or get torn down by the hub before
+    a SUP exchange completes. Smoke coverage for F-NET-1.
+
+    We keep the first batch alive (don't close until end of test), then attempt
+    one extra. If the hub honours the cap, the extra socket either errors at
+    connect or the hub closes it before SUP can complete."""
+    cap = 16
+    keep = []
+    try:
+        for _ in range(cap):
+            sock = socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC)
+            keep.append(sock)
+        # The cap+1 attempt: connect may succeed (kernel-level) but the hub must
+        # not produce an ISUP. Give it ~1s; if we get nothing, the hub refused.
+        try:
+            extra = socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC)
+        except OSError:
+            return  # connect refused at OS level - that's also acceptable
+        try:
+            extra.settimeout(1.5)
+            extra.sendall(b"HSUP ADBASE ADTIGR\n")
+            data = b""
+            try:
+                data = extra.recv(4096)
+            except (socket.timeout, OSError):
+                pass
+            if data:
+                raise TestFailure(
+                    f"hub accepted connection #{cap + 1} from one IP and answered "
+                    f"with {data[:80]!r}; expected the per-IP cap to refuse"
+                )
+        finally:
+            extra.close()
+    finally:
+        for s in keep:
+            s.close()
+        # Give the hub time to process disconnects and free per-IP slots
+        # before the next test connects.
+        time.sleep(0.6)
+
+
 def test_no_script_errors(log_path: Path):
     """
     Plugin-load smoke: scan the captured hub stdout for "script error:"
@@ -476,6 +519,7 @@ TESTS = [
     ("TLS ADC full login (dummy/test)", test_full_login_tls),
     ("+cmd routing (post-login +help)", test_command_routing),
     ("CSPRNG salts are unique across connections", test_csprng_salt_uniqueness),
+    ("per-IP connection cap refuses overflow", test_perip_connection_cap),
 ]
 
 

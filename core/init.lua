@@ -78,6 +78,7 @@ _core = {    -- luadch core, order is important
     "cfg",
     "out",
     --"doc",
+    "ratelimit",
     "server",
     "adc",
     "hub",
