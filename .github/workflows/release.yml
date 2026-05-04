@@ -19,6 +19,14 @@ on:
 permissions:
   contents: write
 
+env:
+  # Run JavaScript-based actions on Node.js 24 instead of the default
+  # Node.js 20. GitHub will switch the default in mid-2026; setting this
+  # explicitly avoids the deprecation warning and keeps us off the
+  # to-be-removed runtime. See:
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build-linux:
     name: Build Linux x86_64
