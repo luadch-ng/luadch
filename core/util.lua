@@ -80,6 +80,7 @@
 local type = use "type"
 local table = use "table"
 local pairs = use "pairs"
+local pcall = use "pcall"
 local ipairs = use "ipairs"
 local tostring = use "tostring"
 local tonumber = use "tonumber"
@@ -275,14 +276,41 @@ sortserialize = function( tbl, name, file, tab, r )
 end
 
 --// loads a local table from file
+-- Phase 7e F-FIO-1: was `loadfile(path)` which loads with the caller's
+-- full _ENV - any attacker who tampers a .tbl file gains RCE on the
+-- hub host (cfg.tbl / user.tbl / lang/*.lng / dozens of plugin state
+-- files all flow through here).
+--
+-- Hardening:
+--   1. mode = "t" rejects compiled bytecode files (text source only).
+--   2. env = {} gives the chunk an empty _ENV: no os, io, debug,
+--      package, load*, require, dofile, loadfile, ... - effectively
+--      a sandbox where the chunk can compute pure data but cannot
+--      reach the host. Legitimate .tbl files are
+--      "local foo; foo = { ... }; return foo" which uses zero
+--      globals and works unchanged.
+--   3. pcall wraps the chunk call so a tampered file that errors at
+--      runtime (e.g. arithmetic on nil, infinite recursion past the
+--      Lua stack guard) cannot crash the hub - we just log and
+--      return nil.
+--
+-- Residual risk: a chunk can still loop indefinitely or allocate
+-- large tables. That is a DoS, not RCE, and only reachable by an
+-- attacker who already has file-write access (i.e. existing
+-- corruption / chmod / disk-fill primitives). Acceptable trade-off
+-- vs. a full hand-rolled non-executable parser (~300 LoC).
 loadtable = function( path )
     local _, err = checkfile( path )
     if err then
         return nil, err
     end
-    local chunk, err = loadfile( path )
+    local chunk, err = loadfile( path, "t", { } )
     if chunk then
-        local ret = chunk( )
+        local ok, ret = pcall( chunk )
+        if not ok then
+            out_error( "util.lua: function 'loadtable': chunk error in ", path, ": ", ret )
+            return nil, ret
+        end
         if ret and type( ret ) == "table" then
             return ret, err
         else
