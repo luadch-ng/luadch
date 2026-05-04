@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <syslog.h>
 #include <string.h>
+#include <libgen.h>
+#include <limits.h>
 #endif
 #ifdef _WIN32
 #include <windows.h>
@@ -30,8 +32,13 @@ static int do_daemonization = 0;
 
 static void log_error(const char *msg)
 {
+  // Write to log/exception.txt next to the binary. chdir_to_binary_dir
+  // (called from main) anchored the CWD there at startup, so this
+  // resolves to <install>/log/exception.txt regardless of where the
+  // user invoked the hub from. If log/ does not exist, fopen returns
+  // NULL and we just rely on the stderr write below - non-fatal.
   FILE *file = NULL;
-  file = fopen("exception.txt", "a+");
+  file = fopen("log/exception.txt", "a+");
   if (file)
   {
     fprintf(file, "%s\n", msg);
@@ -39,6 +46,56 @@ static void log_error(const char *msg)
   }
   fprintf(stderr, "%s\n", msg);
   fflush(stderr);
+}
+
+// Anchor relative paths inside the hub (./core/init.lua, ./cfg/cfg.tbl,
+// ./scripts/...) to the binary's own directory rather than whatever CWD
+// the user happened to be in when they invoked us. Issue #12.
+//
+// Done via chdir() rather than threading a base-dir variable through
+// every Lua module: the existing "././X" pattern in core/cfg.lua,
+// core/init.lua, core/scripts.lua etc. continues to work unchanged
+// once CWD is correct, and there is no behavioural change for
+// deployments that already chdir into the install tree (systemd
+// WorkingDirectory=/opt/luadch, manual `cd /opt/luadch && ./luadch`).
+//
+// Returns 0 on success, -1 on any failure. We do not bail out on
+// failure: init.lua will then error with a clear "could not load
+// core/init.lua" message which is more diagnostic than a silent abort.
+static int chdir_to_binary_dir(void)
+{
+#ifdef _WIN32
+  char path[MAX_PATH];
+  DWORD len = GetModuleFileNameA(NULL, path, sizeof(path));
+  if (len == 0 || len == sizeof(path))
+  {
+    return -1;
+  }
+  // Strip the trailing filename so `path` becomes the directory.
+  for (DWORD i = len; i > 0; i--)
+  {
+    if (path[i - 1] == '\\' || path[i - 1] == '/')
+    {
+      path[i - 1] = '\0';
+      break;
+    }
+  }
+  return SetCurrentDirectoryA(path) ? 0 : -1;
+#elif defined(__unix__)
+  char buf[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+  if (len < 0)
+  {
+    return -1;
+  }
+  buf[len] = '\0';
+  // dirname() may modify its argument and may return a pointer into a
+  // static buffer on some libcs; chdir copies the string so the lifetime
+  // is not an issue here.
+  return chdir(dirname(buf));
+#else
+  return -1;
+#endif
 }
 
 #ifdef _WIN32
@@ -203,6 +260,14 @@ int main(int argc, char **argv)
 {
   handle_signals();
   handle_args(argc, argv);
+  if (chdir_to_binary_dir() != 0)
+  {
+    // Non-fatal: continue and let luaL_loadfile report a clear "no such
+    // file" error if the surrounding environment cannot supply
+    // core/init.lua via the inherited CWD either.
+    fprintf(stderr, "warning: could not anchor cwd to binary directory; "
+                    "falling back to inherited cwd\n");
+  }
   daemonize();
   run_lua();
   return EXIT_SUCCESS;

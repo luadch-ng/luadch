@@ -31,7 +31,8 @@ CMakeUserPresets.json
 Thumbs.db
 desktop.ini
 
-# Hub runtime crash log: hub/hub.c writes to "exception.txt" in CWD when
-# startup fails. Until path-anchoring lands (Phase 6 / issue #12),
-# running the binary from the repo root scatters this file there.
+# Hub runtime crash log. Since the Phase 6b path-anchoring change
+# (issue #12), the hub writes log/exception.txt inside its own install
+# tree. This entry is a safety net for older binaries or unusual
+# invocation paths that could still drop the file at the repo root.
 exception.txt

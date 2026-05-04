@@ -136,18 +136,23 @@ def generate_test_cert(staging_dir: Path):
 
 def start_hub(staging_dir: Path):
     """
-    Launch luadch in the staging dir. Returns the Popen handle and a
-    file handle to the captured stdout/stderr stream (combined).
+    Launch luadch from a CWD outside the staging tree. The hub anchors
+    its own runtime paths to the binary's directory at startup
+    (issue #12 / Phase 6b), so it must work regardless of the caller's
+    CWD. Picking a foreign CWD here turns the smoke run into a positive
+    proof of that anchoring; before #12 was fixed the hub would bail
+    out looking for ./core/init.lua relative to the harness's CWD.
     """
     binary = staging_dir / ("Luadch.exe" if sys.platform == "win32" else "luadch")
     if not binary.exists():
         raise RuntimeError(f"hub binary not found at {binary}")
 
+    foreign_cwd = staging_dir.parent  # the temp dir the staging lives inside
     log_file = open(staging_dir / "log" / "smoke-hub.log", "wb")
-    log(f"starting {binary}")
+    log(f"starting {binary} (cwd={foreign_cwd})")
     proc = subprocess.Popen(
         [str(binary)],
-        cwd=str(staging_dir),
+        cwd=str(foreign_cwd),
         stdout=log_file,
         stderr=subprocess.STDOUT,
     )

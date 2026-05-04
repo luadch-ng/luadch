@@ -108,10 +108,11 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
-`WorkingDirectory=` is mandatory — the hub uses CWD-relative paths
-internally. If you skip it, the hub will fail to find `core/init.lua`.
-(Issue [#12](https://github.com/Aybook/luadch/issues/12) tracks
-removing this constraint in Phase 6.)
+`WorkingDirectory=` is optional - the hub anchors its own runtime
+paths to the binary's directory at startup (Phase 6b / issue #12),
+so it works regardless of the CWD systemd hands it. We still set it
+explicitly above for clarity and so the unit reads the same on older
+releases that did require it.
 
 Enable and start:
 
