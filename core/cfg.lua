@@ -507,7 +507,6 @@ local loadusers
 local saveusers
 local loadlanguage
 local registerevent
-local checklanguage
 local loadcfgprofile
 local checkusers
 
@@ -545,6 +544,7 @@ local _defaultsettings_module = use "cfg_defaults"
 _defaultsettings = _defaultsettings_module.settings
 
 local _users_module = use "cfg_users"
+local _lang_module  = use "cfg_lang"
 
 
 checkcfg = function( )
@@ -556,16 +556,6 @@ checkcfg = function( )
             break
         end
     end
-end
-
-checklanguage = function( lang )
-    --[[for i, k in pairs( lang ) do
-        if not ( types_utf8( k, nil, true ) and types_utf8( i, nil, true ) ) then
-            out_error( "cfg.lua: function 'checklanguage': error while loading hub language: invalid key/value: ", i, "/", k, "; using default" )
-            return { }
-        end
-    end]]
-    return lang
 end
 
 checkusers = function()
@@ -605,36 +595,14 @@ end
 saveusers = function( regusers )
     return _users_module.saveusers( get "user_path", regusers )
 end
---[[
-loadlanguage = function( language, name )
-    language = tostring( language or get "language" )    -- default language
-    local path
-    if not name then
-        path = get "core_lang_path" .. language .. ".tbl"
-    else
-        path = get "scripts_lang_path" .. tostring( name ) .. ".lang." .. language
-    end
-    local ret, err = util_loadtable( path )
-    _ = err and out_error( "cfg.lua: function 'loadlanguage': error while loading language: ", err )
-    return checklanguage( ret or { } ), err
-end
-]]
 
 loadlanguage = function( language, name )
-    language = tostring( language or get "language" )    -- default language
-    local path
-    if not name then
-        path = get "core_lang_path" .. language .. ".tbl"
-    else
-        path = get "scripts_lang_path" .. tostring( name ) .. ".lang." .. language
-    end
-    local ret, err = util_loadtable( path )
-    if name then
-        _ = err and out_error( "cfg.lua: function 'loadlanguage': error while loading language (" .. tostring( name ) .. "): ", err )
-    else
-        _ = err and out_error( "cfg.lua: function 'loadlanguage': error while loading language: ", err )
-    end
-    return checklanguage( ret or { } ), err
+    return _lang_module.loadlanguage(
+        language or get "language",
+        name,
+        get "core_lang_path",
+        get "scripts_lang_path"
+    )
 end
 
 loadcfgprofile = function( profile, name )
@@ -671,6 +639,7 @@ init = function( )
     out = use "out"
     out_error = out.error
     _users_module.bind_late()
+    _lang_module.bind_late()
     local err
     _settings, err = util_loadtable( _cfgfile )
     _settings = _settings or { }
