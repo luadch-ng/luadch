@@ -163,6 +163,8 @@ local spairs
 
 local is_posint
 
+local chmod_secret
+
 local encode
 local decode
 
@@ -606,6 +608,23 @@ spairs = function( tbl )
     return orderedNext, tbl, nil
 end
 
+--// chmod 600 a freshly-written secret file on POSIX. No-op on Windows
+-- (NTFS ACLs are not POSIX mode bits; see docs/BUILDING.md for the
+-- icacls recipe). Invoked from secret-writing call sites such as
+-- saveusers; should NOT be applied to non-secret .tbl files like
+-- bans.tbl or hubstats.tbl. Phase 7 F-SEC-1 mitigation.
+do
+    local is_windows = os.getenv( "COMSPEC" ) and os.getenv( "WINDIR" )
+    chmod_secret = function( path )
+        if is_windows then return end
+        -- Single-quote-escape to neutralise any path metacharacters; the
+        -- only common offender is a literal single quote inside the path,
+        -- which we replace with the standard '\'' escape.
+        local escaped = "'" .. tostring( path ):gsub( "'", "'\\''" ) .. "'"
+        os.execute( "chmod 600 " .. escaped )
+    end
+end
+
 --// low impact encryption - a lightweight pure Lua cipher / based on a code part on stackoverflow.com
 do
     local Key53 = 1529434767825498 -- 67bit
@@ -687,6 +706,7 @@ return {
     spairs = spairs,
     maketable = maketable,
     is_posint = is_posint,
+    chmod_secret = chmod_secret,
     encode = encode,
     decode = decode,
 

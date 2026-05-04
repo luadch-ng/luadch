@@ -186,6 +186,45 @@ default account is hubowner — **delete it as soon as you have your own**.
 
 ---
 
+## File permissions for secrets
+
+`cfg/user.tbl` (registered users with their cleartext passwords - see
+[F-AUTH-1](https://github.com/Aybook/luadch/issues/52) for the
+ADC-protocol-mandated reason) and `certs/serverkey.pem` (TLS private
+key) hold material that must not be world-readable.
+
+### 🐧 Linux / BSD
+
+The hub `chmod 600`s `user.tbl` automatically after every write
+(`+reg`, `+delreg`, `+setpass`, etc.) and the `make_cert.sh` script
+`chmod 600`s the generated private keys. **No manual step needed**
+on a fresh install.
+
+If you have an existing deployment from before this hardening, run
+once:
+
+```sh
+chmod 600 cfg/user.tbl certs/serverkey.pem certs/cakey.pem
+```
+
+### 🪟 Windows
+
+NTFS does not have POSIX permission bits, so the hub does not attempt
+to enforce permissions automatically. Run once after install to
+restrict the secret files to your user account only:
+
+```cmd
+icacls "cfg\user.tbl"           /inheritance:r /grant:r "%USERNAME%:F"
+icacls "certs\serverkey.pem"    /inheritance:r /grant:r "%USERNAME%:F"
+icacls "certs\cakey.pem"        /inheritance:r /grant:r "%USERNAME%:F"
+```
+
+If the hub runs as `LocalService` / a dedicated service user, replace
+`%USERNAME%` with that account name. After you regenerate certificates
+or migrate `user.tbl` to a new install, repeat the `icacls` command.
+
+---
+
 ## Known cosmetic build warnings
 
 The Linux build emits 5 deprecation warnings from the bundled `luasec/` C

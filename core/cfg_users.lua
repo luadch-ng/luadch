@@ -34,6 +34,7 @@ local util = use "util"
 local util_loadtable = util.loadtable
 local util_savearray = util.savearray
 local util_maketable = util.maketable
+local util_chmod_secret = util.chmod_secret
 
 local _
 
@@ -54,11 +55,13 @@ local function loadusers( user_path )
 end
 
 local function saveusers( user_path, regusers )
-    local _, err = util_savearray( regusers, user_path .. "user.tbl" )
+    local file = user_path .. "user.tbl"
+    local _, err = util_savearray( regusers, file )
     _ = err and out_error( "cfg_users.lua: function 'saveusers': error while saving user db: ", err )
     if err then
         return false, err
     else
+        util_chmod_secret( file )
         return true
     end
 end
@@ -66,15 +69,25 @@ end
 local function checkusers( user_path )
     local users, err = util_loadtable( user_path .. "user.tbl" )
     if users then
-        util_maketable( nil, user_path .. "user.tbl.bak" )
-        local _, err = util_savearray( users, user_path .. "user.tbl.bak" )
-        _ = err and out_error( "cfg_users.lua: function 'checkusers': error while saving user db backup: ", err )
+        local backup = user_path .. "user.tbl.bak"
+        util_maketable( nil, backup )
+        local _, err = util_savearray( users, backup )
+        if err then
+            out_error( "cfg_users.lua: function 'checkusers': error while saving user db backup: ", err )
+        else
+            util_chmod_secret( backup )
+        end
     else
         local users, err = util_loadtable( user_path .. "user.tbl.bak" )
         if users then
-            util_maketable( nil, user_path .. "user.tbl" )
-            local _, err = util_savearray( users, user_path .. "user.tbl" )
-            _ = err and out_error( "cfg_users.lua: function 'checkusers': error while restoring corrupt user db from backup: ", err )
+            local file = user_path .. "user.tbl"
+            util_maketable( nil, file )
+            local _, err = util_savearray( users, file )
+            if err then
+                out_error( "cfg_users.lua: function 'checkusers': error while restoring corrupt user db from backup: ", err )
+            else
+                util_chmod_secret( file )
+            end
         end
     end
 end
