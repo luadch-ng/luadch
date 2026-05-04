@@ -36,3 +36,4 @@ desktop.ini
 # tree. This entry is a safety net for older binaries or unusual
 # invocation paths that could still drop the file at the repo root.
 exception.txt
+__pycache__/

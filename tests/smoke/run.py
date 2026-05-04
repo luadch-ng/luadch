@@ -22,8 +22,10 @@ Exit codes:
 """
 
 import argparse
+import base64
 import os
 import re
+import secrets
 import shutil
 import socket
 import ssl
@@ -32,6 +34,12 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+# Vendored pure-Python Tiger-192 hash. Used to compute CIDs (Tiger(PID)) and
+# password challenge responses (Tiger(password || salt)) for the login flow
+# tests below. Self-tests on import; if it ever breaks the harness fails fast.
+sys.path.insert(0, str(Path(__file__).parent))
+import tiger as _tiger
 
 
 # Test ports, deliberately offset from the upstream defaults (5000-5003)
@@ -243,6 +251,162 @@ def test_tls_handshake():
             adc_handshake(sock)
 
 
+# -----------------------------------------------------------------------------
+# ADC protocol helpers (used by the login flow tests below)
+# -----------------------------------------------------------------------------
+
+def _b32_encode(data: bytes) -> str:
+    """ADC base32: standard RFC 4648 alphabet, no padding."""
+    return base64.b32encode(data).decode("ascii").rstrip("=")
+
+
+def _b32_decode(s: str) -> bytes:
+    """ADC base32 decode: re-pad to a multiple of 8, then standard b32decode."""
+    return base64.b32decode(s + "=" * (-len(s) % 8))
+
+
+def _adc_escape(s: str) -> str:
+    """Escape spaces, newlines and backslashes for an ADC named-parameter value."""
+    return s.replace("\\", "\\\\").replace(" ", "\\s").replace("\n", "\\n")
+
+
+class _ADCReader:
+    """Buffered reader that yields complete newline-terminated ADC frames."""
+
+    def __init__(self, sock):
+        self._sock = sock
+        self._buffer = b""
+
+    def recv_until(self, predicate, timeout: float = PROTOCOL_TIMEOUT_SEC) -> str:
+        """Read frames from the socket until predicate(frame) returns truthy.
+        Returns the matching frame as a string (without the trailing \\n)."""
+        deadline = time.monotonic() + timeout
+        while True:
+            while b"\n" in self._buffer:
+                line, _, self._buffer = self._buffer.partition(b"\n")
+                frame = line.decode("utf-8", errors="replace")
+                if predicate(frame):
+                    return frame
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TestFailure(f"timed out after {timeout}s waiting for matching ADC frame")
+            self._sock.settimeout(remaining)
+            try:
+                chunk = self._sock.recv(4096)
+            except socket.timeout:
+                continue
+            if not chunk:
+                raise TestFailure("connection closed by hub before matching frame arrived")
+            self._buffer += chunk
+
+
+def _adc_login(sock, nick: str, password: str):
+    """Run a full ADC client login as a registered user. On success returns
+    (sid, reader) so the caller can keep using the same socket for further
+    interactions (e.g. sending +help)."""
+    reader = _ADCReader(sock)
+
+    # 1. SUP exchange. Hub responds with ISUP (its supported features),
+    #    ISID (the SID it has assigned us) and IINF (hub info).
+    sock.sendall(b"HSUP ADBASE ADTIGR\n")
+    reader.recv_until(lambda f: f.startswith("ISUP "))
+    isid = reader.recv_until(lambda f: f.startswith("ISID "))
+    sid = isid.split(" ", 1)[1].strip()
+    reader.recv_until(lambda f: f.startswith("IINF "))
+
+    # 2. Compute identity and send BINF. CID = Tiger(PID); the hub validates
+    #    this match in core/hub.lua's BINF handler.
+    pid_bytes = secrets.token_bytes(24)
+    cid_b32 = _b32_encode(_tiger.tiger(pid_bytes))
+    pid_b32 = _b32_encode(pid_bytes)
+    # SU (supported features) needs a non-empty value or the ADC parser
+    # rejects the BINF as malformed. TCP4 declares we accept active TCPv4
+    # CTM connections - inert for the smoke test, but parser-valid.
+    binf = (
+        f"BINF {sid}"
+        f" ID{cid_b32}"
+        f" PD{pid_b32}"
+        f" NI{_adc_escape(nick)}"
+        f" I40.0.0.0"
+        f" SUTCP4\n"
+    )
+    sock.sendall(binf.encode("utf-8"))
+
+    # 3. Hub answers IGPA <salt> for a registered user. Decode salt, compute
+    #    the response = Tiger(password || salt_bytes), send HPAS.
+    gpa = reader.recv_until(lambda f: f.startswith("IGPA "))
+    salt_b32 = gpa.split(" ", 1)[1].strip()
+    salt_bytes = _b32_decode(salt_b32)
+    response = _tiger.tiger(password.encode("utf-8") + salt_bytes)
+    sock.sendall(f"HPAS {_b32_encode(response)}\n".encode("utf-8"))
+
+    # 4. On success the hub transitions us to NORMAL state and starts
+    #    streaming our own and other users' INFs. The first BINF that starts
+    #    with our own SID is the canonical signal we are logged in. On a
+    #    bad-password failure the hub instead emits ISTA 223 and disconnects.
+    final = reader.recv_until(
+        lambda f: f.startswith(f"BINF {sid}") or f.startswith("ISTA "),
+        timeout=PROTOCOL_TIMEOUT_SEC,
+    )
+    if final.startswith("ISTA "):
+        raise TestFailure(f"login failed: hub returned {final!r}")
+
+    return sid, reader
+
+
+# -----------------------------------------------------------------------------
+# Tests (continued)
+# -----------------------------------------------------------------------------
+
+def _open_tls_socket():
+    """Helper: return a connected TLS-wrapped socket to the hub's TLS port.
+    Validation is disabled because the smoke harness uses a self-signed
+    test cert generated by certs/make_cert.{sh,bat}."""
+    raw = socket.create_connection((HUB_HOST, TEST_PORT_TLS), timeout=PROTOCOL_TIMEOUT_SEC)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx.wrap_socket(raw, server_hostname=HUB_HOST)
+
+
+def test_full_login_plain():
+    """Plain ADC: full login flow as dummy/test, BINF + HPAS to NORMAL state.
+    Exercises createuser's user object, the BINF parser, IGPA / salt
+    generation, HPAS verification, login() listener firing."""
+    with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
+        sid, _reader = _adc_login(sock, "dummy", "test")
+        if not sid or len(sid) != 4:
+            raise TestFailure(f"unexpected SID format from hub: {sid!r}")
+
+
+def test_full_login_tls():
+    """Same as plain, but over the TLS port."""
+    sock = _open_tls_socket()
+    try:
+        sid, _reader = _adc_login(sock, "dummy", "test")
+        if not sid or len(sid) != 4:
+            raise TestFailure(f"unexpected SID format from hub: {sid!r}")
+    finally:
+        sock.close()
+
+
+def test_command_routing():
+    """After a full login, send `+help` and expect any EMSG/DMSG response from
+    the hubbot. Exercises onBroadcast listener chain + etc_hubcommands routing
+    + cmd_help running and replying."""
+    with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+        sock.sendall(f"BMSG {sid} +help\n".encode("utf-8"))
+        # cmd_help replies via user:reply(...) which goes out as a private
+        # message frame (E or D type). We accept either kind.
+        response = reader.recv_until(
+            lambda f: f.startswith("EMSG ") or f.startswith("DMSG "),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if len(response) < 20:
+            raise TestFailure(f"+help response unexpectedly short: {response!r}")
+
+
 def test_no_script_errors(log_path: Path):
     """
     Plugin-load smoke: scan the captured hub stdout for "script error:"
@@ -266,6 +430,9 @@ TESTS = [
     ("hub binds plain + TLS ports", test_hub_binds_ports),
     ("plain ADC handshake", test_plain_handshake),
     ("TLS ADC handshake", test_tls_handshake),
+    ("plain ADC full login (dummy/test)", test_full_login_plain),
+    ("TLS ADC full login (dummy/test)", test_full_login_tls),
+    ("+cmd routing (post-login +help)", test_command_routing),
 ]
 
 

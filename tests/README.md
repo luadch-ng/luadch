@@ -17,6 +17,9 @@ tests/
     run.py        Python harness: stages a temp install, generates a
                   test cert, starts the hub on test ports, runs the
                   protocol checks, tears down.
+    tiger.py      Vendored pure-Python Tiger-192 hash. Used to compute
+                  CIDs and password challenge responses for the login
+                  flow tests. Self-tests on import.
   README.md       (this file)
 ```
 
@@ -36,6 +39,20 @@ tests/
 - **TLS ADC handshake.** Same as plain but wrapped in TLS against the
   hub's self-signed test cert. Covers the LuaSec / OpenSSL path
   end-to-end and protects against TLS regressions during refactor.
+- **Plain ADC full login (dummy/test).** Performs a complete client
+  login: SUP exchange, BINF with a freshly generated PID and the
+  matching `CID = Tiger(PID)`, GPA salt receipt, HPAS response
+  computed as `Tiger(password || salt)`. Asserts the hub transitions
+  the client to NORMAL state by emitting our own BINF echo. Exercises
+  `createuser`'s user object end-to-end (the user object factory is
+  the largest single function in `core/hub.lua` and a top target for
+  the Phase 6d refactor), the BINF parser, salt generation, and
+  password verification.
+- **TLS ADC full login (dummy/test).** Same login flow over TLS.
+- **`+cmd` routing (post-login `+help`).** After a successful login,
+  sends `BMSG <sid> +help` and expects an EMSG/DMSG response from the
+  hubbot. Exercises the onBroadcast listener chain,
+  `etc_hubcommands` parser, and a real bundled command's reply path.
 - **No script errors in log.** Scans the captured hub stdout for
   `script error:` lines (the prefix `core/scripts.lua` emits when a
   plugin fails to load or a listener throws). Catches plugin-level
@@ -75,18 +92,17 @@ does not matter there.
 
 ## Limitations
 
-- **No full login flow yet.** The handshake tests stop at the SUP/SID/
-  INF exchange. Full BINF + GPA + BPAS auth as the `dummy` user is
-  planned but adds non-trivial protocol code; it will land in a
-  follow-up PR alongside `+cmd`-routing tests once login is in.
 - **No internal unit tests.** `core/adc.lua` could be exercised
   directly with parser fixtures, but the `use "X"` sandbox in
   `core/init.lua` makes loading core modules standalone clunky. We
   test the parser via the running hub instead, which is more accurate
   but slower per assertion.
-- **CI integration is a separate step.** The harness runs locally
-  here; wiring it into `.github/workflows/` is the next Phase-6a
-  ticket.
+- **Tiger hash is vendored.** ADC's CID and password-challenge use
+  Tiger-192, which has been removed from `hashlib`, `pycryptodome`
+  and other modern Python crypto libraries. `tiger.py` is a
+  pure-Python port of `adclib/tiger.cpp` (S-box constants taken
+  verbatim from the C source); it self-tests against the standard
+  Tiger-192 test vectors on import.
 
 ## Adding a test
 
