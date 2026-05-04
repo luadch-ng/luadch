@@ -33,6 +33,7 @@
 
 local pairs = use "pairs"
 local ipairs = use "ipairs"
+local tostring = use "tostring"
 
 --// lua libs //--
 

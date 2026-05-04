@@ -75,6 +75,7 @@ _core = {    -- luadch core, order is important
     "mem",
     "signal",
     "util",
+    "cfg_secret",
     "cfg",
     "out",
     --"doc",

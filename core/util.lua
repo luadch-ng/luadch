@@ -78,9 +78,11 @@
 --// lua functions //--
 
 local type = use "type"
+local load = use "load"
 local table = use "table"
 local pairs = use "pairs"
 local pcall = use "pcall"
+local select = use "select"
 local ipairs = use "ipairs"
 local tostring = use "tostring"
 local tonumber = use "tonumber"
@@ -104,6 +106,7 @@ local math_floor = math.floor
 local string_byte = string.byte
 local table_sort = table.sort
 local table_insert = table.insert
+local table_concat = table.concat
 local string_format = string.format
 local string_find = string.find
 local string_match = string.match
@@ -146,8 +149,10 @@ local serialize
 local sortserialize
 
 local loadtable
+local loadtable_string
 local savetable
 local savearray
+local arraytostring
 local maketable
 
 local formatseconds
@@ -335,14 +340,11 @@ savetable = function( tbl, name, path )
     end
 end
 
---// saves an array to a local file
-savearray = function( array, path )
+-- Internal: emit a savearray-shaped serialisation to any writer that
+-- accepts :write(...). Used by both savearray (file-backed) and
+-- arraytostring (in-memory builder, for cfg_secret).
+local _writearray = function( array, writer )
     array = array or { }
-    local file, err = io_open( path, "w+" )
-    if not file then
-        out_error( "util.lua: function 'savearray': error in ", path, ": ", err, " (savearray)" )
-        return false, err
-    end
     local iterate, savetbl
     iterate = function( tbl )
         local tmp = { }
@@ -353,10 +355,10 @@ savearray = function( array, path )
         for i, key in ipairs( tmp ) do
             key = tonumber( key ) or key
             if type( tbl[ key ] ) == "table" then
-                file:write( ( ( type( key ) ~= "number" ) and tostring( key ) .. " = " ) or " " )
+                writer:write( ( ( type( key ) ~= "number" ) and tostring( key ) .. " = " ) or " " )
                 savetbl( tbl[ key ] )
             else
-                file:write( ( ( type( key ) ~= "number" and tostring( key ) .. " = " ) or "" ) .. ( ( type( tbl[ key ] ) == "string" ) and utf_format( "%q", tbl[ key ] ) or tostring( tbl[ key ] ) ) .. ", " )
+                writer:write( ( ( type( key ) ~= "number" and tostring( key ) .. " = " ) or "" ) .. ( ( type( tbl[ key ] ) == "string" ) and utf_format( "%q", tbl[ key ] ) or tostring( tbl[ key ] ) ) .. ", " )
             end
         end
     end
@@ -366,21 +368,65 @@ savearray = function( array, path )
             tmp[ #tmp + 1 ] = tostring( key )
         end
         table_sort( tmp )
-        file:write( "{ " )
+        writer:write( "{ " )
         iterate( tbl )
-        file:write( "}, " )
+        writer:write( "}, " )
     end
-    file:write( "return {\n\n" )
+    writer:write( "return {\n\n" )
     for i, tbl in ipairs( array ) do
         if type( tbl ) == "table" then
-            file:write( "    { " )
+            writer:write( "    { " )
             iterate( tbl )
-            file:write( "},\n" )
+            writer:write( "},\n" )
         else
-            file:write( "    ", utf_format( "%q,\n", tostring( tbl ) ) )
+            writer:write( "    ", utf_format( "%q,\n", tostring( tbl ) ) )
         end
     end
-    file:write( "\n}" )
+    writer:write( "\n}" )
+end
+
+-- Same shape as savearray but returns the serialised content as a
+-- string. Used by core/cfg_secret.lua so we can encrypt the
+-- serialised bytes before they ever touch disk (Phase 7f F-AUTH-1).
+arraytostring = function( array )
+    local sb = { buf = { }, n = 0 }
+    function sb:write( ... )
+        local n = select( "#", ... )
+        for i = 1, n do
+            self.n = self.n + 1
+            self.buf[ self.n ] = tostring( ( select( i, ... ) ) or "" )
+        end
+    end
+    _writearray( array, sb )
+    return table_concat( sb.buf, "", 1, sb.n )
+end
+
+-- Sandboxed string-loader for plaintext .tbl content already in
+-- memory (Phase 7f F-AUTH-1: cfg_secret.open returns plaintext bytes
+-- of an encrypted user.tbl, and we want the same empty-_ENV protection
+-- as loadtable). Same return-shape as loadtable.
+loadtable_string = function( content, name )
+    local fn, err = load( content, name or "tbl_string", "t", { } )
+    if not fn then return nil, err end
+    local ok, ret = pcall( fn )
+    if not ok then
+        out_error( "util.lua: function 'loadtable_string': chunk error: ", ret )
+        return nil, ret
+    end
+    if ret and type( ret ) == "table" then
+        return ret
+    end
+    return nil, "invalid table"
+end
+
+--// saves an array to a local file
+savearray = function( array, path )
+    local file, err = io_open( path, "w+" )
+    if not file then
+        out_error( "util.lua: function 'savearray': error in ", path, ": ", err, " (savearray)" )
+        return false, err
+    end
+    _writearray( array, file )
     file:close( )
     return true
 end
@@ -721,8 +767,10 @@ return {
     checkfile = checkfile,
     savetable = savetable,
     loadtable = loadtable,
+    loadtable_string = loadtable_string,
     serialize = serialize,
     savearray = savearray,
+    arraytostring = arraytostring,
     formatseconds = formatseconds,
     formatbytes = formatbytes,
     generatepass = generatepass,

@@ -492,6 +492,32 @@ def test_perip_connection_cap():
         time.sleep(0.6)
 
 
+def test_usertbl_encrypted_at_rest(staging_dir: Path):
+    """Phase 7f F-AUTH-1: user.tbl on disk must start with the LDC1 magic
+    after the hub has had any reason to save it (HPAS lastconnect update
+    runs every login). master.key must exist with the AES-256 key size.
+
+    We rely on the prior tests having logged in dummy/test (forces a
+    saveusers via the HPAS handler), so by the time this runs user.tbl
+    is in the encrypted format."""
+    cfg_dir = staging_dir / "cfg"
+    user_tbl = cfg_dir / "user.tbl"
+    master_key = cfg_dir / "master.key"
+    if not master_key.exists():
+        raise TestFailure(f"master.key missing at {master_key}")
+    key_bytes = master_key.read_bytes()
+    if len(key_bytes) != 32:
+        raise TestFailure(f"master.key size {len(key_bytes)}; expected 32")
+    if not user_tbl.exists():
+        raise TestFailure(f"user.tbl missing at {user_tbl}")
+    head = user_tbl.read_bytes()[:4]
+    if head != b"LDC1":
+        raise TestFailure(
+            f"user.tbl is not encrypted at rest (head={head!r}); "
+            f"expected LDC1 magic prefix"
+        )
+
+
 def test_no_script_errors(log_path: Path):
     """
     Plugin-load smoke: scan the captured hub stdout for "script error:"
@@ -523,7 +549,8 @@ TESTS = [
 ]
 
 
-def run_tests(log_path: Path):
+def run_tests(staging_dir: Path):
+    log_path = staging_dir / "log" / "smoke-hub.log"
     failed = []
     for name, fn in TESTS:
         try:
@@ -533,6 +560,16 @@ def run_tests(log_path: Path):
             failed.append(name)
         else:
             log(f"PASS  {name}")
+
+    # State-of-disk tests run after the protocol tests so any post-login
+    # save (HPAS lastconnect update) has had a chance to land.
+    try:
+        test_usertbl_encrypted_at_rest(staging_dir)
+    except Exception as e:
+        log(f"FAIL  user.tbl encrypted at rest: {e}")
+        failed.append("user.tbl encrypted at rest")
+    else:
+        log("PASS  user.tbl encrypted at rest")
 
     # The plugin-load test reads the hub log, so it runs after all
     # protocol tests have had a chance to exercise the listeners.
@@ -572,7 +609,7 @@ def main():
         override_test_ports(staging_dir)
         generate_test_cert(staging_dir)
         proc, log_file = start_hub(staging_dir)
-        failed = run_tests(staging_dir / "log" / "smoke-hub.log")
+        failed = run_tests(staging_dir)
     finally:
         if proc is not None:
             stop_hub(proc, log_file)

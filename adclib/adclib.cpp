@@ -15,6 +15,7 @@
 #include "tiger.h"
 
 #include <openssl/rand.h>
+#include <openssl/evp.h>
 
 extern "C" {
 
@@ -23,6 +24,14 @@ extern "C" {
 #include "lauxlib.h"
 
 }
+
+// AES-GCM constants. The Lua wrapper in core/cfg_secret.lua enforces
+// the same constants for framing on disk.
+enum {
+    AES_KEY_SIZE = 32,    // AES-256
+    AES_NONCE_SIZE = 12,  // GCM standard 96-bit nonce
+    AES_TAG_SIZE = 16,    // GCM standard 128-bit tag
+};
 
 enum {SIZE = 192/8};
 
@@ -237,6 +246,130 @@ int random_bytes(lua_State* L)
     return 1;
 }
 
+// AES-256-GCM seal: takes (key, nonce, plaintext), returns
+// ciphertext || tag concatenated as one Lua string. The plaintext can
+// be any binary; key must be exactly 32 bytes, nonce exactly 12 bytes.
+// Phase 7f F-AUTH-1 mitigation: at-rest encryption of user.tbl.
+int aes_gcm_seal(lua_State* L)
+{
+    size_t key_len, nonce_len, pt_len;
+    const unsigned char* key = (const unsigned char*)luaL_checklstring(L, 1, &key_len);
+    const unsigned char* nonce = (const unsigned char*)luaL_checklstring(L, 2, &nonce_len);
+    const unsigned char* pt = (const unsigned char*)luaL_checklstring(L, 3, &pt_len);
+
+    if (key_len != AES_KEY_SIZE) {
+        return luaL_error(L, "aes_gcm_seal: key must be %d bytes, got %d",
+                          AES_KEY_SIZE, (int)key_len);
+    }
+    if (nonce_len != AES_NONCE_SIZE) {
+        return luaL_error(L, "aes_gcm_seal: nonce must be %d bytes, got %d",
+                          AES_NONCE_SIZE, (int)nonce_len);
+    }
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) return luaL_error(L, "aes_gcm_seal: EVP_CIPHER_CTX_new failed");
+
+    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, nonce) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        return luaL_error(L, "aes_gcm_seal: EVP_EncryptInit_ex failed");
+    }
+
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    // Allocate space for ciphertext (same size as plaintext for GCM) + tag.
+    unsigned char* out = (unsigned char*)luaL_prepbuffsize(&b, pt_len + AES_TAG_SIZE);
+
+    int outlen = 0;
+    if (EVP_EncryptUpdate(ctx, out, &outlen, pt, (int)pt_len) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        return luaL_error(L, "aes_gcm_seal: EVP_EncryptUpdate failed");
+    }
+    int finlen = 0;
+    if (EVP_EncryptFinal_ex(ctx, out + outlen, &finlen) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        return luaL_error(L, "aes_gcm_seal: EVP_EncryptFinal_ex failed");
+    }
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, AES_TAG_SIZE,
+                            out + outlen + finlen) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        return luaL_error(L, "aes_gcm_seal: EVP_CTRL_GCM_GET_TAG failed");
+    }
+    EVP_CIPHER_CTX_free(ctx);
+
+    luaL_addsize(&b, outlen + finlen + AES_TAG_SIZE);
+    luaL_pushresult(&b);
+    return 1;
+}
+
+// AES-256-GCM open: takes (key, nonce, ciphertext_with_tag), returns
+// plaintext on success or (nil, error_message) on tag-mismatch or
+// malformed input. Tag-mismatch is the security-critical signal: a
+// tampered file fails here.
+int aes_gcm_open(lua_State* L)
+{
+    size_t key_len, nonce_len, blob_len;
+    const unsigned char* key = (const unsigned char*)luaL_checklstring(L, 1, &key_len);
+    const unsigned char* nonce = (const unsigned char*)luaL_checklstring(L, 2, &nonce_len);
+    const unsigned char* blob = (const unsigned char*)luaL_checklstring(L, 3, &blob_len);
+
+    if (key_len != AES_KEY_SIZE) {
+        return luaL_error(L, "aes_gcm_open: key must be %d bytes, got %d",
+                          AES_KEY_SIZE, (int)key_len);
+    }
+    if (nonce_len != AES_NONCE_SIZE) {
+        return luaL_error(L, "aes_gcm_open: nonce must be %d bytes, got %d",
+                          AES_NONCE_SIZE, (int)nonce_len);
+    }
+    if (blob_len < AES_TAG_SIZE) {
+        lua_pushnil(L);
+        lua_pushstring(L, "ciphertext shorter than tag");
+        return 2;
+    }
+    size_t ct_len = blob_len - AES_TAG_SIZE;
+    const unsigned char* ct = blob;
+    const unsigned char* tag = blob + ct_len;
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) return luaL_error(L, "aes_gcm_open: EVP_CIPHER_CTX_new failed");
+
+    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, nonce) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        return luaL_error(L, "aes_gcm_open: EVP_DecryptInit_ex failed");
+    }
+
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    unsigned char* out = (unsigned char*)luaL_prepbuffsize(&b, ct_len);
+
+    int outlen = 0;
+    if (EVP_DecryptUpdate(ctx, out, &outlen, ct, (int)ct_len) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        lua_pushnil(L);
+        lua_pushstring(L, "EVP_DecryptUpdate failed");
+        return 2;
+    }
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, AES_TAG_SIZE,
+                            (void*)tag) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        lua_pushnil(L);
+        lua_pushstring(L, "EVP_CTRL_GCM_SET_TAG failed");
+        return 2;
+    }
+    int finlen = 0;
+    if (EVP_DecryptFinal_ex(ctx, out + outlen, &finlen) != 1) {
+        // Tag mismatch - tampering or wrong key.
+        EVP_CIPHER_CTX_free(ctx);
+        lua_pushnil(L);
+        lua_pushstring(L, "tag mismatch (file tampered or wrong key)");
+        return 2;
+    }
+    EVP_CIPHER_CTX_free(ctx);
+
+    luaL_addsize(&b, outlen + finlen);
+    luaL_pushresult(&b);
+    return 1;
+}
+
 int escape(lua_State* L)
 {
     std::string s = (std::string) luaL_optstring(L, 1, "");
@@ -295,6 +428,8 @@ static const luaL_Reg adclib[] = {
     {"isutf8", is_valid_utf8},
     {"sanitize_utf8", sanitize_utf8},
     {"random_bytes", random_bytes},
+    {"aes_gcm_seal", aes_gcm_seal},
+    {"aes_gcm_open", aes_gcm_open},
     {NULL, NULL}
 };
 
