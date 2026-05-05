@@ -4,7 +4,6 @@
 
         - this script adds a prefix to the nick of an user
         - you can use the prefix table to define different prefixes for different user levels
-        - onInf nick-change handling tracked in issue #48
 
         v0.12: by pulsar
             - removed table lookups
@@ -114,7 +113,7 @@ hub.setlistener( "onConnect", { },
             local bol, err = user:updatenick( prefix .. user:nick(), true )
             if not bol then
                 -- disable to prevent spam; remember: never fire listenter X inside listener X; will cause infinite loop
-                --scripts.firelistener( "onFailedAuth", user:nick( ), user:ip( ), user:cid( ), "Nick prefix failed: " .. err ) -- todo: i18n
+                --scripts.firelistener( "onFailedAuth", user:nick( ), user:ip( ), user:cid( ), "Nick prefix failed: " .. err )
                 user:kill( "ISTA 220 " .. hub.escapeto( err ) .. "\n", "TL300" )
                 return PROCESSED
             end

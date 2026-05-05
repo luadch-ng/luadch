@@ -11,9 +11,10 @@ local scriptname = "usr_nick_length.lua"
 local scriptversion = "0.01"
 
 local check = function( user, nick )
-    -- byte length: rejects multi-byte (Cyrillic etc.) nicks earlier than
-    -- their codepoint length suggests; codepoint-aware fix tracked in #48.
-    local len = #nick
+    -- min/max_nickname_length is documented in codepoints; use utf.len so
+    -- multi-byte (e.g. Cyrillic) nicks aren't rejected at lower codepoint
+    -- counts than ASCII nicks.
+    local len = utf.len( nick )
     if ( cfg.get "min_nickname_length" <= len ) and ( len <= cfg.get "max_nickname_length" ) then
         return nil
     end

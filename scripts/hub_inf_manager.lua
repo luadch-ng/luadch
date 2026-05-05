@@ -23,6 +23,7 @@ local scriptlang = cfg.get "language"
 local lang, err = cfg.loadlanguage( scriptlang, scriptname ); lang = lang or { }; err = err and hub.debug( err )
 
 local msg_invalid = hub.escapeto( lang.msg_invalid or "invalid named parameter in inf: " )
+local msg_failedauth_reason = lang.msg_failedauth_reason or "User sent offending flag in INF: "
 
 --// forbidden named parameters in inf //--
 
@@ -60,8 +61,7 @@ end
 local fire_onfailedauth = function( user, offending_flag )
     -- remember: never fire listenter X inside listener X; will cause infinite loop
     -- also: never fire listener X in listener Y, where listener Y fires listener X; will as well cause a infinite loop.
-    -- failure-reason string is hardcoded English; i18n tracked in #48.
-    scripts.firelistener( "onFailedAuth", user:nick( ), user:ip( ), user:cid( ), "User send offending flag in INF: "  .. offending_flag )
+    scripts.firelistener( "onFailedAuth", user:nick( ), user:ip( ), user:cid( ), msg_failedauth_reason .. offending_flag )
 end
 
 hub.setlistener( "onConnect", { },
