@@ -86,7 +86,7 @@ Tiger output, so login breaks. This constraint is shared by the
 entire ADC ecosystem (ADCH++ stores cleartext in XML, uHub in
 `users.conf`, …) and there is no published ADC extension that lifts
 it. The audit research is recorded in issue
-[#52](https://github.com/Aybook/luadch/issues/52).
+[#52](https://github.com/luadch-ng/luadch/issues/52).
 
 ### What luadch actually does
 
@@ -167,7 +167,7 @@ Windows, apply `icacls` to the new path - see §4.
 OS-bound key wrapping (TPM, DPAPI machine-scope, libsecret, macOS
 Keychain) would harden the master-key-theft case and is tracked as a
 Phase 8+ candidate in
-[#48](https://github.com/Aybook/luadch/issues/48).
+[#48](https://github.com/luadch-ng/luadch/issues/48).
 
 ---
 
@@ -229,7 +229,7 @@ the same `icacls` line there. The same recipe lives in
 | Connection read-buffer cap | [`core/server.lua`](../core/server.lua) | hardcoded 1 MiB |
 
 The full DoS-hardening rationale is in Phase 7c
-([#56](https://github.com/Aybook/luadch/issues/56)).
+([#56](https://github.com/luadch-ng/luadch/issues/56)).
 
 ---
 
@@ -276,7 +276,7 @@ truth, not to greps.
 ## 8. Reporting a security issue
 
 Open a private security advisory at
-<https://github.com/Aybook/luadch/security/advisories/new> rather
+<https://github.com/luadch-ng/luadch/security/advisories/new> rather
 than a public issue, especially for issues that:
 
 - enable RCE without prior authentication

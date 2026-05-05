@@ -35,7 +35,7 @@ OpenSSL 3.x development headers.
 ### Build & install
 
 ```sh
-git clone https://github.com/Aybook/luadch.git
+git clone https://github.com/luadch-ng/luadch.git
 cd luadch
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
@@ -189,7 +189,7 @@ default account is hubowner — **delete it as soon as you have your own**.
 ## File permissions for secrets
 
 `cfg/user.tbl` (registered users with their cleartext passwords - see
-[F-AUTH-1](https://github.com/Aybook/luadch/issues/52) for the
+[F-AUTH-1](https://github.com/luadch-ng/luadch/issues/52) for the
 ADC-protocol-mandated reason) and `certs/serverkey.pem` (TLS private
 key) hold material that must not be world-readable.
 
@@ -232,7 +232,7 @@ sources against system OpenSSL 3.x (`EC_KEY_*`, `PEM_read_bio_DHparams`,
 `SSL_CTX_set_tmp_dh_callback`, `EC_KEY_free`, `DH_free`). These are
 cosmetic — the functions still work in current OpenSSL. The negotiated
 TLS session is modern (TLS 1.3 + AES-256-GCM verified). Tracked in
-[issue #3](https://github.com/Aybook/luadch/issues/3) as
+[issue #3](https://github.com/luadch-ng/luadch/issues/3) as
 `upstream-blocked` / `wontfix`.
 
 The Windows build (gcc 16+) emits 2 stylistic `-Wparentheses` warnings

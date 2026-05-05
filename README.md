@@ -3,12 +3,12 @@
 [![License](https://img.shields.io/badge/license-GPLv3.0-blueviolet.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ARM-orange.svg)](docs/BUILDING.md)
 [![Lua](https://img.shields.io/badge/lua-5.4-blue.svg)](https://www.lua.org/)
-[![Smoke](https://github.com/Aybook/luadch/actions/workflows/smoke.yml/badge.svg)](https://github.com/Aybook/luadch/actions/workflows/smoke.yml)
-[![Release](https://img.shields.io/github/v/release/Aybook/luadch.svg)](https://github.com/Aybook/luadch/releases/latest)
+[![Smoke](https://github.com/luadch-ng/luadch/actions/workflows/smoke.yml/badge.svg)](https://github.com/luadch-ng/luadch/actions/workflows/smoke.yml)
+[![Release](https://img.shields.io/github/v/release/luadch-ng/luadch.svg)](https://github.com/luadch-ng/luadch/releases/latest)
 
 A modernised fork of [luadch](https://github.com/luadch/luadch) by
-**blastbeat** and **pulsar**. Maintained by [Aybook](https://github.com/Aybook),
-with help from Claude.
+**blastbeat** and **pulsar**, hosted at [`luadch-ng`](https://github.com/luadch-ng).
+Maintained by [Aybo](https://github.com/Aybook), with help from Claude.
 
 ## Original Features
 
@@ -21,9 +21,9 @@ with help from Claude.
 
 ## New Features
 
-- **DoS hardening** ([#56](https://github.com/Aybook/luadch/issues/56)) - per-IP / per-user rate limits, TLS handshake deadline, failed-auth lockout
-- **Encrypted user database** ([#52](https://github.com/Aybook/luadch/issues/52)) - AES-256-GCM at-rest encryption of `cfg/user.tbl`
-- **Sandboxed config / state loaders** ([#51](https://github.com/Aybook/luadch/issues/51)) - tampered `.tbl` files cannot achieve RCE
+- **DoS hardening** ([#56](https://github.com/luadch-ng/luadch/issues/56)) - per-IP / per-user rate limits, TLS handshake deadline, failed-auth lockout
+- **Encrypted user database** ([#52](https://github.com/luadch-ng/luadch/issues/52)) - AES-256-GCM at-rest encryption of `cfg/user.tbl`
+- **Sandboxed config / state loaders** ([#51](https://github.com/luadch-ng/luadch/issues/51)) - tampered `.tbl` files cannot achieve RCE
 - **POSIX file-permission enforcement** on secret files
 
 See [`docs/SECURITY.md`](docs/SECURITY.md) for the full threat model
@@ -78,13 +78,13 @@ Detail per phase in [docs/phases/](docs/phases/).
 ## Quick start
 
 Pre-built binaries for Linux x86_64 and Windows x86_64 are attached to
-each [release](https://github.com/Aybook/luadch/releases/latest) - extract
+each [release](https://github.com/luadch-ng/luadch/releases/latest) - extract
 and run.
 
 Or build from source:
 
 ```sh
-git clone https://github.com/Aybook/luadch.git
+git clone https://github.com/luadch-ng/luadch.git
 cd luadch
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)

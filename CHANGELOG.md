@@ -1,6 +1,8 @@
 # Changelog
 
-All notable changes to the `Aybook/luadch` fork are documented here.
+All notable changes to the `luadch-ng/luadch` fork are documented here.
+The repo lived at `Aybook/luadch` before the v3.1.x line; auto-redirects
+handle historic links.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -163,7 +165,7 @@ OpenSSL-3 deprecated APIs, tracked as #3).
   On Windows, see the `icacls` recipe in
   [`docs/SECURITY.md`](docs/SECURITY.md) §4.
 
-[v3.1.0]: https://github.com/Aybook/luadch/releases/tag/v3.1.0
+[v3.1.0]: https://github.com/luadch-ng/luadch/releases/tag/v3.1.0
 
 
 ## [v3.0.0] - 2026-05-03
@@ -273,4 +275,4 @@ and ships several pre-existing-bug fixes on top.
 For the full per-phase narrative (activities, design decisions, build
 output specs, review-gate checklists), see [`docs/phases/`](docs/phases/).
 
-[v3.0.0]: https://github.com/Aybook/luadch/releases/tag/v3.0.0
+[v3.0.0]: https://github.com/luadch-ng/luadch/releases/tag/v3.0.0

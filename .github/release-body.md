@@ -19,8 +19,8 @@ of the modernisation programme. Drop-in upgrade from v3.0.0.
 - **`core/cfg.lua` and `core/hub.lua` decomposed** into focused modules
   under a 1500-line ceiling (Phase 6c-d)
 - **Comprehensive security audit** (Phase 7): 24 findings filed, 22 fixed;
-  see [`docs/SECURITY.md`](https://github.com/Aybook/luadch/blob/v3.1.0/docs/SECURITY.md)
-  and [`docs/phases/PHASE_7_FINDINGS.md`](https://github.com/Aybook/luadch/blob/v3.1.0/docs/phases/PHASE_7_FINDINGS.md)
+  see [`docs/SECURITY.md`](https://github.com/luadch-ng/luadch/blob/v3.1.0/docs/SECURITY.md)
+  and [`docs/phases/PHASE_7_FINDINGS.md`](https://github.com/luadch-ng/luadch/blob/v3.1.0/docs/phases/PHASE_7_FINDINGS.md)
 - **CI smoke harness** extended from 7 to 10 protocol-level tests
   (handshake, login, +cmd routing, CSPRNG-salt-uniqueness, per-IP cap,
   encryption-at-rest, no-script-errors), green on Linux + Windows
@@ -39,7 +39,7 @@ LuaSocket, basexx, adclib), default configs, scripts, certs helpers.
 Default plain ADC port `5000`, TLS port `5001` after running
 `certs/make_cert.{sh,bat}` once. First login: nick `dummy`, password
 `test` - **delete that account immediately** after registering yourself,
-see [`docs/CONFIGURATION.md`](https://github.com/Aybook/luadch/blob/v3.1.0/docs/CONFIGURATION.md).
+see [`docs/CONFIGURATION.md`](https://github.com/luadch-ng/luadch/blob/v3.1.0/docs/CONFIGURATION.md).
 
 ## Migration from v3.0.0
 
@@ -49,7 +49,7 @@ post-login save after upgrade.
 
 **Strongly recommended** before putting real users into `user.tbl`:
 
-1. Read [`docs/SECURITY.md`](https://github.com/Aybook/luadch/blob/v3.1.0/docs/SECURITY.md)
+1. Read [`docs/SECURITY.md`](https://github.com/luadch-ng/luadch/blob/v3.1.0/docs/SECURITY.md)
    §3 "Backup separation".
 2. Set `master_key_path` in `cfg/cfg.tbl` to an absolute path **outside**
    the install directory:
@@ -73,22 +73,22 @@ Existing world-readable secrets - one-time fix on POSIX:
 chmod 600 cfg/user.tbl cfg/user.tbl.bak certs/serverkey.pem certs/cakey.pem
 ```
 
-Windows `icacls` recipe in [`docs/BUILDING.md`](https://github.com/Aybook/luadch/blob/v3.1.0/docs/BUILDING.md)
-and [`docs/SECURITY.md`](https://github.com/Aybook/luadch/blob/v3.1.0/docs/SECURITY.md) §4.
+Windows `icacls` recipe in [`docs/BUILDING.md`](https://github.com/luadch-ng/luadch/blob/v3.1.0/docs/BUILDING.md)
+and [`docs/SECURITY.md`](https://github.com/luadch-ng/luadch/blob/v3.1.0/docs/SECURITY.md) §4.
 
 ## Full changelog
 
-See [`CHANGELOG.md`](https://github.com/Aybook/luadch/blob/v3.1.0/CHANGELOG.md)
+See [`CHANGELOG.md`](https://github.com/luadch-ng/luadch/blob/v3.1.0/CHANGELOG.md)
 for the complete categorised list. Phase journals in
-[`docs/phases/PHASE_6.md`](https://github.com/Aybook/luadch/blob/v3.1.0/docs/phases/PHASE_6.md)
-and [`docs/phases/PHASE_7.md`](https://github.com/Aybook/luadch/blob/v3.1.0/docs/phases/PHASE_7.md).
+[`docs/phases/PHASE_6.md`](https://github.com/luadch-ng/luadch/blob/v3.1.0/docs/phases/PHASE_6.md)
+and [`docs/phases/PHASE_7.md`](https://github.com/luadch-ng/luadch/blob/v3.1.0/docs/phases/PHASE_7.md).
 
 ## Build from source
 
 The pipeline is identical on every supported platform:
 
 ```sh
-git clone --branch v3.1.0 https://github.com/Aybook/luadch.git
+git clone --branch v3.1.0 https://github.com/luadch-ng/luadch.git
 cd luadch
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
@@ -97,7 +97,7 @@ cmake --install build
 
 Output lands in `build/install/luadch/` ready to run. Windows needs
 `-G "MinGW Makefiles" -DOPENSSL_ROOT_DIR=...` extra, see
-[`docs/BUILDING.md`](https://github.com/Aybook/luadch/blob/v3.1.0/docs/BUILDING.md).
+[`docs/BUILDING.md`](https://github.com/luadch-ng/luadch/blob/v3.1.0/docs/BUILDING.md).
 
 ## Credits
 

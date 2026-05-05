@@ -317,7 +317,7 @@ and review gate. The strict "one phase at a time" discipline still applies.
   modernization phase: activities, findings, build-output specs, and the review-gate
   checklist. Entry point for "what happened in phase N" is `docs/phases/PHASE_N.md`.
   These are the narrative — issues and code are the actionable state.
-- **GitHub issues** — https://github.com/Aybook/luadch/issues — the actionable backlog.
+- **GitHub issues** — https://github.com/luadch-ng/luadch/issues — the actionable backlog.
   Each finding from a phase journal that needs work is an issue here, labeled with the
   target phase (`phase-2`, `phase-3`, …). Use `gh issue list --label phase-2` to scope
   upcoming work. Upstream `luadch/luadch` issues are referenced selectively when we
@@ -329,7 +329,7 @@ and review gate. The strict "one phase at a time" discipline still applies.
 
 ### Upstream policy
 
-The repo at `Aybook/luadch` is currently a fork of `luadch/luadch`. The upstream is
+The repo at `luadch-ng/luadch` is a fork of `luadch/luadch`. The upstream is
 not actively released (last release 2022-04-02) but still receives occasional commits.
 We do **not** plan to push modernization work back upstream and do **not** bulk-import
 upstream's open issues. When a phase touches an area covered by an upstream issue, we
