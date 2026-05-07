@@ -5,6 +5,13 @@
         - this script kills users with forbidden inf flags
         - do not change anything here when you dont know what you are doing
 
+        v0.06: by Aybo
+            - re-enabled "I4" + added "I6" to flags_on_inf
+                - paired with the kill_wrong_ips default flip in #97;
+                  closes the "user changes their advertised IP after
+                  login via a fresh BINF in normal state" path that
+                  the on-connect check alone cannot cover
+
         v0.05: by pulsar
             - improved user:kill()
 
@@ -17,7 +24,7 @@
 ]]--
 
 local scriptname = "hub_inf_manager"
-local scriptversion = "0.05"
+local scriptversion = "0.06"
 local scriptlang = cfg.get "language"
 
 local lang, err = cfg.loadlanguage( scriptlang, scriptname ); lang = lang or { }; err = err and hub.debug( err )
@@ -43,7 +50,13 @@ local forbidden = {
 
         "PD",
         "ID",
-        --"I4",
+        -- #97: I4 / I6 are valid in the initial BINF (the hub validates
+        -- and fills them in core/hub_dispatch.lua) but MUST NOT be
+        -- changed after login - allowing it would let a normal-state
+        -- user re-stamp their advertised IP and bypass per-IP rate
+        -- limits / GeoIP rules / abuse logs.
+        "I4",
+        "I6",
 
     },
 

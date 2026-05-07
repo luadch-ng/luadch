@@ -3072,7 +3072,17 @@ local defaults = {
             return types_boolean( value, nil, true )
         end
     },
-    kill_wrong_ips = { false,
+    -- #97: default kept off historically because some NAT setups
+    -- legitimately advertise a different IP than the TCP source
+    -- (clients behind symmetric NAT, IPv6 fallback weirdness). The
+    -- legitimate "I40.0.0.0" passive-mode case is handled separately
+    -- in core/hub_dispatch.lua (the hub fills in the real IP); the
+    -- only branch this gate fires on is "client claims a real but
+    -- different IP". Per-IP rate limits, GeoIP rules, abuse logs, and
+    -- the unified blocklist all rely on the IP being trustworthy, so
+    -- the default is now true. NAT-weird deployments opt out by
+    -- setting kill_wrong_ips = false in their cfg/cfg.tbl.
+    kill_wrong_ips = { true,
         function( value )
             return types_boolean( value, nil, true )
         end

@@ -227,9 +227,43 @@ the same `icacls` line there. The same recipe lives in
 | Op-level bypass of per-user limits | same | `ratelimit_bypass_level` (default 60) |
 | Parser-side message-size cap | [`core/adc.lua` parse](../core/adc.lua) | hardcoded 64 KiB |
 | Connection read-buffer cap | [`core/server.lua`](../core/server.lua) | hardcoded 1 MiB |
+| INF-IP consistency check (kick on TCP-source vs INF-claim mismatch) | [`core/hub_dispatch.lua` BINF](../core/hub_dispatch.lua) + [`scripts/hub_inf_manager.lua`](../scripts/hub_inf_manager.lua) | `kill_wrong_ips` (default **true** since v3.1.4) |
 
 The full DoS-hardening rationale is in Phase 7c
 ([#56](https://github.com/luadch-ng/luadch/issues/56)).
+
+### `kill_wrong_ips` operator note ([#97](https://github.com/luadch-ng/luadch/issues/97))
+
+The `kill_wrong_ips` default flipped from `false` to `true` in v3.1.4:
+a connecting client whose INF advertises an `I4` / `I6` value
+different from the TCP source IP is now disconnected. Same check
+fires on `onInf` updates in normal state via
+[`scripts/hub_inf_manager.lua`](../scripts/hub_inf_manager.lua) -
+post-login a user cannot re-stamp their advertised IP either.
+
+The legitimate **passive-mode `I40.0.0.0`** case is handled before
+the kill check (the hub fills in the real IP at
+[`core/hub_dispatch.lua`](../core/hub_dispatch.lua)), so passive
+clients are unaffected.
+
+**When to opt out (`kill_wrong_ips = false`):** deployments where
+clients legitimately advertise an IP different from the TCP source.
+Mostly:
+
+- users behind symmetric NAT or carrier-grade NAT (CGNAT) where the
+  client cannot determine its public IP and falls back to a stale
+  cached value
+- bridged / dual-stack setups where the user's own selection of
+  `I4` vs `I6` does not match what the kernel chose for the
+  outbound TCP connection
+- corporate proxies / TLS-terminating reverse proxies in front of
+  the hub that rewrite the source IP
+
+The cost of opting out: per-IP rate limits, GeoIP / unified
+blocklist matches, abuse logs, and any plugin reading
+`user:ip()` operate on the **TCP source IP** anyway, so the check
+is purely defence-in-depth against IP-spoofing INFs - the rest of
+the stack stays sound.
 
 ---
 
