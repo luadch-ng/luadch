@@ -10,6 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The upstream project (`luadch/luadch`) is a separate codebase; its release
 history is at https://github.com/luadch/luadch/releases.
 
+## [v3.1.3] - 2026-05-07
+
+Security patch on top of v3.1.2. Drop-in upgrade; no cfg / on-disk-format changes. Smoke 12/12 PASS on Linux + Windows.
+
+### Bugfixes
+
+- [#91](https://github.com/luadch-ng/luadch/issues/91) - Pre-auth DoS via reg_only nick collision (HPAS-gated takeover)
+- [#92](https://github.com/luadch-ng/luadch/issues/92) - Encrypted `user.tbl` bypass in `cmd_setpass` / `cmd_nickchange` / `cmd_upgrade`
+- [#93](https://github.com/luadch-ng/luadch/issues/93) - `master_key_path` POSIX shell-quoting in `cfg_secret`
+- [#94](https://github.com/luadch-ng/luadch/issues/94) - Failed-auth state pollution in HPAS handler
+- [#96](https://github.com/luadch-ng/luadch/issues/96) - `etc_cmdlog` redacts password-bearing arguments via new `etc_cmdlog_redact_args` cfg key
+
+### Notes
+
+- Smoke regression test added for #92 (`test_setpass_preserves_encryption`)
+- Deferred to Phase-8 hardening: [#95](https://github.com/luadch-ng/luadch/issues/95), [#97](https://github.com/luadch-ng/luadch/issues/97)
+- Audit meta tracker: [#98](https://github.com/luadch-ng/luadch/issues/98)
+
+[v3.1.3]: https://github.com/luadch-ng/luadch/releases/tag/v3.1.3
+
+
 ## [v3.1.2] - 2026-05-06
 
 Patch release. Drop-in upgrade from v3.1.1; no cfg / on-disk-format

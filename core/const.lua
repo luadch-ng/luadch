@@ -11,7 +11,7 @@
 return {
 
     PROGRAM_NAME = "Luadch",
-    VERSION = "v3.1.2",
+    VERSION = "v3.1.3",
     COPYRIGHT = "by blastbeat and pulsar",
     FORK = "modernised fork by Aybo",
     CONFIG_PATH = "././cfg/",
