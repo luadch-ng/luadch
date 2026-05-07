@@ -1,0 +1,48 @@
+# Source-only context for the docker build.
+#
+# Anything excluded here is not sent to the BuildKit daemon, which
+# trims build time and avoids accidentally baking dev artefacts into
+# the final image.
+
+# Build artefacts (CMake -B build dir + the install staging tree)
+build/
+install/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Node / Python local installs that may sit alongside the source
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local-only compose state
+.env
+
+# VCS metadata is not needed inside the build
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Tests are not part of the runtime image (they target the install
+# tree externally)
+tests/
+
+# Phase journals / contributor docs are GitHub-side
+docs/phases/
+
+# Pre-compiled artefacts that may sit in the workspace
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+luadch-v*.tar.gz
+luadch-v*.zip

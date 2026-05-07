@@ -70,6 +70,8 @@ Detail per phase in [docs/phases/](docs/phases/).
 - **[docs/SECURITY.md](docs/SECURITY.md)** - threat model, plugin
   trust contract, file-permission baseline, network-defense map,
   CVE-tracking process, how to report a security issue
+- **[docs/DOCKER.md](docs/DOCKER.md)** - container image, mount layout,
+  TLS-only deployments, troubleshooting
 - [docs/Luadch_Lua_API.txt](docs/Luadch_Lua_API.txt) - plugin scripting
   API reference (upstream-style)
 - [docs/Luadch_Manual.pdf](docs/Luadch_Manual.pdf) - original upstream
@@ -81,7 +83,23 @@ Pre-built binaries for Linux x86_64 and Windows x86_64 are attached to
 each [release](https://github.com/luadch-ng/luadch/releases/latest) - extract
 and run.
 
-Or build from source:
+### Docker
+
+```sh
+git clone https://github.com/luadch-ng/luadch.git
+cd luadch
+cp .env.example .env   # adjust PUID / PGID if `id -u` is not 1000
+mkdir -p cfg scripts certs log secrets
+docker compose up -d
+```
+
+The image (`ghcr.io/luadch-ng/luadch:latest`, multi-arch
+linux/amd64+arm64) runs **unprivileged** by default; the entrypoint
+seeds empty mounts, generates a self-signed TLS cert, and logs the
+keyprint for the `adcs://` URL. See [`docs/DOCKER.md`](docs/DOCKER.md)
+for the full operator guide.
+
+### From source
 
 ```sh
 git clone https://github.com/luadch-ng/luadch.git

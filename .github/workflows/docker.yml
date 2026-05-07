@@ -1,0 +1,97 @@
+name: Docker
+
+# Triggers:
+#   - tag push v* (real release, publishes vX.Y.Z + vX.Y + latest)
+#   - push to master (publishes :master moving tag for testing)
+#   - PR (build-only, no push) so PRs that touch the Dockerfile or
+#     entrypoint can fail fast in CI before merge
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'docker/**'
+      - 'docker-compose.yml'
+      - '.dockerignore'
+      - '.github/workflows/docker.yml'
+      # Also rebuild on source changes that affect the binary, since
+      # the Dockerfile builds from source. Skip docs / tests / configs
+      # that don't enter the image (those are .dockerignore'd).
+      - 'CMakeLists.txt'
+      - 'core/**'
+      - 'lua/**'
+      - 'luasec/**'
+      - 'luasocket/**'
+      - 'adclib/**'
+      - 'basexx/**'
+      - 'slnunicode/**'
+      - 'hub/**'
+      - 'scripts/**'
+      - 'examples/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  docker:
+    name: Build and push multi-arch image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # buildx + qemu give us linux/amd64 + linux/arm64 from a single
+      # x86_64 runner. Native arm64 runners are GitHub-paid only and
+      # not worth the spend for this image.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Only log in for the events that will actually push (master push
+      # + tag push + workflow_dispatch). PRs from forks have no
+      # write-access secret anyway; PRs from the same repo are still
+      # build-only here to keep the published tags clean.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag policy:
+      #   - tag v3.1.4    -> :v3.1.4, :v3.1, :v3, :latest
+      #   - master push   -> :master   (moving, for early testers)
+      #   - PR / dispatch -> :pr-<n>   (build-only, no push)
+      - name: Compute image tags + labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build (and push if not PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GitHub Actions cache speeds up incremental rebuilds; the
+          # mode=max keeps multi-stage build layers (the alpine build
+          # toolchain) reusable across runs.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

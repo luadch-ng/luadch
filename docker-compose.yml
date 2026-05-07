@@ -1,0 +1,44 @@
+# luadch docker-compose example.
+#
+# Usage:
+#   1. Copy .env.example to .env and adjust UID/GID to your host user
+#      (default 1000 matches most desktop Linux distros).
+#   2. mkdir -p cfg scripts certs log secrets
+#   3. docker compose up -d
+#
+# On first start the entrypoint seeds empty mount dirs from the image
+# defaults, generates a self-signed TLS cert pair, and logs the
+# keyprint. Pull it from `docker compose logs` and share the resulting
+# adcs:// URL with your users.
+#
+# See docs/DOCKER.md for the full operator guide.
+
+services:
+  luadch:
+    image: ghcr.io/luadch-ng/luadch:latest
+    container_name: luadch
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      # Plain ADC (legacy clients / debug). Comment out for TLS-only
+      # deployments once your users are on adcs:// URLs.
+      - "5000:5000"
+      # ADC over TLS. The keyprint is logged on container start.
+      - "5001:5001"
+    volumes:
+      # Hub configuration. cfg/cfg.tbl is the main settings file;
+      # cfg/user.tbl is the (encrypted) user database.
+      - ./cfg:/opt/luadch/cfg
+      # Plugin scripts. Seeded from the bundled set on first start;
+      # drop-in additions or per-file overrides land here.
+      - ./scripts:/opt/luadch/scripts
+      # TLS certs. make_cert.sh is invoked by the entrypoint if this
+      # directory is empty.
+      - ./certs:/opt/luadch/certs
+      # Hub log files (error.log, cmd.log, ...). Also mirrored to
+      # `docker logs` via the entrypoint's tail -F.
+      - ./log:/opt/luadch/log
+      # AES master key for at-rest user.tbl encryption. Kept on a
+      # separate mount so backup tools can split it from /cfg per the
+      # F-AUTH-1 threat model.
+      - ./secrets:/secrets
+    restart: unless-stopped
