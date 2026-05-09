@@ -20,6 +20,8 @@
 #include <openssl/pem.h>
 #include <openssl/bio.h>
 #include <openssl/bn.h>
+#include <openssl/err.h>
+#include <climits>
 
 extern "C" {
 
@@ -46,6 +48,31 @@ enum {SIZE = 192/8};
 // fits, while still preventing the attacker-sized VLA stack-DoS flagged
 // as F-C-1 in the Phase 7 audit.
 enum {MAX_SALT_BYTES = 64};
+
+// Push (nil, "<prefix>: <openssl-reason>") onto the Lua stack, drain
+// the OpenSSL per-thread error queue, return 2 (Lua "soft" error
+// shape: caller does `local ok, err = adclib.foo(...)` and inspects
+// err). The OpenSSL reason is included for diagnostic context;
+// callers in cert_bootstrap.lua surface it via out.error.
+//
+// Hygiene: every OpenSSL-using adclib entry point calls
+// ERR_clear_error() on entry so the per-thread queue starts clean.
+// On error this helper drains again, so the queue is empty at
+// every public API boundary.
+static int push_ossl_err(lua_State* L, const char* prefix)
+{
+    unsigned long e = ERR_get_error();
+    char buf[256];
+    lua_pushnil(L);
+    if (e) {
+        ERR_error_string_n(e, buf, sizeof(buf));
+        lua_pushfstring(L, "%s: %s", prefix, buf);
+    } else {
+        lua_pushstring(L, prefix);
+    }
+    ERR_clear_error();
+    return 2;
+}
 
 int utf8ToWc(const char* str, wchar_t& c) {
         const auto c0 = static_cast<uint8_t>(str[0]);
@@ -237,6 +264,8 @@ int hash_pas_oldschool(lua_State* L)
 // salt source flagged as F-AUTH-2 in the Phase 7 audit.
 int random_bytes(lua_State* L)
 {
+    ERR_clear_error();    // start with empty per-thread OpenSSL error queue
+
     lua_Integer n = luaL_checkinteger(L, 1);
     if (n <= 0 || n > 4096) {
         return luaL_error(L, "random_bytes: n must be in [1, 4096], got %d",
@@ -244,6 +273,7 @@ int random_bytes(lua_State* L)
     }
     unsigned char buf[4096];
     if (RAND_bytes(buf, (int)n) != 1) {
+        ERR_clear_error();
         return luaL_error(L, "random_bytes: RAND_bytes failed (PRNG not seeded)");
     }
     lua_pushlstring(L, (const char *)buf, (size_t)n);
@@ -256,6 +286,7 @@ int random_bytes(lua_State* L)
 // Phase 7f F-AUTH-1 mitigation: at-rest encryption of user.tbl.
 int aes_gcm_seal(lua_State* L)
 {
+    ERR_clear_error();    // start with empty per-thread OpenSSL error queue
     size_t key_len, nonce_len, pt_len;
     const unsigned char* key = (const unsigned char*)luaL_checklstring(L, 1, &key_len);
     const unsigned char* nonce = (const unsigned char*)luaL_checklstring(L, 2, &nonce_len);
@@ -275,6 +306,7 @@ int aes_gcm_seal(lua_State* L)
 
     if (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, nonce) != 1) {
         EVP_CIPHER_CTX_free(ctx);
+        ERR_clear_error();
         return luaL_error(L, "aes_gcm_seal: EVP_EncryptInit_ex failed");
     }
 
@@ -286,16 +318,19 @@ int aes_gcm_seal(lua_State* L)
     int outlen = 0;
     if (EVP_EncryptUpdate(ctx, out, &outlen, pt, (int)pt_len) != 1) {
         EVP_CIPHER_CTX_free(ctx);
+        ERR_clear_error();
         return luaL_error(L, "aes_gcm_seal: EVP_EncryptUpdate failed");
     }
     int finlen = 0;
     if (EVP_EncryptFinal_ex(ctx, out + outlen, &finlen) != 1) {
         EVP_CIPHER_CTX_free(ctx);
+        ERR_clear_error();
         return luaL_error(L, "aes_gcm_seal: EVP_EncryptFinal_ex failed");
     }
     if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, AES_TAG_SIZE,
                             out + outlen + finlen) != 1) {
         EVP_CIPHER_CTX_free(ctx);
+        ERR_clear_error();
         return luaL_error(L, "aes_gcm_seal: EVP_CTRL_GCM_GET_TAG failed");
     }
     EVP_CIPHER_CTX_free(ctx);
@@ -311,6 +346,7 @@ int aes_gcm_seal(lua_State* L)
 // tampered file fails here.
 int aes_gcm_open(lua_State* L)
 {
+    ERR_clear_error();    // start with empty per-thread OpenSSL error queue
     size_t key_len, nonce_len, blob_len;
     const unsigned char* key = (const unsigned char*)luaL_checklstring(L, 1, &key_len);
     const unsigned char* nonce = (const unsigned char*)luaL_checklstring(L, 2, &nonce_len);
@@ -338,6 +374,7 @@ int aes_gcm_open(lua_State* L)
 
     if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, nonce) != 1) {
         EVP_CIPHER_CTX_free(ctx);
+        ERR_clear_error();
         return luaL_error(L, "aes_gcm_open: EVP_DecryptInit_ex failed");
     }
 
@@ -348,23 +385,23 @@ int aes_gcm_open(lua_State* L)
     int outlen = 0;
     if (EVP_DecryptUpdate(ctx, out, &outlen, ct, (int)ct_len) != 1) {
         EVP_CIPHER_CTX_free(ctx);
-        lua_pushnil(L);
-        lua_pushstring(L, "EVP_DecryptUpdate failed");
-        return 2;
+        return push_ossl_err(L, "EVP_DecryptUpdate failed");
     }
     if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, AES_TAG_SIZE,
                             (void*)tag) != 1) {
         EVP_CIPHER_CTX_free(ctx);
-        lua_pushnil(L);
-        lua_pushstring(L, "EVP_CTRL_GCM_SET_TAG failed");
-        return 2;
+        return push_ossl_err(L, "EVP_CTRL_GCM_SET_TAG failed");
     }
     int finlen = 0;
     if (EVP_DecryptFinal_ex(ctx, out + outlen, &finlen) != 1) {
         // Tag mismatch - tampering or wrong key.
         EVP_CIPHER_CTX_free(ctx);
+        // Note: tag-mismatch is a security signal, not a diagnostic.
+        // Keep the existing operator-friendly message; drain the
+        // queue separately so it does not leak across calls.
         lua_pushnil(L);
         lua_pushstring(L, "tag mismatch (file tampered or wrong key)");
+        ERR_clear_error();
         return 2;
     }
     EVP_CIPHER_CTX_free(ctx);
@@ -404,8 +441,24 @@ int escape(lua_State* L)
 // certs/servercert.pem on first boot when no cert is present.
 int gen_self_signed_cert(lua_State* L)
 {
+    ERR_clear_error();    // start with empty per-thread OpenSSL error queue
+
     const char* cn = luaL_checkstring(L, 1);
-    long days = (long)luaL_checkinteger(L, 2);
+    lua_Integer days_in = luaL_checkinteger(L, 2);
+
+    // Defensive bound on validity period. A self-signed cert never
+    // realistically wants > 100 years; clamping here prevents the
+    // `days * 86400` arithmetic below from overflowing `long` on
+    // 32-bit platforms (LONG_MAX / 86400 ~= 24800 years there) and
+    // also rejects a future caller passing absurd values.
+    if (days_in < 1 || days_in > 36500) {
+        lua_pushnil(L);
+        lua_pushfstring(L,
+            "gen_self_signed_cert: days must be in [1, 36500], got %I",
+            days_in);
+        return 2;
+    }
+    long days = (long)days_in;
 
     EVP_PKEY* pkey = NULL;
     X509* x509 = NULL;
@@ -419,17 +472,13 @@ int gen_self_signed_cert(lua_State* L)
     // builds (Phase 4 audit), so EVP_EC_gen is fine here.
     pkey = EVP_EC_gen("P-256");
     if (!pkey) {
-        lua_pushnil(L);
-        lua_pushstring(L, "EVP_EC_gen P-256 failed");
-        return 2;
+        return push_ossl_err(L, "EVP_EC_gen P-256 failed");
     }
 
     x509 = X509_new();
     if (!x509) {
         EVP_PKEY_free(pkey);
-        lua_pushnil(L);
-        lua_pushstring(L, "X509_new failed");
-        return 2;
+        return push_ossl_err(L, "X509_new failed");
     }
 
     // Version 3 (the integer field stores version - 1, so 2 means v3).
@@ -441,18 +490,14 @@ int gen_self_signed_cert(lua_State* L)
     if (RAND_bytes(serial_bytes, sizeof(serial_bytes)) != 1) {
         X509_free(x509);
         EVP_PKEY_free(pkey);
-        lua_pushnil(L);
-        lua_pushstring(L, "RAND_bytes for serial failed");
-        return 2;
+        return push_ossl_err(L, "RAND_bytes for serial failed");
     }
     serial_bytes[0] &= 0x7F;
     BIGNUM* serial_bn = BN_bin2bn(serial_bytes, sizeof(serial_bytes), NULL);
     if (!serial_bn) {
         X509_free(x509);
         EVP_PKEY_free(pkey);
-        lua_pushnil(L);
-        lua_pushstring(L, "BN_bin2bn for serial failed");
-        return 2;
+        return push_ossl_err(L, "BN_bin2bn for serial failed");
     }
     BN_to_ASN1_INTEGER(serial_bn, X509_get_serialNumber(x509));
     BN_free(serial_bn);
@@ -474,9 +519,7 @@ int gen_self_signed_cert(lua_State* L)
     if (!X509_sign(x509, pkey, EVP_sha256())) {
         X509_free(x509);
         EVP_PKEY_free(pkey);
-        lua_pushnil(L);
-        lua_pushstring(L, "X509_sign failed");
-        return 2;
+        return push_ossl_err(L, "X509_sign failed");
     }
 
     // PEM-serialize key (PKCS#8 unencrypted) and cert.
@@ -487,24 +530,18 @@ int gen_self_signed_cert(lua_State* L)
         if (cert_bio) BIO_free(cert_bio);
         X509_free(x509);
         EVP_PKEY_free(pkey);
-        lua_pushnil(L);
-        lua_pushstring(L, "BIO_new failed");
-        return 2;
+        return push_ossl_err(L, "BIO_new failed");
     }
 
     if (!PEM_write_bio_PrivateKey(key_bio, pkey, NULL, NULL, 0, NULL, NULL)) {
         BIO_free(key_bio); BIO_free(cert_bio);
         X509_free(x509); EVP_PKEY_free(pkey);
-        lua_pushnil(L);
-        lua_pushstring(L, "PEM_write_bio_PrivateKey failed");
-        return 2;
+        return push_ossl_err(L, "PEM_write_bio_PrivateKey failed");
     }
     if (!PEM_write_bio_X509(cert_bio, x509)) {
         BIO_free(key_bio); BIO_free(cert_bio);
         X509_free(x509); EVP_PKEY_free(pkey);
-        lua_pushnil(L);
-        lua_pushstring(L, "PEM_write_bio_X509 failed");
-        return 2;
+        return push_ossl_err(L, "PEM_write_bio_X509 failed");
     }
 
     BUF_MEM* key_buf = NULL;
@@ -529,31 +566,38 @@ int gen_self_signed_cert(lua_State* L)
 // adcs://host:port/?kp=SHA256/<base32> URL form.
 int cert_fingerprint_sha256(lua_State* L)
 {
+    ERR_clear_error();    // start with empty per-thread OpenSSL error queue
+
     size_t cert_len;
     const char* cert_pem = luaL_checklstring(L, 1, &cert_len);
 
+    // Defensive: BIO_new_mem_buf takes int. A cert > INT_MAX bytes
+    // is implausible for a hub deployment (real certs are ~500 B)
+    // but guards against caller misuse where a huge buffer would
+    // wrap to a negative length and BIO would interpret as
+    // "use strlen", reading past intended bounds.
+    if (cert_len > (size_t)INT_MAX) {
+        lua_pushnil(L);
+        lua_pushstring(L, "cert_fingerprint_sha256: cert PEM exceeds INT_MAX");
+        return 2;
+    }
+
     BIO* bio = BIO_new_mem_buf(cert_pem, (int)cert_len);
     if (!bio) {
-        lua_pushnil(L);
-        lua_pushstring(L, "BIO_new_mem_buf failed");
-        return 2;
+        return push_ossl_err(L, "BIO_new_mem_buf failed");
     }
 
     X509* cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
     BIO_free(bio);
     if (!cert) {
-        lua_pushnil(L);
-        lua_pushstring(L, "PEM_read_bio_X509 failed");
-        return 2;
+        return push_ossl_err(L, "PEM_read_bio_X509 failed");
     }
 
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned int hash_len = 0;
     if (!X509_digest(cert, EVP_sha256(), hash, &hash_len)) {
         X509_free(cert);
-        lua_pushnil(L);
-        lua_pushstring(L, "X509_digest failed");
-        return 2;
+        return push_ossl_err(L, "X509_digest failed");
     }
     X509_free(cert);
 
