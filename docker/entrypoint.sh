@@ -38,6 +38,46 @@ done
 mkdir -p "${LUADCH_HOME}/log"
 
 # ---------------------------------------------------------------------------
+# 1b. Auto-sync bundled top-level scripts/*.lua from /defaults
+# ---------------------------------------------------------------------------
+# After the initial seed, the operator's mounted scripts/ directory is
+# stable - the seed path above only fires when it's empty. That means
+# bug-fixes we ship in subsequent images never reach existing
+# deployments unless the operator manually copies them.
+#
+# This block fixes that for the narrow case of TOP-LEVEL .lua files
+# (the bundled plugin code). It does NOT touch:
+#
+#   scripts/lang/*.lang.*  - operator-customized translations / MOTD
+#   scripts/data/*.tbl     - runtime state (bans, regs, plugin caches)
+#   scripts/cfg/*.tbl      - per-plugin operator settings
+#   scripts/<dir>/         - any other subdirectory
+#
+# Operators who hand-patched a bundled .lua (rare, discouraged) can
+# disable this with LUADCH_AUTOSYNC_SCRIPTS=0 in their .env. The
+# recommended pattern for custom plugins is a NEW filename - those
+# never collide with the bundle so the auto-sync leaves them alone.
+#
+# Idempotent: cmp -s skips files that are already byte-identical, so
+# steady-state restarts are no-ops.
+if [ "${LUADCH_AUTOSYNC_SCRIPTS:-1}" = "1" ]; then
+    updated=0
+    for f in "${DEFAULTS}"/scripts/*.lua; do
+        [ -f "$f" ] || continue
+        n=$(basename "$f")
+        target="${LUADCH_HOME}/scripts/${n}"
+        if [ ! -e "$target" ] || ! cmp -s "$f" "$target"; then
+            cp "$f" "$target"
+            log "auto-synced bundled script: ${n}"
+            updated=$((updated + 1))
+        fi
+    done
+    if [ "$updated" -gt 0 ]; then
+        log "auto-synced ${updated} bundled scripts from /defaults"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # 2. Generate TLS cert if missing
 # ---------------------------------------------------------------------------
 # Cert generation is a one-off on first start; the cert lives in the

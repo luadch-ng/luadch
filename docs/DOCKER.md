@@ -277,6 +277,15 @@ rules don't get involved).
 
 ## Updating
 
+> **⚠️ Always back up first.** Operator-owned state lives in `cfg/`,
+> `scripts/lang/`, `scripts/data/`, `scripts/cfg/`, `certs/`, and
+> `secrets/`. None of these are touched by an image upgrade, but a
+> clean snapshot is the safety net for any production hub.
+>
+> ```sh
+> tar -czf "luadch-backup-$(date +%F).tar.gz" cfg scripts certs secrets
+> ```
+
 Pull the new image and recreate the container; mounts persist:
 
 ```sh
@@ -290,6 +299,95 @@ get unexpected jumps:
 ```yaml
 image: ghcr.io/luadch-ng/luadch:v3.1.3
 ```
+
+### What gets updated automatically
+
+The container's entrypoint **auto-syncs the bundled top-level
+`scripts/*.lua` files** from the image to your mounted `scripts/`
+directory on every start. Bug-fixes we ship in plugin code reach
+your hub on the next image pull without manual action.
+
+What is **not** touched:
+
+| Path | Reason |
+|---|---|
+| `cfg/cfg.tbl` | Your settings; new defaults are merged at runtime via the `cfg.get()` fallback path |
+| `cfg/user.tbl`, `cfg/user.tbl.bak` | User database |
+| `scripts/lang/*.lang.*` | Your translations / MOTD customizations |
+| `scripts/data/*.tbl` | Plugin runtime state (bans, regs, caches) |
+| `scripts/cfg/*.tbl` | Per-plugin operator settings |
+| `scripts/<your-custom>.lua` | Custom plugins keep their distinct filenames - the auto-sync only touches files that exist in the image's `/defaults/scripts/` |
+| `certs/*` | TLS keys |
+| `secrets/master.key` | AES master key |
+
+The entrypoint logs each updated file:
+
+```
+[entrypoint] auto-synced bundled script: cmd_nickchange.lua
+[entrypoint] auto-synced 1 bundled scripts from /defaults
+```
+
+If a bundled script's content matches what's already on disk, it is
+skipped (idempotent on restart).
+
+### Opting out of auto-sync
+
+If you have hand-patched a bundled script and want to preserve those
+edits across image upgrades, set in your `.env`:
+
+```
+LUADCH_AUTOSYNC_SCRIPTS=0
+```
+
+In that mode, image bug-fixes stop reaching your hub automatically.
+You will need to copy them manually:
+
+```sh
+# Diff: which bundled scripts in your mount differ from the new image
+docker compose exec luadch sh -c '
+    for f in /defaults/scripts/*.lua; do
+        n=$(basename "$f")
+        cmp -s "$f" "/opt/luadch/scripts/$n" 2>/dev/null \
+            || echo "differs: $n"
+    done
+'
+
+# Apply a single file
+docker compose exec luadch \
+    cp /defaults/scripts/cmd_nickchange.lua /opt/luadch/scripts/
+docker compose restart luadch
+```
+
+The recommended pattern for plugin customization is to **add a custom
+filename** rather than editing a bundled file. With that pattern the
+auto-sync is harmless and you can leave it ON.
+
+### Updating `lang/*.lang.*` after a release that changed translations
+
+Translation files (and other `scripts/<subdir>/` content) are never
+auto-synced because they typically contain operator-customized strings
+(e.g. your MOTD). When a release changes a bundled translation key
+that you have not customized, the in-script `lang.foo or "<fallback>"`
+pattern keeps the hub running on the hardcoded fallback - you just
+miss the new translation until you sync.
+
+To sync a specific lang file, diff against the image and merge what
+matters:
+
+```sh
+# Show your file vs the image's
+docker compose exec luadch \
+    diff /opt/luadch/scripts/lang/etc_motd.lang.en \
+         /defaults/scripts/lang/etc_motd.lang.en
+
+# Apply the image version (will overwrite your customizations!)
+docker compose exec luadch \
+    cp /defaults/scripts/lang/etc_motd.lang.en /opt/luadch/scripts/lang/
+docker compose restart luadch
+```
+
+Release notes call out lang/data file changes explicitly when they
+happen so you know to sync.
 
 ## Troubleshooting
 

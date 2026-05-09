@@ -18,6 +18,11 @@ services:
     image: ghcr.io/luadch-ng/luadch:latest
     container_name: luadch
     user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      # Auto-sync bundled top-level scripts/*.lua from the image to
+      # the mounted scripts/ on every container start. See .env.example
+      # for the full explanation. Default ON (1).
+      LUADCH_AUTOSYNC_SCRIPTS: "${LUADCH_AUTOSYNC_SCRIPTS:-1}"
     ports:
       # Plain ADC (legacy clients / debug). Comment out for TLS-only
       # deployments once your users are on adcs:// URLs.
