@@ -1,10 +1,10 @@
-# Luadch v3.1.6
+# Luadch v3.1.7
 
-Security-themed patch release. Hub now defaults to TLS-only with an auto-generated self-signed cert on first boot, password leakage in admin reply paths is closed for `+setpass` / `+accinfo` / `+usersearch`, and Docker deployments pick up new bundled language files automatically.
+Plugin data-integrity patch release. `util.savearray` / `util.savetable` are now atomic-by-default across the bundled scripts tree, defensive `or {}` was swept onto `util.loadtable` consumers, the cross-month accounting bug in `usr_uptime` is fixed, and `cmd_gag` gains a shadowmute mode plus duration syntax.
 
 ## ⚠️ Before upgrading
 
-Back up your `cfg/`, `scripts/lang/`, `scripts/data/`, `scripts/cfg/`, `certs/`, and `secrets/` directories. This release touches lang files in particular - if you have customised translations for `cmd_accinfo`, `cmd_setpass`, or `cmd_usersearch`, see the **Lang file changes** section below before letting the autosync run.
+Back up your `cfg/`, `scripts/lang/`, `scripts/data/`, `scripts/cfg/`, `certs/`, and `secrets/` directories. This release modifies `scripts/lang/cmd_gag.lang.{en,de}` (5 new keys + 4 rewritten strings for shadowmute / duration support) and adds `encrypt_usertbl` to `examples/cfg/cfg.tbl`. If you have customised `cmd_gag` translations, see the **Lang file changes** section below before letting the autosync run.
 
 ```sh
 tar -czf "luadch-backup-$(date +%F).tar.gz" cfg scripts certs secrets
@@ -12,67 +12,48 @@ tar -czf "luadch-backup-$(date +%F).tar.gz" cfg scripts certs secrets
 
 ## Lang file changes
 
-This release adds new lang keys and one renamed value. Operators with stock bundled lang files (`scripts/lang/<plugin>.lang.{en,de}`) get all of this automatically via the Docker autosync introduced in [#118](https://github.com/luadch-ng/luadch/pull/118), or via `cmake --install build` for source builds. Operators with **custom** lang files have a small one-time merge:
+Operators with stock bundled lang files get the new keys automatically via the Docker autosync from [#118](https://github.com/luadch-ng/luadch/pull/118), or via `cmake --install build` for source builds. Operators with **custom** `cmd_gag.lang.*` files have a small one-time merge:
 
-| Plugin | What changed |
+| File | What changed |
 |---|---|
-| `cmd_accinfo.lang.{en,de}` | New key: `msg_redacted = "<REDACTED>"`. Falls back to the hardcoded English default if missing. |
-| `cmd_usersearch.lang.{en,de}` | Same new key: `msg_redacted = "<REDACTED>"`. |
-| `cmd_setpass.lang.{en,de}` | Existing `msg_ok` rewritten: `"Password was changed to: "` -> `"Password was changed."` (no longer concatenates the password value). Custom translations that read like a sentence-prefix will sit next to a missing value cosmetically; behaviour is correct regardless. |
-| `usr_nick_length.lang.{en,de}` | New file - previously the script had no lang infrastructure. Two keys: `msg_failedauth_reason`, `msg_invalid_length`. |
-
-## Breaking
-
-- **TLS-only default** ([#77](https://github.com/luadch-ng/luadch/issues/77) / [#113](https://github.com/luadch-ng/luadch/pull/113)) - the bundled `cfg/cfg.tbl` now ships TLS-only on **both stacks**: IPv4 (`tcp_ports = { }`, `ssl_ports = { 5001 }`) and IPv6 (`tcp_ports_ipv6 = { }`, `ssl_ports_ipv6 = { 5003 }`), with `use_ssl = true`. Existing `cfg/cfg.tbl` files are **not migrated** - operators upgrading keep their plain-port settings on both stacks until they choose to flip. Fresh installs and Docker first-boot are TLS-only by default.
+| `cmd_gag.lang.{en,de}` | New keys: `msg_invalid_duration`, `msg_add_user_with_duration`, `msg_expired`, `ucmd_duration`, `ucmd_menu_ct1b`. Rewritten: `msg_usage`, `help_usage`, `help_desc` (now reference shadowmute + `<DURATION>`), `msg_show_users` (adds the "Shadowmuted users" block). Missing keys fall back to the hardcoded English defaults; behaviour stays correct, the chat output just sits in mixed languages until the merge happens. |
 
 ## Features
 
-- **Auto-generated self-signed cert on first boot** ([#113](https://github.com/luadch-ng/luadch/pull/113)) - if `certs/servercert.pem` / `serverkey.pem` are missing, the hub generates a P-256 ECDSA pair via adclib's OpenSSL bindings and writes them to disk before the TLS listener binds. Keyprint logged to stdout in the boot banner so `docker compose logs` / the launching terminal shows the `adcs://host:port/?kp=SHA256/<base32>` URL to share with users. `make_cert.{sh,bat}` stay around for manual rotation; the entrypoint no longer runs them.
-- **Slaxml XML parser bundled** ([#112](https://github.com/luadch-ng/luadch/pull/112)) - `lib/slaxml/slaxml.lua` is now part of the install tree. Plugins can `use "slaxml"` for RSS / XML feed parsing without a separate dep install.
-- **Docker autosync extended to lang files** ([#118](https://github.com/luadch-ng/luadch/pull/118)) - new bundled `scripts/lang/*.lang.*` files land on operator mounts automatically. Strictly add-only, existing translations are never overwritten. The same `LUADCH_AUTOSYNC_SCRIPTS=0` opt-out covers both the `*.lua` overwrite-on-diff sync and the new lang add-only sync.
+- **`cmd_gag` shadowmute mode + duration** ([#85](https://github.com/luadch-ng/luadch/issues/85) / [#132](https://github.com/luadch-ng/luadch/pull/132)) - the gag bot gets a 4th mode where the target sees their own messages echo back as if everything works, but nobody else on the hub receives them. Combined with this, all three restriction modes (mute, kennylize, shadowmute) now take an optional duration: `30s`, `10m`, `2h`, `1d`, `1w` and combinations like `1h30m`. Empty duration = permanent. Restrictions auto-expire as the gag table is walked every 60s. Offline ungag works through `hub.getregusers()` so admins can lift restrictions even after the user disconnects. Right-click menu gets a "Shadowmute User" entry alongside the existing mute / kennylize ones.
+- **`encrypt_usertbl` opt-out toggle** ([#128](https://github.com/luadch-ng/luadch/issues/128) / [#129](https://github.com/luadch-ng/luadch/pull/129)) - the Phase-7f AES-256-GCM at-rest encryption of `cfg/user.tbl` is now optional. Default `true` preserves the v3.1.3+ behaviour. Setting `encrypt_usertbl = false` writes plaintext Lua for single-user / home-hub deployments where disk-level confidentiality isn't part of the threat model and operator tooling needs direct read access to the file. Auto-detected on read via the LDC1 magic prefix, so migration is transparent in both directions; `master.key` is loaded if present (legacy decrypt) but only auto-generated when encryption is on.
 
 ## Bugfixes
 
-- **Password redaction in admin reply paths** ([#95](https://github.com/luadch-ng/luadch/issues/95) partial / [#119](https://github.com/luadch-ng/luadch/pull/119)):
-  - `+setpass` drops the password from the **caller's** reply. The target user still receives the new password via PM (admin-sets-target case) - they need it to log in.
-  - `+accinfo` and `+usersearch` show `<REDACTED>` in the password column instead of the cleartext value.
-  - `+reg` auto-generated password delivery is **intentionally unchanged** - target needs the value to log in. The `cmd_reg` redesign is Phase-8+ scope and depends on either an alternate delivery channel ([#100](https://github.com/luadch-ng/luadch/issues/100) SMTP) or a token-based first-login flow.
-- **`usr_nick_length` localisation** ([#48](https://github.com/luadch-ng/luadch/issues/48) i18n half / [#117](https://github.com/luadch-ng/luadch/pull/117)) - operator-facing `onFailedAuth` reason and user-facing `ISTA 221` kill message now route through the new `scripts/lang/usr_nick_length.lang.{en,de}`.
-- **Plugin-header grammar fix** ([#114](https://github.com/luadch-ng/luadch/issues/114) / [#116](https://github.com/luadch-ng/luadch/pull/116)) - `'an user'` -> `'a user'` across nine bundled plugin headers. Comment-only.
+- **`usr_uptime` cross-month accounting** ([#127](https://github.com/luadch-ng/luadch/issues/127) / [#131](https://github.com/luadch-ng/luadch/pull/131)) - sessions that span month boundaries no longer accumulate as "years" of uptime. The pre-fix code bracketed sessions on `login` and credited the whole span to the login month on `logout`, so a session starting on the 31st and ending on the 1st saw the end-month-minus-start-month delta arithmetic wrap into multi-year totals. The fix walks the user list on a 60-second timer and credits each tick to the calendar month it falls into, so cross-month sessions land in both months correctly.
+- **Plugin save crash-safety - F-PLG-1** ([#133](https://github.com/luadch-ng/luadch/issues/133) / [#134](https://github.com/luadch-ng/luadch/pull/134)) - `util.savearray` and `util.savetable` previously opened the target file in `"w+"` (truncate) and wrote serialised content directly, so a hub crash mid-write left the `.tbl` partial. Both helpers now route through a new public `util.atomic_write(path, content)` helper that does tmp + rename (Windows fallback: remove then rename). 21 plugin save sites across the bundled tree get crash-safe writes with zero call-site changes; `core/cfg_users.lua` keeps its `chmod 600` for `user.tbl` separately via `util.chmod_secret`.
+- **Plugin load nil-handling - F-PLG-2** ([#133](https://github.com/luadch-ng/luadch/issues/133) / [#135](https://github.com/luadch-ng/luadch/pull/135)) - `util.loadtable` returns `nil` on missing / unreadable / parse-fail. Defensive `or {}` added at 22 consumer sites across 12 bundled plugins (`bot_session_chat`, `cmd_accinfo`, `cmd_delreg`, `cmd_nickchange`, `cmd_reg`, `cmd_usercleaner`, `etc_msgmanager`, `etc_trafficmanager`, `usr_hide_share`, plus field-read defence in `cmd_hubinfo`, `cmd_uptime`, `hub_runtime`). Sites with the existing init-pattern (`check_hci` style: type-check + savetable + opchat warning) intentionally left alone - they handle nil correctly and auto-create the file.
+- **F-PLG-3 audit** ([#133](https://github.com/luadch-ng/luadch/issues/133)) - silent no-op on incomplete `+cmd` audited across 24 bundled scripts and 53 `utf.match`-on-parameters sites. **No actionable bugs found.** Every command handler already has either an explicit pre-check guard or a final `msg_usage` fallback. Audit closeout on the tracker.
 
 ## Notes
 
-- Bug-report and feature-request issue templates added under `.github/ISSUE_TEMPLATE/`.
-- Smoke harness: 14/14 PASS on Linux + Windows (no test count change in this release; existing tests cover the new behaviour).
+- New public helpers in `core/util.lua`: `util.atomic_write(path, content)` and `util.tabletostring(tbl, name)`. Plugins that roll their own save logic can route through them for crash-safe writes. The companion `luadch-ng/scripts` repo already uses them in `ptx_poll_bot`, `ptx_freshstuff`, `etc_requests`, and `etc_mainecho` (min hub version: **v3.1.7**).
+- Smoke harness: 31/31 PASS on Linux + Windows. No test count change in this release; the existing tests already cover the new behaviour (atomic-write path validated by `test_usertbl_bak_atomic_refresh` from v3.1.5).
+- Companion plugin updates landed in [`luadch-ng/scripts#24`](https://github.com/luadch-ng/scripts/issues/24) (closed) with two PRs adding atomic save + nil-handling to the curated plugin tree - operators running those plugins should also pull the latest from that repo.
 
 ## Downloads
 
 | File | Platform |
 |---|---|
-| `luadch-v3.1.6-linux-x86_64.tar.gz` | Linux glibc x86_64 |
-| `luadch-v3.1.6-windows-x86_64.zip`  | Windows x86_64 (MinGW UCRT64) |
-| `ghcr.io/luadch-ng/luadch:v3.1.6`   | Container, linux/amd64 + linux/arm64 |
+| `luadch-v3.1.7-linux-x86_64.tar.gz` | Linux glibc x86_64 |
+| `luadch-v3.1.7-windows-x86_64.zip`  | Windows x86_64 (MinGW UCRT64) |
+| `ghcr.io/luadch-ng/luadch:v3.1.7`   | Container, linux/amd64 + linux/arm64 |
 
-## Migration from v3.1.5
+## Migration from v3.1.6
 
-Drop the new install tree in place of the old one (or `git pull && cmake --build build && cmake --install build` from source). Container users get both the bundled `*.lua` sync and the new lang add-only sync on the next `docker compose up -d` after `pull`.
+Drop the new install tree in place of the old one (or `git pull && cmake --build build && cmake --install build` from source). Container users get both the bundled `*.lua` sync and the lang add-only sync on the next `docker compose up -d` after `pull`.
 
-If you want to flip to TLS-only on an existing deployment, edit `cfg/cfg.tbl`. luadch separates IPv4 and IPv6 listeners into distinct port arrays - flip both stacks to mirror the new bundled defaults:
-
-```lua
-tcp_ports      = { },
-ssl_ports      = { 5001 },
-tcp_ports_ipv6 = { },
-ssl_ports_ipv6 = { 5003 },
-use_ssl        = true,
-```
-
-If you only run on one stack, leave the other one as-is. Then `+reload` (or restart the container). The hub's auto-cert-gen path picks up the missing `certs/serverkey.pem` / `servercert.pem` and writes a fresh self-signed pair before binding the listener.
+No `cfg.tbl` migration is needed. The new `encrypt_usertbl` key in `examples/cfg/cfg.tbl` is purely additive - existing `cfg/cfg.tbl` files without the key default to encrypted, which matches v3.1.6 behaviour. To opt out, add `encrypt_usertbl = false` and `+reload` (or restart the container).
 
 ## Build from source
 
 ```sh
-git clone --branch v3.1.6 https://github.com/luadch-ng/luadch.git
+git clone --branch v3.1.7 https://github.com/luadch-ng/luadch.git
 cd luadch
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j

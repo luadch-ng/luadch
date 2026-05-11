@@ -10,6 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The upstream project (`luadch/luadch`) is a separate codebase; its release
 history is at https://github.com/luadch/luadch/releases.
 
+## [v3.1.7] - 2026-05-11
+
+Plugin data-integrity patch release. `util.savearray` / `util.savetable` are atomic-by-default, defensive `or {}` swept across bundled plugins that load tables, cross-month uptime accounting bug fixed, and `cmd_gag` gains shadowmute mode + duration syntax. Smoke 31/31 PASS on Linux + Windows.
+
+### Features
+
+- [#85](https://github.com/luadch-ng/luadch/issues/85) - `cmd_gag` adds **shadowmute** as a 4th mode plus optional duration on all modes ([#132](https://github.com/luadch-ng/luadch/pull/132)). Shadowmute = target sees their own messages echo but nobody else does. Duration accepts `30s` / `10m` / `2h` / `1d` / `1w` (combinable as `1h30m`); empty = permanent. Auto-expire walks the gag table every 60s. Offline ungag now works via `hub.getregusers()` lookup. Right-click menu gets a "Shadowmute User" entry.
+- [#128](https://github.com/luadch-ng/luadch/issues/128) - `encrypt_usertbl` opt-out toggle in `cfg/cfg.tbl` ([#129](https://github.com/luadch-ng/luadch/pull/129)). Default `true` preserves the Phase-7f AES-256-GCM at-rest encryption. `false` writes plaintext `user.tbl` for single-user / home hubs where direct operator read access matters more than disk confidentiality. Auto-detected on read via LDC1 magic prefix - migration is transparent in both directions, master.key auto-generated only when encryption is on.
+
+### Bugfixes
+
+- [#127](https://github.com/luadch-ng/luadch/issues/127) - `usr_uptime` cross-month accounting fix ([#131](https://github.com/luadch-ng/luadch/pull/131)). Sessions spanning month boundaries no longer accumulate as "years" of uptime. New per-tick credit pattern attributes each 60s tick to the calendar month that contains it.
+- [#133](https://github.com/luadch-ng/luadch/issues/133) F-PLG-1 / F-PLG-2 - bundled plugin data-integrity sweep:
+  - `util.savearray` / `util.savetable` are **atomic-by-default** ([#134](https://github.com/luadch-ng/luadch/pull/134)) via the new public `util.atomic_write(path, content)` helper (tmp + rename, Windows fallback). 21 plugin save sites in the bundled tree get crash-safe writes with zero call-site changes. `cfg_users.lua` delegates to the shared helper for a single source of truth.
+  - Defensive `or {}` on 22 `util.loadtable` consumer sites across 12 bundled plugins ([#135](https://github.com/luadch-ng/luadch/pull/135)). Missing / unreadable / parse-fail `.tbl` files no longer crash listeners on first `pairs()` / `ipairs()` / field access. Sites with the existing init-pattern (`check_hci` style) intentionally left as-is - they handle nil correctly and auto-create with defaults.
+  - F-PLG-3 (silent no-op on incomplete `+cmd`) audited across 24 bundled scripts - no actionable bugs found, all command handlers already have explicit `msg_usage` fallbacks.
+
+### Notes
+
+- `scripts/lang/cmd_gag.lang.{en,de}` modified: 5 new keys (`msg_invalid_duration`, `msg_add_user_with_duration`, `msg_expired`, `ucmd_duration`, `ucmd_menu_ct1b`); rewritten: `msg_usage`, `help_usage`, `help_desc`, `msg_show_users`. Operators with custom `cmd_gag.lang.*` translations need a one-time merge.
+- `examples/cfg/cfg.tbl` gains `encrypt_usertbl = true`. Existing `cfg/cfg.tbl` files without the key default to encrypted (preserves v3.1.6 behaviour). To opt out, add `encrypt_usertbl = false`.
+- New public `util.atomic_write` + `util.tabletostring` helpers in `core/util.lua`. Plugins that roll their own save path can route through them for crash-safe writes; companion `luadch-ng/scripts` PRs already use them in `ptx_poll_bot`, `ptx_freshstuff`, `etc_requests`, and `etc_mainecho` (min hub version: v3.1.7).
+- Smoke harness: 31/31 PASS unchanged - no new tests this release (audit-discussion outcome was "don't grow the testbench for refactors that don't change the protocol surface").
+
+[v3.1.7]: https://github.com/luadch-ng/luadch/releases/tag/v3.1.7
+
+
 ## [v3.1.6] - 2026-05-09
 
 Security-themed patch release. Hub now defaults to TLS-only with auto-generated self-signed certs on first boot, the password leakage in admin reply paths is closed for `+setpass` / `+accinfo` / `+usersearch`, and Docker deployments pick up new bundled language files automatically. Smoke 14/14 PASS on Linux + Windows.
