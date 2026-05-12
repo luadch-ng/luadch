@@ -595,6 +595,21 @@ _normal = {
     --CRES = function( user, adccmd, targetuser ) -- new
     --    return scripts_firelistener( "onSearchResult", user, targetuser, adccmd )
     --end,
+    -- ADC 6.3.10 QUI (client-initiated). Spec lists QUI as permitted
+    -- in any state and the hub's expected reaction is to close the
+    -- connection. Before this handler the parser accepted HQUI but
+    -- the dispatcher had no entry, so the hub answered ISTA 125
+    -- (unknown command) instead of treating QUI as the polite
+    -- goodbye it is.
+    --
+    -- We just close the client here. server.lua's read loop catches
+    -- the resulting EOF and calls disconnect(), which broadcasts
+    -- IQUI <sid> to the remaining users and fires onLogout via the
+    -- normal cleanup path. T1.7 of #147.
+    HQUI = function( user, adccmd )
+        user:client():close()
+        return true
+    end,
 
 }
 

@@ -851,6 +851,43 @@ def test_neg_post_login_rcm_burst():
         _neg_drain_briefly(sock)
 
 
+def test_hqui_from_client_honored():
+    """ADC 6.3.10: client-initiated HQUI must be honored - hub closes
+    the connection cleanly without replying ISTA 125 (unknown command).
+    Before T1.7 of #147 the parser accepted HQUI but the dispatcher
+    had no entry, so the hub answered with the catch-all unknown-
+    command STA instead of treating QUI as a polite goodbye."""
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, _reader = _adc_login(sock, "dummy", "test")
+        try:
+            sock.sendall(f"HQUI {sid}\n".encode("utf-8"))
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
+        # Drain whatever the hub still has buffered for us before the
+        # close. Should be empty or contain only normal logout
+        # broadcasts, never ISTA 125.
+        sock.settimeout(2.0)
+        buf = b""
+        try:
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+        except (socket.timeout, TimeoutError):
+            raise TestFailure(
+                "hub did not close socket within 2s after HQUI; "
+                "T1.7 dispatcher likely not wired correctly"
+            )
+        if b"ISTA 125" in buf:
+            raise TestFailure(
+                f"hub rejected client HQUI as unknown command "
+                f"(ISTA 125 in tail): {buf[:200]!r}"
+            )
+
+
 def test_neg_post_login_natt_burst():
     """After a clean login, fire 50 mixed DNAT / DRNT commands (ADC-EXT
     NATT, T1.1 of #147) at non-existent SIDs. Both new dispatch routes
@@ -1443,6 +1480,7 @@ TESTS = [
     ("neg: post-login DCTM burst (#80 CTM bucket)", test_neg_post_login_ctm_burst),
     ("neg: post-login DRCM burst (#80 CTM bucket)", test_neg_post_login_rcm_burst),
     ("neg: post-login NATT burst (#147 T1.1)", test_neg_post_login_natt_burst),
+    ("HQUI from client closes cleanly (#147 T1.7)", test_hqui_from_client_honored),
     ("neg: canary - hub still alive after fuzz battery", test_neg_canary_hub_alive),
 ]
 

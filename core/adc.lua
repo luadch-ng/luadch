@@ -513,6 +513,27 @@ _protocol = {
             nonpclones = true,
 
         },
+        -- ADC 6.3.10 QUI. Hub-direction (IQUI) is built directly via
+        -- string concat in disconnect() and user.kill, but the
+        -- parser also needs the shape so client-direction (HQUI =
+        -- "I'm leaving") parses through to the dispatcher instead
+        -- of being dropped as unknown. pp is the leaving user's SID;
+        -- np = empty lets the default validator pass any spec-defined
+        -- flag (RD / TL / MS / ID / RDEX RX-PT-RP) without enumerating
+        -- them here. T1.7 of #147.
+        QUI = {
+
+            pp = {
+
+                _regex.sid,
+
+                len = 1,
+
+            },
+            np = { },
+            nonpclones = false,
+
+        },
 
     },
     contexts = {
