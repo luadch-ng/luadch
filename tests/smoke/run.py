@@ -786,10 +786,15 @@ def test_neg_post_login_inf_burst():
 
 
 def test_neg_post_login_pm_burst():
-    """After a clean login, fire 50 DMSG private messages back-to-back at
-    a non-existent SID. Tests that the PM bucket (#80 split from msg)
-    rate-limits / absorbs without crashing the dispatcher. Independent of
-    the BMSG bucket exercised by other tests."""
+    """After a clean login, fire 50 DMSG private messages back-to-back
+    at our OWN sid (self-target). Self-target is accepted by incoming()
+    (mysid == usersid check passes, targetuser is non-nil) so the
+    dispatcher actually reaches the _normal.DMSG handler and the
+    rl_pm_drop rate-limit gate. Targeting a non-existent SID like ZZZZ
+    instead would short-circuit at hub.lua:1264 with ISTA 140 BEFORE
+    dispatch, defeating the test's purpose. Tests that the PM bucket
+    (#80 split from msg) rate-limits / absorbs without crashing the
+    dispatcher."""
     with socket.create_connection(
         (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
     ) as sock:
@@ -799,10 +804,8 @@ def test_neg_post_login_pm_burst():
             return
         for i in range(50):
             try:
-                # ZZZZ is a syntactically-valid SID slot with no logged-in
-                # client; the dispatcher rate-checks before target lookup.
                 sock.sendall(
-                    f"DMSG {sid} ZZZZ hello{i}\n".encode("utf-8")
+                    f"DMSG {sid} {sid} hello{i}\n".encode("utf-8")
                 )
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
@@ -810,10 +813,11 @@ def test_neg_post_login_pm_burst():
 
 
 def test_neg_post_login_ctm_burst():
-    """After a clean login, fire 50 DCTM commands at non-existent SIDs.
-    Confirms the #80 CTM bucket absorbs a connection-setup flood
-    without crashing the dispatcher. First ~burst go through to onCTM
-    listeners, the rest are silently dropped by rl_ctm_drop."""
+    """After a clean login, fire 50 DCTM commands at our own SID
+    (self-target). See PM burst test above for why we self-target
+    instead of using a non-existent SID. Confirms the #80 CTM bucket
+    absorbs a connection-setup flood without crashing the dispatcher
+    and actually reaches the rl_ctm_drop gate."""
     with socket.create_connection(
         (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
     ) as sock:
@@ -822,17 +826,15 @@ def test_neg_post_login_ctm_burst():
         except TestFailure:
             return
         for i in range(50):
-            # ZZZZ is a syntactically-valid SID slot that does not
-            # correspond to any logged-in client.
             try:
-                sock.sendall(f"DCTM {sid} ZZZZ ADC/1.0 12345\n".encode("utf-8"))
+                sock.sendall(f"DCTM {sid} {sid} ADC/1.0 12345 tok{i}\n".encode("utf-8"))
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
         _neg_drain_briefly(sock)
 
 
 def test_neg_post_login_rcm_burst():
-    """After a clean login, fire 50 DRCM commands at non-existent SIDs.
+    """After a clean login, fire 50 DRCM commands at our own SID.
     DRCM shares the CTM bucket since both are peer-connection
     initiation primitives. Tests the second code path through
     rl_ctm_drop."""
@@ -845,7 +847,7 @@ def test_neg_post_login_rcm_burst():
             return
         for i in range(50):
             try:
-                sock.sendall(f"DRCM {sid} ZZZZ ADC/1.0\n".encode("utf-8"))
+                sock.sendall(f"DRCM {sid} {sid} ADC/1.0\n".encode("utf-8"))
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
         _neg_drain_briefly(sock)
@@ -890,9 +892,10 @@ def test_hqui_from_client_honored():
 
 def test_neg_post_login_natt_burst():
     """After a clean login, fire 50 mixed DNAT / DRNT commands (ADC-EXT
-    NATT, T1.1 of #147) at non-existent SIDs. Both new dispatch routes
+    NATT, T1.1 of #147) at our own SID. Both new dispatch routes
     share the CTM bucket (peer-connection setup); confirms NATT relay
-    absorbs floods the same way DCTM / DRCM do without crashing."""
+    absorbs floods the same way DCTM / DRCM do without crashing and
+    actually reaches the rl_ctm_drop gate."""
     with socket.create_connection(
         (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
     ) as sock:
@@ -906,7 +909,7 @@ def test_neg_post_login_natt_burst():
             cmd = "DNAT" if i % 2 == 0 else "DRNT"
             try:
                 sock.sendall(
-                    f"{cmd} {sid} ZZZZ ADC/1.0 12345 tok{i}\n".encode("utf-8")
+                    f"{cmd} {sid} {sid} ADC/1.0 12345 tok{i}\n".encode("utf-8")
                 )
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return

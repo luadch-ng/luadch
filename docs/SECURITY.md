@@ -356,6 +356,43 @@ If you write a plugin and need exact message accounting, do not
 rely on the dispatcher's listener fan-out alone - it is rate-
 limited at the hub boundary by design.
 
+### onSearchResult contract widening for F-class ([#147](https://github.com/luadch-ng/luadch/issues/147) T1.6)
+
+Before #147 the `onSearchResult` listener only fired on D-class
+(`DRES`) - single-recipient search results. Returning a truthy value
+(`return PROCESSED`) from the listener suppressed delivery to the
+**one** target SID.
+
+After #147 T1.6 the same listener also fires on F-class (`FRES`) -
+feature-filtered fan-out where the message is delivered to any
+client matching a feature mask. Returning truthy on the F-class
+path suppresses delivery to **the entire set** of matching
+recipients, not just one.
+
+Plugins differentiate the two cases by checking the `targetuser`
+arg: nil = F-class fan-out (wide impact), non-nil = D-class single
+recipient.
+
+```lua
+hub.setlistener( "onSearchResult", { },
+    function( user, targetuser, adccmd )
+        if not targetuser then
+            -- F-class. Returning PROCESSED here drops the whole
+            -- feature-filtered fan-out. Use with care.
+        else
+            -- D-class. Returning PROCESSED drops one delivery only.
+        end
+        return nil    -- let it through
+    end
+)
+```
+
+The bundled `hub_cmd_manager.lua` only reads `user:level()` and
+returns PROCESSED unconditionally on level mismatch; it tolerates
+the new arg shape but operators using it should be aware that
+unauthorised F-class results are now dropped for the whole
+recipient set instead of per-recipient.
+
 ---
 
 ## 6. TLS configuration

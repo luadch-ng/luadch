@@ -223,8 +223,11 @@ _protocol = {
                 min_share = min_share * 1024^3
                 max_share = max_share * 1024^4
                 -- T1.3 of #147: aggregate SS / SF over online users.
-                -- Bots have no INF and their share/files getters
-                -- return nil, so we skip them implicitly. Cost is
+                -- Bot user objects expose .share() returning 0 (not
+                -- nil) and may not expose .files() at all; the
+                -- short-circuit on `u.files and u:files()` plus the
+                -- nil-check before accumulation handles both shapes
+                -- and contributes 0 from bots either way. Cost is
                 -- O(N) once per PING handshake - not a hot path.
                 local total_ss, total_sf = 0, 0
                 for _, u in pairs( _normalstatesids ) do
@@ -287,7 +290,15 @@ _protocol = {
             user:kill( "ISTA 220 " .. _i18n_no_base_support .. "\n", "TL-1" )-----!
         end
         return true
-    end
+    end,
+    -- Pre-login QUI - client gave up mid-handshake. Spec allows QUI
+    -- in any state; we close cleanly so no ISTA 125 reaches the
+    -- client. The normal disconnect path will not broadcast IQUI to
+    -- others because state != "normal" (hub.lua:1325).
+    HQUI = function( user, adccmd )
+        user:client():close()
+        return true
+    end,
 
 }
 
@@ -396,6 +407,12 @@ _identify = {
         end
         return true
     end,
+    -- Same rationale as the protocol-state HQUI handler: spec allows
+    -- QUI in any state, clean-close instead of ISTA 125.
+    HQUI = function( user, adccmd )
+        user:client():close()
+        return true
+    end,
 
 }
 
@@ -464,6 +481,14 @@ _verify = {
         profile.lastseen = util_date( )
         profile.is_online = 1
         cfg_saveusers( _regusers )
+        return true
+    end,
+    -- Same rationale as the protocol-state / identify-state HQUI
+    -- handlers above. Reaching verify means BINF was accepted but
+    -- HPAS was either not sent or aborted; client-initiated QUI here
+    -- means the password prompt was abandoned.
+    HQUI = function( user, adccmd )
+        user:client():close()
         return true
     end,
 
@@ -586,7 +611,17 @@ _normal = {
     -- has to recognise the command. Fire the onSearchResult listener
     -- with nil targetuser so plugins can distinguish F-class
     -- (multi-target) from D-class (single-target) results.
-    FRES = function( user, adccmd )
+    FRES = function( user, adccmd, _targetuser )
+        -- F-class has no single targetuser by definition. Argument
+        -- kept in signature for visual symmetry with DRES so the
+        -- dispatcher table reads consistently top-to-bottom; the
+        -- onSearchResult listener still receives nil here so plugins
+        -- can branch on `if targetuser` to distinguish D-class from
+        -- F-class results. **Plugin contract note:** returning a
+        -- truthy value from an onSearchResult listener on a FRES path
+        -- suppresses the ENTIRE feature-filtered fan-out, not just a
+        -- single recipient as with DRES. See docs/SCRIPTS.md
+        -- "Passthrough extensions" for the implications.
         return scripts_firelistener( "onSearchResult", user, nil, adccmd )
     end,
     --URES = function( user, adccmd, targetuser ) -- new

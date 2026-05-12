@@ -2073,6 +2073,15 @@ local defaults = {
     --   * federation / "anti-leech" hubs: min_reg_hubs = 1+ so regs
     --     must be present in other hubs too.
     --   * private hubs: leave at defaults.
+    --
+    -- Operator-side sanity: keep `min_*_hubs <= max_*_hubs` for each
+    -- role. The validators here are per-key (no cross-key check), so
+    -- a contradiction like `min_user_hubs = 50, max_user_hubs = 20`
+    -- loads without error but advertises nonsensical MU > XU in the
+    -- PING reply. usr_hubs.lua enforcement runs on both fields
+    -- independently so a user satisfying the max but not the min
+    -- still gets disconnected. Cross-validation is a future
+    -- candidate if the foot-gun ever bites in practice.
     max_user_hubs = { 20,
         function( value )
             return types_number( value, nil, true )

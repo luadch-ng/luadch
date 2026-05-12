@@ -194,7 +194,13 @@ local function createuser( _client, _sid )
         -- docstring: flags is optional, must be a table when present.
         if type( flags ) == "table" then
             for flag, value in pairs( flags ) do
-                msg = msg .. " " .. escapeto( flag ) .. escapeto( value )
+                -- The NP name (e.g. "TL", "FC") is the on-wire field
+                -- key and must be emitted verbatim - escape-encoding
+                -- it would mangle non-alpha names that future spec
+                -- extensions may introduce. Today's NP names are all
+                -- alpha so this works by luck either way, but keep the
+                -- escape on the value where it actually matters.
+                msg = msg .. " " .. flag .. escapeto( value )
             end
         end
         msg =  msg .. "\n"
@@ -320,12 +326,15 @@ local function createuser( _client, _sid )
     -- driven from cfg. The legacy MS quitmsg stays as the trailing
     -- field. Cfg is looked up at call time so a +reload picks up new
     -- alternatives / permanent toggle without a hub restart.
+    -- Alternatives are iterated with ipairs so RX field order on the
+    -- wire matches the operator's cfg table order across reloads
+    -- (pairs() in Lua has implementation-defined iteration order).
     user.redirect = function( _, url, quitmsg )
         types_utf8( url )
         local parts = { "IQUI ", _sid, " RD", adclib_escape( url ) }
         local alts = cfg.get "hub_redirect_alternatives"
         if alts then
-            for _, alt in pairs( alts ) do
+            for _, alt in ipairs( alts ) do
                 types_utf8( alt )
                 parts[ #parts + 1 ] = " RX"
                 parts[ #parts + 1 ] = adclib_escape( alt )
@@ -337,7 +346,11 @@ local function createuser( _client, _sid )
         if quitmsg then
             types_utf8( quitmsg )
             parts[ #parts + 1 ] = " MS"
-            parts[ #parts + 1 ] = quitmsg
+            -- ADC requires whitespace / control-byte escaping in field
+            -- values. The legacy MS path emitted quitmsg raw, so any
+            -- caller passing a multi-word reason produced malformed
+            -- ADC on the wire. Now escaped same as RD / RX above.
+            parts[ #parts + 1 ] = adclib_escape( quitmsg )
         end
         parts[ #parts + 1 ] = "\n"
         user:kill( table_concat( parts ) )
