@@ -573,9 +573,21 @@ _normal = {
         if rl_search_drop( user ) then return true end
         return scripts_firelistener( "onSearch", user, adccmd )
     end,
-    -- ADC: 6.3.7. RES
+    -- ADC: 6.3.7. RES (D-class single-recipient + F-class feature-
+    -- filtered fan-out via #147 T1.6).
     DRES = function( user, adccmd, targetuser )
         return scripts_firelistener( "onSearchResult", user, targetuser, adccmd )
+    end,
+    -- F-class search-result. Sent when the responder wants the result
+    -- delivered to a set of clients matching feature flags rather
+    -- than a single SID (e.g. delivering NMDC-bridged results only
+    -- to ADC clients that support the bridge). The feature-fan-out
+    -- itself happens in hub.lua's class router; the dispatcher just
+    -- has to recognise the command. Fire the onSearchResult listener
+    -- with nil targetuser so plugins can distinguish F-class
+    -- (multi-target) from D-class (single-target) results.
+    FRES = function( user, adccmd )
+        return scripts_firelistener( "onSearchResult", user, nil, adccmd )
     end,
     --URES = function( user, adccmd, targetuser ) -- new
     --    return scripts_firelistener( "onSearchResult", user, targetuser, adccmd )

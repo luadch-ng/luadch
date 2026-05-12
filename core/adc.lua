@@ -238,6 +238,7 @@ _regex = {
         bcast = "[BF]",
         direct = "[DE]",
         hubdirect = "[HDE]",
+        result = "[FD]",        -- ADC 5.3.6 RES: D (direct) + F (feature-filtered)
 
     },
 
@@ -522,7 +523,7 @@ _protocol = {
         INF = _regex.context.bcast,
         MSG = _regex.context.send,
         SCH = _regex.context.send,
-        RES = _regex.context.direct,
+        RES = _regex.context.result,
         CTM = _regex.context.direct,
         RCM = _regex.context.direct,
         NAT = _regex.context.direct,    -- ADC-EXT NATT
