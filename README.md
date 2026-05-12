@@ -24,42 +24,16 @@ Maintained by [Aybo](https://github.com/Aybook), with help from Claude.
 ## New Features
 
 - **DoS hardening** ([#56](https://github.com/luadch-ng/luadch/issues/56)) - per-IP / per-user rate limits, TLS handshake deadline, failed-auth lockout
+- **Per-userlevel rate-limit tiers** ([#80](https://github.com/luadch-ng/luadch/issues/80)) - independent buckets for chat / PM / INF / CTM-RCM / search, optional named tiers per user level (see [`docs/SCRIPTS.md`](docs/SCRIPTS.md#rate-limit-configuration))
 - **Encrypted user database** ([#52](https://github.com/luadch-ng/luadch/issues/52)) - AES-256-GCM at-rest encryption of `cfg/user.tbl`
 - **Sandboxed config / state loaders** ([#51](https://github.com/luadch-ng/luadch/issues/51)) - tampered `.tbl` files cannot achieve RCE
 - **POSIX file-permission enforcement** on secret files
+- **TLS-only default + auto-generated cert on first boot** ([#77](https://github.com/luadch-ng/luadch/issues/77) / [#113](https://github.com/luadch-ng/luadch/pull/113)) - fresh installs ship TLS-only on both IPv4 and IPv6, with a P-256 ECDSA cert generated automatically when none exists
+- **Atomic plugin saves** ([#133](https://github.com/luadch-ng/luadch/issues/133)) - `util.savearray` / `util.savetable` use tmp + rename so a hub crash mid-write leaves the `.tbl` intact
+- **Docker plugin + language autosync** ([#118](https://github.com/luadch-ng/luadch/pull/118)) - container restarts pull in new bundled scripts and lang files without overwriting operator customisations
 
 See [`docs/SECURITY.md`](docs/SECURITY.md) for the full threat model
 and operator guidance.
-
-## What's different in this fork
-
-- Lua **5.1** (EOL since 2012) **→ 5.4.8**
-- Unmaintained `slnunicode` C module replaced by a 40-line pure-Lua shim
-  on top of Lua 5.4's builtin `utf8` library - same API, no C maintenance
-- Build system rewritten to **CMake**: one pipeline for Linux / Windows /
-  ARM (`cmake -B build && cmake --build build && cmake --install build`)
-- The `*.c.not` source-rename hack on the Windows build is gone
-- `core/cfg.lua` (3688 lines) and `core/hub.lua` (2245 lines)
-  decomposed into focused modules under a 1500-line ceiling (Phase 6)
-- Comprehensive security audit (Phase 7) - 24 findings filed,
-  22 fixed; see [`docs/SECURITY.md`](docs/SECURITY.md) and
-  [`docs/phases/PHASE_7_FINDINGS.md`](docs/phases/PHASE_7_FINDINGS.md)
-- Password salts now drawn from OpenSSL CSPRNG (`RAND_bytes`)
-  instead of `math.random` reseeded with `os.time()`
-- CI smoke harness with 10 protocol-level tests (handshake, login,
-  +cmd routing, rate-limit, encryption-at-rest) on every push and
-  PR, both Linux and Windows
-- Several pre-existing bugs fixed:
-  - `os.difftime` 1-arg pattern (silently tolerated by 5.1, errors in 5.4)
-  - `cmd_hubinfo.lua` crash on missing certificate file
-  - `wmic` calls replaced with `Get-CimInstance` (Windows 11 24H2+ removed wmic)
-  - `+!#` server commands from PMs now reach the command pipeline again
-  - `make_cert.sh` no longer collides with bash's read-only `UID` builtin
-- Repo hygiene: `.gitattributes` for line endings, reproducible Windows
-  build via env vars, no more `register` C++17 warnings, dropped 1366
-  lines of unmaintained C
-
-Detail per phase in [docs/phases/](docs/phases/).
 
 ## Documentation
 
@@ -69,6 +43,8 @@ Detail per phase in [docs/phases/](docs/phases/).
   (file layout, permissions, systemd, backups, updates)
 - **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** - configure the
   hub, register users, manage plugins, set up TLS
+- **[docs/SCRIPTS.md](docs/SCRIPTS.md)** - every bundled plugin with
+  its commands and cfg keys, plus the rate-limit configuration guide
 - **[docs/SECURITY.md](docs/SECURITY.md)** - threat model, plugin
   trust contract, file-permission baseline, network-defense map,
   CVE-tracking process, how to report a security issue
@@ -76,8 +52,6 @@ Detail per phase in [docs/phases/](docs/phases/).
   TLS-only deployments, troubleshooting
 - [docs/Luadch_Lua_API.txt](docs/Luadch_Lua_API.txt) - plugin scripting
   API reference (upstream-style)
-- [docs/Luadch_Manual.pdf](docs/Luadch_Manual.pdf) - original upstream
-  manual (predates this fork)
 
 ## Quick start
 

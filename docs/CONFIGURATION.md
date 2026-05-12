@@ -265,5 +265,5 @@ plugin appends its own entries.
 
 - The shipped `cfg/cfg.tbl` itself — every key has an inline comment
 - [Luadch_Lua_API.txt](Luadch_Lua_API.txt) — the plugin API
-- [Luadch_Manual.pdf](Luadch_Manual.pdf) — original upstream manual
+- [SCRIPTS.md](SCRIPTS.md) — bundled plugin reference + rate-limit configuration
 - [docs/phases/](phases/) — modernization journals (what changed and why)
