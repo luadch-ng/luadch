@@ -949,13 +949,21 @@ def test_post_login_search_result_listener_chain():
         # Send 5 DRES (D-class single-target result) + 5 FRES
         # (F-class feature-filtered result). Targets are our own
         # SID for D-class; FRES has no explicit target SID.
-        for i in range(5):
+        # TR is the TigerTree hash - ADC enforces exactly 39 chars
+        # from [A-Z2-7] (core/adc.lua:155). Build the value as 38
+        # fixed chars + one digit-suffix in 2..6 (range 2,7) to
+        # stay inside the alphabet AND the length cap. A length
+        # or alphabet mismatch makes the parser drop the frame
+        # silently (event.log, not error.log) and the listener
+        # would never fire - the test would pass for the wrong
+        # reason without exercising the new onSearchResult path.
+        for i in range(2, 7):
             try:
                 sock.sendall(
-                    f"DRES {sid} {sid} FNself.txt SI100 TR{('A'*39)}{i}\n".encode("utf-8")
+                    f"DRES {sid} {sid} FNself.txt SI100 TR{'A'*38}{i}\n".encode("utf-8")
                 )
                 sock.sendall(
-                    f"FRES {sid} +ADC0 FNself{i}.txt SI100 TR{('B'*39)}{i}\n".encode("utf-8")
+                    f"FRES {sid} +ADC0 FNself{i}.txt SI100 TR{'B'*38}{i}\n".encode("utf-8")
                 )
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
