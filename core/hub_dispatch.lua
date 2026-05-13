@@ -309,20 +309,35 @@ _identify = {
         local pid = adccmd:getnp "PD"
         local cid = adccmd:getnp "ID"
         local nick = adccmd:getnp "NI"
-        local ipver = "I4"
-        local infip = adccmd:getnp( ipver )
-        if not infip then
-            ipver = "I6"
-            infip = adccmd:getnp( ipver )
+        -- I4 / I6 are conditionally required per ADC 4.3.x - clients
+        -- without TCP4 / UDP4 / TCP6 / UDP6 in their SU may legitimately
+        -- omit them (hublist pingers, IP-agnostic probes). The hub
+        -- accepts no-IP login and fills the slot with the TCP-source
+        -- IP under the connection's address family - see #161.
+        local ipver
+        local infip = adccmd:getnp "I4"
+        if infip then
+            ipver = "I4"
+        else
+            infip = adccmd:getnp "I6"
+            if infip then ipver = "I6" end
         end
         local hash = user.hash( )
-        if not ( cid and pid and nick and infip ) then
+        if not ( cid and pid and nick ) then
             user:kill( "ISTA 220 " .. _i18n_no_cid_nick_found .. "\n", "TL-1" )
             scripts_firelistener( "onFailedAuth", ( nick or _i18n_unknown ), ( infip or _i18n_unknown ), ( cid or _i18n_unknown ), escapefrom( _i18n_no_cid_nick_found ) )
             return true
         end
         local userip = user.ip( ) or ""
-        if ( infip == "0.0.0.0" ) or ( infip == "::" ) then
+        if not infip or infip == "0.0.0.0" or infip == "::" then
+            -- Client did not advertise an IP (or used the spec
+            -- placeholder). Single canonical path for "IP unknown to
+            -- client" - hub fills in TCP-source IP under the connection
+            -- address family, no special-case "no-IP user" shape
+            -- downstream. ipver is nil exactly when neither I4 nor I6
+            -- was probed successfully; pick the family from userip
+            -- shape (IPv6 contains a colon, IPv4 does not).
+            ipver = ipver or ( userip:find( ":", 1, true ) and "I6" or "I4" )
             adccmd:setnp( ipver, userip )
         elseif infip ~= userip then
             if _cfg_kill_wrong_ips then

@@ -637,6 +637,79 @@ def test_neg_inf_missing_required_fields():
     _neg_send_binf_extra(extra)
 
 
+def test_binf_without_i4_or_i6_accepted():
+    """#161 regression: a BINF that omits I4 AND I6 must NOT be rejected
+    with ISTA 220 'No CID/PID/NICK/IP found in your INF.'. Per ADC 4.3.x
+    the I4 / I6 fields are conditionally required (only when the client
+    supports TCP4 / UDP4 / TCP6 / UDP6). Hublist pingers and any
+    IP-agnostic probe omit them legitimately. The hub fills in the
+    TCP-source IP, same canonical path as the 0.0.0.0 placeholder.
+
+    Test uses the registered `dummy` account so the success path is
+    `IGPA <salt>` (password challenge), which lets us distinguish the
+    fix from the bug:
+      - Pre-fix: ISTA 220 immediately after BINF
+      - Post-fix: IGPA, meaning BINF was accepted and identify-state
+        passed
+
+    BINF intentionally omits TCP4 / UDP4 in SU - the real pinger profile
+    advertises no TCP/UDP feature (see go-dcpp dcping in upstream
+    luadch/luadch#176: `SUKEYP,OSNR,UCM0,UCMD,BAS0,BASE,TIGR`). This is
+    the spec-defined case where I4/I6 are *not* required at all. A
+    future hardening that adds "if SU has TCP4 then require I4" must
+    not break this test (it wouldn't, since we don't claim TCP4).
+
+    IPv6 coverage note: the `userip:find(":", 1, true) and "I6" or "I4"`
+    fallback in core/hub_dispatch.lua only exercises the "I6" branch
+    when the socket is IPv6. This test connects to TEST_PORT_PLAIN
+    (IPv4 only) so the IPv6 branch is untested here - the logic is
+    trivial fallback (colon-presence in TCP-source IP string), proven
+    by inspection rather than test. Worth a dedicated IPv6 smoke run
+    if/when we expand IPv6 feature coverage.
+    """
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        reader, sid = _neg_handshake_get_sid(sock)
+        cid_b32, pid_b32 = _neg_random_pid_cid_pair()
+        # BINF with NO I4, NO I6, NO TCP4/UDP4 in SU - matches the real
+        # hublist-pinger profile. The bug fix lets the hub fill the IP
+        # slot with the TCP-source IP via setnp(ipver, userip).
+        binf = (
+            f"BINF {sid}"
+            f" ID{cid_b32}"
+            f" PD{pid_b32}"
+            f" NIdummy"
+            f" SUBAS0,BASE,TIGR\n"
+        )
+        sock.sendall(binf.encode("utf-8"))
+        # Read the first frame the hub emits after BINF. With the fix
+        # this is IGPA (the password challenge for a registered user).
+        # Without the fix it is ISTA 220 + IQUI.
+        try:
+            frame = reader.recv_until(
+                lambda f: f.startswith("IGPA ") or f.startswith("ISTA "),
+                timeout=PROTOCOL_TIMEOUT_SEC,
+            )
+        except TestFailure as e:
+            raise TestFailure(
+                f"hub did not respond to no-I4/no-I6 BINF within "
+                f"{PROTOCOL_TIMEOUT_SEC}s: {e}"
+            ) from e
+        if frame.startswith("ISTA 220 "):
+            raise TestFailure(
+                f"hub rejected BINF without I4/I6 with ISTA 220 "
+                f"(regression of #161): {frame!r}. Per ADC 4.3.x the "
+                f"I4/I6 fields are conditionally required, not absolutely "
+                f"required - the hub must fill in the TCP-source IP."
+            )
+        if not frame.startswith("IGPA "):
+            raise TestFailure(
+                f"unexpected response to no-I4/no-I6 BINF: {frame!r}. "
+                f"Expected IGPA (registered user password challenge)."
+            )
+
+
 def test_neg_repeated_binf_burst():
     """Send 30 BINFs back-to-back on a single connection before any HPAS.
     Goal: stress the parse() reentrancy fix (Phase 7d, #65) and any
@@ -1553,6 +1626,7 @@ TESTS = [
     ("plain ADC full login (dummy/test)", test_full_login_plain),
     ("TLS ADC full login (dummy/test)", test_full_login_tls),
     ("+cmd routing (post-login +help)", test_command_routing),
+    ("BINF without I4/I6 accepted (#161)", test_binf_without_i4_or_i6_accepted),
     ("CSPRNG salts are unique across connections", test_csprng_salt_uniqueness),
     ("per-IP connection cap refuses overflow", test_perip_connection_cap),
     # Phase 8a-2 negative-test fuzz suite (issue #121). Each test feeds
