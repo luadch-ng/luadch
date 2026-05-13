@@ -19,6 +19,12 @@
                   unsolicited-result edge case the onSearch filter
                   alone cannot reach
 
+        v2.0 / v2.1:
+            - (no header changelog entries; the script-version
+              counter was bumped twice without a matching block here.
+              Bug-history reconstruction would need `git log -p` on
+              this file in the upstream luadch/luadch repo)
+
         v1.9:
             - fix missing links to language file  / thx Sopor
 
