@@ -43,7 +43,7 @@ land on `release/3.1.x` per
 
 ### Refactors
 
-- [#166](https://github.com/luadch-ng/luadch/issues/166) - cosmetic refactor: unified `return nil` exit pattern in `etc_trafficmanager.lua` `onConnectToMe` / `onRevConnectToMe` / `onSearchResult` listeners. Three listeners had two `return nil` paths (inside-gate "allow" + outside-gate "exempt") that were functionally identical. Replaced with a single explicit `return nil` after the gate block. Behaviour unchanged; bytecode unchanged. `onSearch` is not part of this refactor because its control-flow shape is different (no masterlevel gate, returns `PROCESSED` after manual fan-out). Plugin bumped to v2.3. 3.2.x only, not backported.
+- [#166](https://github.com/luadch-ng/luadch/issues/166) - cosmetic refactor: unified `return nil` exit pattern in `etc_trafficmanager.lua` `onConnectToMe` / `onRevConnectToMe` / `onSearchResult` listeners. Three listeners had two `return nil` paths (inside-gate "allow" + outside-gate "exempt") that were functionally identical. Replaced with a single explicit `return nil` after the gate block. Behaviour unchanged. Bytecode is two instructions shorter per listener (a deduplicated `LOADNIL` / `RETURN1` pair), verified with `luac -l`. `onSearch` is not part of this refactor because its control-flow shape is different (no masterlevel gate, returns `PROCESSED` after manual fan-out). Plugin bumped to v2.3. 3.2.x only, not backported.
 
 
 ## [v3.1.8] - 2026-05-12

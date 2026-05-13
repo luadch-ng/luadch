@@ -18,11 +18,13 @@
               Three listeners had two `return nil` paths (inside-gate
               "allow" + outside-gate "exempt") that were functionally
               identical. Now a single explicit `return nil` after the
-              gate block. Behaviour unchanged; bytecode size unchanged
-              by inspection. Closes luadch-ng/luadch#166. onSearch is
-              not part of this refactor because its control-flow
-              shape is different (no masterlevel gate, returns
-              PROCESSED after fan-out).
+              gate block. Behaviour unchanged. Bytecode is two
+              instructions shorter per listener (the deduplicated
+              LOADNIL / RETURN1 pair); verified with `luac -l`.
+              Closes luadch-ng/luadch#166. onSearch is not part of
+              this refactor because its control-flow shape is
+              different (no masterlevel gate, returns PROCESSED
+              after fan-out).
 
         v2.2:
             - defense-in-depth: onSearchResult listener swallows
