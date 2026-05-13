@@ -23,11 +23,12 @@ T2 BLOM, T3 HBRI, T3 ZLIF). Security-fixes-only for the v3.1.x line
 land on `release/3.1.x` per
 [`CLAUDE.md` §8](CLAUDE.md#8-release-lines-and-support-policy).
 
-> **Note:** All entries below were also cherry-picked to
-> `release/3.1.x` and shipped as
+> **Note:** All entries in the **Bugfixes** and **Features** sections
+> below were also cherry-picked to `release/3.1.x` and shipped as
 > **[v3.1.9](https://github.com/luadch-ng/luadch/releases/tag/v3.1.9)**
 > (2026-05-13). They stay listed here because they are part of the
 > 3.2.x line as well - merged on master first per the §8 workflow.
+> Entries in **Refactors** are 3.2.x-only and not part of v3.1.9.
 
 ### Bugfixes
 
@@ -39,6 +40,10 @@ land on `release/3.1.x` per
 ### Features
 
 - [#159](https://github.com/luadch-ng/luadch/issues/159) (Sopor) - pre-compiled `linux-aarch64` release artifact. The `release.yml` workflow gains a `build-linux-aarch64` job on GitHub's native `ubuntu-24.04-arm` runner (Cobalt 100, public-repo-free since 2025). Produces `luadch-vX.Y.Z-linux-aarch64.tar.gz` alongside the existing x86_64 / Windows artifacts on every tag push. Covers Raspberry Pi 3+ / 4 / 5 / Zero 2W with a 64-bit OS (>95% of the installed Pi base in 2026). Backported to `release/3.1.x` as v3.1.9 - the workflow lives in `.github/`, which is mirrored from master for every backport release, so the cherry-pick is purely the workflow file.
+
+### Refactors
+
+- [#166](https://github.com/luadch-ng/luadch/issues/166) - cosmetic refactor: unified `return nil` exit pattern in `etc_trafficmanager.lua` `onConnectToMe` / `onRevConnectToMe` / `onSearchResult` listeners. Three listeners had two `return nil` paths (inside-gate "allow" + outside-gate "exempt") that were functionally identical. Replaced with a single explicit `return nil` after the gate block. Behaviour unchanged. Bytecode is two instructions shorter per listener (a deduplicated `LOADNIL` / `RETURN1` pair), verified with `luac -l`. `onSearch` is not part of this refactor because its control-flow shape is different (no masterlevel gate, returns `PROCESSED` after manual fan-out). Plugin bumped to v2.3. 3.2.x only, not backported.
 
 
 ## [v3.1.8] - 2026-05-12

@@ -12,6 +12,20 @@
         [+!#]trafficmanager show blocks  -- shows all blockes users and her blockmodes
 
 
+        v2.3:
+            - cosmetic refactor: unify return-nil exit pattern in
+              onConnectToMe / onRevConnectToMe / onSearchResult.
+              Three listeners had two `return nil` paths (inside-gate
+              "allow" + outside-gate "exempt") that were functionally
+              identical. Now a single explicit `return nil` after the
+              gate block. Behaviour unchanged. Bytecode is two
+              instructions shorter per listener (the deduplicated
+              LOADNIL / RETURN1 pair); verified with `luac -l`.
+              Closes luadch-ng/luadch#166. onSearch is not part of
+              this refactor because its control-flow shape is
+              different (no masterlevel gate, returns PROCESSED
+              after fan-out).
+
         v2.2:
             - defense-in-depth: onSearchResult listener swallows
               RES / DRES / FRES from or to blocked users
@@ -140,7 +154,7 @@
 --------------
 
 local scriptname = "etc_trafficmanager"
-local scriptversion = "2.2"
+local scriptversion = "2.3"
 
 local cmd = "trafficmanager"
 local cmd_b = "block"
@@ -912,7 +926,6 @@ hub.setlistener( "onConnectToMe", {},
         if user:level() < masterlevel then
             if need_block( user ) then return PROCESSED end
             if need_block( target ) then return PROCESSED end
-            return nil
         end
         return nil
     end
@@ -924,7 +937,6 @@ hub.setlistener( "onRevConnectToMe", {},
         if user:level() < masterlevel then
             if need_block( user ) then return PROCESSED end
             if need_block( target ) then return PROCESSED end
-            return nil
         end
         return nil
     end
@@ -983,7 +995,6 @@ hub.setlistener( "onSearchResult", {},
         if user:level() < masterlevel then
             if need_block( user ) then return PROCESSED end
             if target and need_block( target ) then return PROCESSED end
-            return nil
         end
         return nil
     end
