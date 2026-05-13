@@ -1373,6 +1373,101 @@ def test_ratelimit_tier_msg_throttle(staging_dir: Path, proc=None):
             )
 
 
+def _switch_to_public_hub_mode(staging_dir: Path, current_proc, current_log_file):
+    """#162 setup: stop the hub, flip reg_only to false in cfg.tbl,
+    restart. Required so the next test exercises the
+    `(not _cfg_reg_only) and adccmd:hasparam "ADPING"` branch in
+    core/hub_dispatch.lua's HSUP handler - the branch that ADC pingers
+    (hublist scrapers) actually hit. Returns the new (proc, log_file)."""
+    stop_hub(current_proc, current_log_file)
+
+    cfg_path = staging_dir / "cfg" / "cfg.tbl"
+    text = cfg_path.read_text(encoding="utf-8")
+    text, n = re.subn(
+        r"^\s*reg_only\s*=\s*true\s*,",
+        "    reg_only = false,",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if n != 1:
+        raise TestFailure(
+            "could not flip reg_only to false in cfg.tbl - the setting "
+            "line was not found in the staging tree"
+        )
+    cfg_path.write_text(text, encoding="utf-8")
+
+    time.sleep(1.0)
+    proc, log_file = start_hub(staging_dir)
+    return proc, log_file
+
+
+def test_ping_hsup_branch_emits_pingsup_response(staging_dir: Path, proc=None):
+    """#162 regression: an ADC pinger sending HSUP with the ADPING flag
+    against a public (reg_only=false) hub must receive the PING-IINF
+    response from core/hub_dispatch.lua's _protocol.HSUP. Pre-fix the
+    HSUP handler hit `pairs( _normalstatesids )` with `pairs` not
+    imported into the module locals, raising the sandbox guard and
+    silently failing the incoming() function - the pinger saw zero
+    frames and timed out.
+
+    Three assertions:
+    1. ISUP from the hub advertises ADPING (proves the pinger branch
+       at hub_dispatch.lua:220 fired, not the regular non-PING branch).
+    2. IINF carries the T1.3 aggregate fields (SS, SF) that are only
+       computed inside the buggy pairs() loop.
+    3. The hub's error.log gained no `attempt to read undeclared var`
+       entries during this connection (would catch the regression even
+       if some future change made the pingsup string format-tolerate
+       a missing field).
+    """
+    wait_for_port(HUB_HOST, TEST_PORT_PLAIN, START_TIMEOUT_SEC)
+
+    error_log = staging_dir / "log" / "error.log"
+    before = error_log.read_text(encoding="utf-8", errors="replace") if error_log.exists() else ""
+
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sock.sendall(b"HSUP ADBASE ADTIGR ADPING\n")
+        reader = _ADCReader(sock)
+        try:
+            isup = reader.recv_until(lambda f: f.startswith("ISUP "))
+            reader.recv_until(lambda f: f.startswith("ISID "))
+            iinf = reader.recv_until(lambda f: f.startswith("IINF "))
+        except TestFailure as e:
+            raise TestFailure(
+                f"public hub did not respond to HSUP ADPING (regression "
+                f"of #162 'pairs undeclared'); error: {e}"
+            ) from e
+
+    if "ADPING" not in isup:
+        raise TestFailure(
+            f"ISUP did not advertise ADPING - the pinger branch in "
+            f"hub_dispatch.lua:220 did not fire. Got: {isup!r}"
+        )
+
+    # T1.3 (#147) added SS / SF aggregate fields to the PING-IINF. The
+    # SS field on a freshly-started empty hub will be SS0; the
+    # regular non-PING IINF does not carry SS at all. Presence of SS
+    # is the smoking-gun signal that the aggregator loop ran.
+    if " SS" not in iinf:
+        raise TestFailure(
+            f"PING-IINF did not include the SS aggregate from T1.3 - the "
+            f"aggregator loop at hub_dispatch.lua:233 did not run. "
+            f"Got: {iinf!r}"
+        )
+
+    after = error_log.read_text(encoding="utf-8", errors="replace") if error_log.exists() else ""
+    new_lines = after[len(before):]
+    if "attempt to read undeclared var" in new_lines:
+        raise TestFailure(
+            f"hub emitted a sandbox-undeclared-var error during the "
+            f"PING handshake (regression of #162). New error.log "
+            f"content: {new_lines!r}"
+        )
+
+
 def test_canonical_socket_layout(staging_dir: Path):
     """Closes #88: LuaSocket and LuaSec install in the canonical layout
     so plugins can `require "socket.http"` / `require "ssl.https"` per
@@ -1625,6 +1720,23 @@ def main():
             failed.append("ratelimit tier overlay throttles BMSG")
         else:
             log("PASS  ratelimit tier overlay throttles BMSG")
+
+        # #162 regression test: switch to a public (reg_only=false) hub
+        # and verify the ADC PING HSUP branch in hub_dispatch.lua emits
+        # ISUP+ADPING and the T1.3 PING-IINF without sandbox errors.
+        # Pre-fix, `pairs` was not imported into the dispatcher module
+        # so the aggregator loop crashed and pingers saw silent
+        # timeouts.
+        try:
+            proc, log_file = _switch_to_public_hub_mode(
+                staging_dir, proc, log_file
+            )
+            test_ping_hsup_branch_emits_pingsup_response(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  ADC PING HSUP emits pingsup response (#162): {e}")
+            failed.append("ADC PING HSUP emits pingsup response (#162)")
+        else:
+            log("PASS  ADC PING HSUP emits pingsup response (#162)")
     finally:
         if proc is not None:
             stop_hub(proc, log_file)

@@ -37,6 +37,7 @@
 
 local use = use
 
+local pairs = use "pairs"
 local tostring = use "tostring"
 local tablesize = use "tablesize"
 

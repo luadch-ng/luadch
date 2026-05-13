@@ -46,6 +46,7 @@ local type = use "type"
 local pairs = use "pairs"
 local ipairs = use "ipairs"
 local tostring = use "tostring"
+local tonumber = use "tonumber"
 local collectgarbage = use "collectgarbage"
 
 --// lua libs //--

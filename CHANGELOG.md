@@ -23,6 +23,11 @@ T2 BLOM, T3 HBRI, T3 ZLIF). Security-fixes-only for the v3.1.x line
 land on `release/3.1.x` per
 [`CLAUDE.md` §8](CLAUDE.md#8-release-lines-and-support-policy).
 
+### Bugfixes
+
+- [#162](https://github.com/luadch-ng/luadch/issues/162) - ADC PING HSUP handler errored out (sandbox-undeclared `pairs`) on public (`reg_only = false`) hubs, returning zero frames to the pinger. Hublist scrapers timed out and dropped the hub from listings. Regression introduced by T1.3 of [#147](https://github.com/luadch-ng/luadch/issues/147) in v3.1.8. Backport target: `release/3.1.x` as v3.1.9 (self-introduced functional regression breaking the public-hub deployment mode - judgement call outside CLAUDE.md §8 table's listed categories).
+- Latent crash in `core/server.lua` `changesettings()`: `tonumber()` was called seven times without `local tonumber = use "tonumber"` import. Function is currently dead code (no caller in hub or plugins) so no production impact; surfaced by the #162 sandbox-locals audit. Fix is a one-line `use` declaration alongside the existing locals.
+
 
 ## [v3.1.8] - 2026-05-12
 
