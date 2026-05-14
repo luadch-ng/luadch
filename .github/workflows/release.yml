@@ -113,11 +113,17 @@ jobs:
       OPENSSL_PREFIX: /opt/openssl3
     steps:
       - name: Install build dependencies
+        # Bullseye's stock cmake is 3.18 but luadch needs >= 3.20.
+        # Enable bullseye-backports which ships a modern cmake (>= 3.25).
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake perl wget ca-certificates \
+            build-essential perl wget ca-certificates \
             patchelf file git
+          echo "deb http://deb.debian.org/debian bullseye-backports main" \
+            > /etc/apt/sources.list.d/backports.list
+          apt-get update
+          apt-get install -y --no-install-recommends -t bullseye-backports cmake
 
       - uses: actions/checkout@v4
 
