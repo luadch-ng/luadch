@@ -677,10 +677,10 @@ login = function( user, bot )
             return "NO"
         end
         local TLS = "[TLS: " .. get_tls_mode() .. "]"
-        local msg = utf_format( _i18n_login_message, 
-            util.decode( '8129587ede4c' ), 
-            VERSION, 
-            TLS, 
+        local msg = utf_format( _i18n_login_message,
+            NAME,
+            VERSION,
+            TLS,
             util_formatseconds( os_difftime( os_time( ), signal_get "start" ), true )
         )
         user:reply( msg, _hubbot )
