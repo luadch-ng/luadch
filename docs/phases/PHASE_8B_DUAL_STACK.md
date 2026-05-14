@@ -14,10 +14,6 @@
 
 ## Items deferred from the original sweep
 
-**T2.1 HUBI (Hub Identification)** - originally planned as the warm-up PR for this phase. Investigation on 2026-05-14 found that **HUBI is not in the ADC-EXT 1.0.9 spec** (33 documented extensions, no HUBI) and **not in the ADCH++ source** (verified via `gh search code "HUBI" --repo adricu/adchpp`). The plan-doc's earlier citation of "ADC-EXT 3.10" and "ADCH++ ships HUBI behind a build flag" turned out to be speculation; neither claim survives verification. Implementing HUBI would mean inventing wire format with zero client uptake.
-
-The persistent-hub-identifier use case (clients verifying "same hub as before" beyond KEYP keyprint pinning) is still legitimate, but it needs either (a) a standardisation effort with the ADC working group, or (b) a luadch-specific extension with clear "non-standard" documentation. Either way the work no longer fits "low-risk warm-up PR". **Deferred to a separate phase or quietly dropped** depending on operator demand.
-
 **T2.2 BLOM (Bloom Filter SCH)** - still demand-driven, only worth it for hubs with 100+ users. Out of scope.
 
 **T3.2 ZLIF (full-stream zlib)** - architectural, depends on a Phase 8 IO refactor for HTTP API (#82) / Prometheus (#83). Stays in Phase 8 backlog.
