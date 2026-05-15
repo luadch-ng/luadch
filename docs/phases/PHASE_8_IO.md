@@ -333,6 +333,47 @@ binds the HTTP listener (pipeline = `[httpstage]`, dispatch ->
   §1a.6 + §1.1): the new network listener is the highest-risk
   surface added since the modernisation.
 
+
+### Finding 2026-05-15 (S3 security review, BLOCKER B1 + C1-C5)
+
+The mandatory security-focused two-pass review (independent agent +
+maintainer spot-check vs source) found, and S3 fixed in-branch:
+
+- **B1 (BLOCKER) - HTTP listener bound 0.0.0.0, not 127.0.0.1.**
+  `server.addserver` binds `p.addr` (default `"*"`); it never reads
+  `p.ip`. hub.lua passed `ip = "127.0.0.1"` -> silently ignored ->
+  the unauthenticated, no-TLS HTTP socket was exposed on ALL
+  interfaces, nullifying the entire loopback-only security premise.
+  Fix: pass `addr = "127.0.0.1"` (the param addserver actually
+  reads). Smoke now asserts the listener is unreachable on a
+  non-loopback address. The pre-existing ADC-side `hub_listen`
+  ignored / `addserver` dead range-clause are tracked separately as
+  #186 (CLAUDE.md §7, no drive-by).
+- **C1 - zero-byte connection slowloris.** `_activitytimes[handler]`
+  was armed only on first read with bytes, so a connect-and-send-
+  nothing was never idle-swept. Fixed: armed at accept in
+  wrapconnection (bounds every connection by the standard
+  `_max_idle_time`, all listener types).
+- **C2 - http_port validator had no range/integer check** (0 / floats
+  slipped through). Now: false, or integer 1..65535.
+- **C3 - http_port colliding with an ADC port** silently failed to
+  bind. Now: explicit `out_error` and the HTTP API is not started
+  (fail loud).
+- **C4 - header name whitespace bypass.** `Content-Length : 0`
+  matched the old name pattern, dodging the CL/TE smuggling
+  classifier. Pattern tightened to reject any whitespace in the
+  header name (-> 400). Unit-tested.
+- **C5 - the loopback property was untested** (smoke connected to
+  127.0.0.1, which a 0.0.0.0 bind also accepts, so it was green with
+  B1 live). Added the non-loopback-unreachable smoke assertion.
+
+Everything else in the hardening contract held: the reviewer could
+not smuggle, DoS the framer, leak info, or escape the sandbox; the
+type-guard does not weaken S1/S2; HTTP never enters hub user
+machinery. This is exactly the §1a.5 "verify every assumption
+against current source" miss the security two-pass gate exists to
+catch.
+
 ## Log
 
 - 2026-05-15: phase opened, integration branch `phase8-io` created, design
@@ -384,3 +425,8 @@ binds the HTTP listener (pipeline = `[httpstage]`, dispatch ->
   units carry their own in-stage hardening). Full smoke green on
   Windows; iostream_test 35/35. Next: security-focused two-pass review
   -> sub-PR into phase8-io.
+- 2026-05-15: S3 security two-pass review found BLOCKER B1 (HTTP
+  listener bound 0.0.0.0 not 127.0.0.1 - addserver reads p.addr,
+  not p.ip) + C1-C5; all fixed in-branch (see finding above). N4
+  pre-existing hub_listen/addserver bugs tracked as #186. Re-run
+  security review on the fixes before sub-PR.

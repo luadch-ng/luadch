@@ -1904,6 +1904,37 @@ def test_http_health_roundtrip(staging_dir: Path, proc=None):
                 f"HTTP {label}: expected {want}, got {status(r)!r}"
             )
 
+    # SECURITY: the HTTP listener MUST be loopback-only (no TLS / no
+    # auth is only acceptable because it is 127.0.0.1-bound). Prove it
+    # is NOT reachable on this host's non-loopback address. Skipped
+    # only if the environment has no usable non-loopback IPv4 (some
+    # locked-down CI net namespaces) - never failed spuriously.
+    nonloop = None
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("8.8.8.8", 80))  # no packets sent; just resolves the local addr
+            cand = probe.getsockname()[0]
+        finally:
+            probe.close()
+        if cand and not cand.startswith("127.") and cand != "0.0.0.0":
+            nonloop = cand
+    except OSError:
+        nonloop = None
+    if nonloop:
+        try:
+            c = socket.create_connection((nonloop, TEST_PORT_HTTP), timeout=2)
+            c.close()
+            raise TestFailure(
+                f"SECURITY: HTTP listener reachable on non-loopback "
+                f"{nonloop}:{TEST_PORT_HTTP} - it must bind 127.0.0.1 "
+                f"only (regression of B1: addr vs ip)."
+            )
+        except (ConnectionRefusedError, socket.timeout, OSError):
+            pass  # expected: refused/unreachable off-loopback
+    else:
+        log("  (skip non-loopback bind check: no non-loopback IPv4)")
+
     # ADC path still works alongside the HTTP listener
     with socket.create_connection(
         (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC

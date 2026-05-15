@@ -221,7 +221,16 @@ local defaults = {
     -- #82 follow-up PR.
     http_port = { false,
         function( value )
-            return value == false or types_number( value, nil, true )
+            if value == false then
+                return true
+            end
+            -- integer in the valid TCP port range only: types_number
+            -- has no range/integer check, so 0 (OS-assigned ephemeral
+            -- on all interfaces) and floats would otherwise slip
+            -- through.
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 1 and value <= 65535
         end
     },
     hub_website = { "http://yourwebsite.org",

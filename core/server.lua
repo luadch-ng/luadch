@@ -852,6 +852,15 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
     _readlist[ _readlistlen ] = socket
     _readlist[ socket ] = _readlistlen
 
+    -- Arm the idle sweep at accept. Previously _activitytimes[handler]
+    -- was set only on the first read with bytes (_readbuffer, got>0),
+    -- so a connection that completes TCP accept and then sends NOTHING
+    -- was never swept (held until the client closes - a slowloris /
+    -- fd-exhaustion vector, especially on the no-handshake HTTP
+    -- listener). Initialising here bounds every connection by the
+    -- standard _max_idle_time regardless of listener type.
+    _activitytimes[ handler ] = _currenttime
+
     return handler, socket
 end
 

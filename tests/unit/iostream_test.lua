@@ -176,6 +176,8 @@ eq( "http: non-numeric Content-Length -> 400",
     du( httpreq( "GET /health HTTP/1.1" .. CRLF .. "Content-Length: ab" .. CRLF .. CRLF ) ), "reject=400" )
 eq( "http: obs-fold continuation rejected -> 400",
     du( httpreq( "GET /health HTTP/1.1" .. CRLF .. "X: a" .. CRLF .. " cont" .. CRLF .. CRLF ) ), "reject=400" )
+eq( "http: whitespace in header name rejected -> 400 (CL/TE classifier bypass)",
+    du( httpreq( "GET /health HTTP/1.1" .. CRLF .. "Content-Length : 0" .. CRLF .. CRLF ) ), "reject=400" )
 eq( "http: oversize request-line -> 414",
     du( httpreq( "GET /" .. string.rep( "a", 9000 ) .. " HTTP/1.1" .. CRLF .. CRLF ) ), "reject=414" )
 

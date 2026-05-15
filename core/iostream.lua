@@ -286,7 +286,13 @@ newhttpstage = function( )
                     if string_len( line ) > MAXHDRLINE then
                         return emit{ reject = 431 }
                     end
-                    local name, value = string_match( line, "^([^:%c]+):[ \t]*(.-)[ \t]*$" )
+                    -- name = token with NO whitespace and no control
+                    -- (RFC 7230 forbids OWS before the colon; allowing
+                    -- it - e.g. "Content-Length : 5" - would let a
+                    -- spaced name dodge the CL/TE smuggling classifier
+                    -- below, which compares the lowercased name to the
+                    -- exact strings).
+                    local name, value = string_match( line, "^([^:%c ]+):[ \t]*(.-)[ \t]*$" )
                     if not name then
                         return emit{ reject = 400 }
                     end

@@ -1504,9 +1504,29 @@ init = function( )
     -- HTTP framer pipeline (http.listeners().pipeline), never the ADC
     -- one, and no hub user object is created for it. No TLS here:
     -- #82 assumes a reverse proxy for any non-loopback exposure.
+    --
+    -- server.addserver binds p.addr (NOT p.ip - p.ip is dead; the ADC
+    -- listeners' `ip = ip` has always been silently ignored, tracked
+    -- as a separate pre-existing bug). Loopback-only is the entire
+    -- security premise for shipping this without TLS/auth, so it MUST
+    -- be `addr`. A non-loopback bind here is a network-exposed
+    -- unauthenticated socket.
     local http_port = cfg_get "http_port"
     if type( http_port ) == "number" then
-        add_server_handler{ listeners = http.listeners( ), port = http_port, ip = "127.0.0.1" }
+        -- Refuse to share a port with an ADC listener: addserver would
+        -- reject the second registration and the API would silently
+        -- never come up. Fail loud instead.
+        local clash = false
+        for _, list in ipairs( { "tcp_ports", "ssl_ports", "tcp_ports_ipv6", "ssl_ports_ipv6" } ) do
+            for _, p in pairs( cfg_get( list ) ) do
+                if p == http_port then clash = true end
+            end
+        end
+        if clash then
+            out_error( "hub.lua: http_port ", http_port, " collides with an ADC port; HTTP API not started" )
+        else
+            add_server_handler{ listeners = http.listeners( ), port = http_port, addr = "127.0.0.1" }
+        end
     end
     server.addtimer(
         function( )
