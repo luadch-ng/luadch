@@ -1323,7 +1323,16 @@ disconnect = function( client, err, user, quitstring )
         if user:isregged() then _regusercids[userhash][usercid] = nil end
 
         if userstate == "normal" then
-	    _user_count = _user_count - 1
+            -- _user_count is humans-only: it is incremented only in
+            -- login()'s non-bot branch. Bots reach this block via
+            -- bot.kill() -> disconnect() (state() hard-returns
+            -- "normal"), notably during killscripts() on every
+            -- +reload. Without this symmetry guard each reload
+            -- underflows _user_count by the bot count - a skew #179
+            -- now also surfaces in the external hublist UC field.
+            if not user:isbot( ) then
+                _user_count = _user_count - 1
+            end
             if user:isregged( ) then
                 local profile = user:profile( )
                 profile.lastlogout = util_date( )
