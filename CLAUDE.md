@@ -13,26 +13,54 @@ commits, PRs, issues) stay in **English** so other contributors can read them.
 
 These rules are set by the maintainer and apply to every change.
 
+### 1a. Per-change discipline (every PR, no size exemption)
+
 1. **Security and consistency come first.** Treat any change touching network I/O,
    authentication, ADC protocol parsing, or configuration as security-sensitive. When
    fixing a pattern in one place, grep for the same pattern across the repo and fix it
-   everywhere — divergent code paths are a defect.
+   everywhere - divergent code paths are a defect.
 2. **No spaghetti code.** Prefer small, focused functions and modules. Don't grow
    `core/cfg.lua` or `core/hub.lua` further; if new logic doesn't have an obvious home,
    propose a new module before writing the code.
-3. **One phase at a time.** Work proceeds strictly phase by phase (see §5 Roadmap). Do
-   not pull tickets forward from a later phase, even if they look trivial.
-4. **Review gate between phases.** After every phase, run an explicit review covering:
-   - **Security** — input validation, auth boundaries, network surface, file I/O.
-   - **Consistency** — did similar code paths drift apart? Did naming get inconsistent?
-   - **Code quality** — readability, dead code, duplication, function length.
-   - **Build & smoke test** — both Linux and Windows builds succeed, hub starts, a
-     test client (`adc://127.0.0.1:5000`) can connect.
-5. **Fix-then-advance.** Anything found in the review must be fixed before the next
-   phase begins. No "we'll get back to it." If something is genuinely out of scope,
-   open a tracking issue and link it from the phase summary.
-6. **Small reviewable PRs.** One logical change per PR. Reference the GitHub issue it
-   closes. Never bundle modernization work with unrelated fixes.
+3. **Deep-dive before implementation.** Analyse the issue/idea from the source
+   outward before writing code, even when it costs more tokens. A clean
+   implementation pays the tokens back twice over (#179: the deep-dive replaced a
+   proposed 50-LoC redesign with a 1-line fix).
+4. **An issue/plan is a hypothesis, not ground truth.** Always re-derive the root
+   cause from spec + current source before implementing. If the issue/plan is wrong,
+   correct the issue/plan - do not implement the wrong thing. (HUBI, CTM/RCM, the
+   #179 split-table proposal: same trap three times.)
+5. **Verify every assumption** against the current code/spec before building on it.
+   Recalled memory and old docs are point-in-time; confirm before relying.
+6. **Mandatory two-pass pre-merge review.** Before any merge - regardless of how
+   small the diff - run: (a) an independent reviewer (subagent / fresh perspective)
+   and (b) a maintainer-side spot-check. The review covers **security**, **new
+   bugs**, **breaking existing behaviour**, **consistency / anti-spaghetti**. No
+   "it's just a one-liner" exemption: the #179 one-line fix's review is exactly what
+   caught a latent counter underflow.
+7. **Regression tests must provably fail pre-fix.** A test green on both old and new
+   code proves nothing. For every fix, demonstrate the new test FAILS on the
+   unpatched code and PASSES patched (PR #177 lesson; applied per-tier in #179).
+8. **Small reviewable PRs.** One logical change per PR. Reference the GitHub issue it
+   closes. Never bundle unrelated fixes.
+9. **No wall of text.** Chat answers, issues, PR bodies, release notes: minimal,
+   technical, complete - result first. Internal artifacts (commit messages, code
+   comments, repo docs, phase journals) stay as detailed as needed.
+
+### 1b. Phase & milestone discipline
+
+10. **One phase at a time.** Work proceeds strictly phase by phase (see §5 Roadmap).
+    Do not pull tickets forward from a later phase, even if they look trivial.
+11. **Review gate between phases, and before any release/milestone.** Run an
+    explicit, PR-grade review (same depth as 1a.6) covering:
+    - **Security** - input validation, auth boundaries, network surface, file I/O.
+    - **Consistency** - did similar code paths drift apart? Did naming get inconsistent?
+    - **Code quality** - readability, dead code, duplication, function length.
+    - **Build & smoke test** - both Linux and Windows builds succeed, hub starts, a
+      test client (`adc://127.0.0.1:5000`) can connect.
+12. **Fix-then-advance.** Anything found in the review must be fixed before the next
+    phase begins or the release is cut. No "we'll get back to it." If something is
+    genuinely out of scope, open a tracking issue and link it from the phase summary.
 
 When uncertain whether a change fits the current phase, **stop and ask the maintainer**.
 
@@ -44,12 +72,15 @@ luadch is a DC++ **ADC** hub server written in Lua with a thin C launcher
 (`hub/hub.c`, 209 lines) that embeds the Lua interpreter and hands off to
 `core/init.lua`.
 
-- **Current source version:** `v2.24 [RC4]` (see `core/const.lua`)
-- **Latest release:** `v2.23` (2022-04-02) — the source is ahead of the last release
-- **Open issues:** 47 (as of 2026-05-02)
+- **Current source version:** `v3.2.0-dev` on `master`, `PROGRAM_NAME = "Luadch-NG"`
+  (see `core/const.lua`). The 3.1.x maintenance line keeps `PROGRAM_NAME = "Luadch"`.
+- **Latest release:** `v3.1.9` (2026-05-13, on `release/3.1.x`)
+- **Status:** the Phase 1-7 modernisation programme is content-complete; work is now
+  3.2.x feature development (Phase 8+) plus 3.1.x security-only maintenance (see §8).
+- **Open issues:** ~12 (as of 2026-05-15) - check `gh issue list` for the live count.
 - **License:** GPLv3.0
 
-The repo bundles all runtime dependencies as source — there is no external package
+The repo bundles all runtime dependencies as source - there is no external package
 manager. This is intentional (the project ships as a self-contained build) but means
 dependency updates are manual.
 
@@ -345,6 +376,21 @@ open a fresh issue here that references the upstream one in its body.
 - **Comments:** explain *why*, not *what*. Don't add a comment that just restates code.
 - **No drive-by refactors.** If you spot something during an unrelated change, open
   an issue instead of fixing it inline.
+- **No em-dashes anywhere.** Use `-` in all written output: chat, commits, PRs,
+  issues, docs. (Pre-existing em-dashes in this file are legacy; don't mass-reformat,
+  but new/edited lines use `-`.)
+
+### Tooling gotchas (these have already burned us)
+
+- **Always pin `gh` to the repo:** `gh ... --repo luadch-ng/luadch`. The checkout has
+  an upstream remote; bare `gh` defaults to the parent-of-fork and acts on the wrong
+  repository.
+- **Multi-tier tracker issues: never `Closes #N`.** GitHub auto-closes the whole
+  tracker on squash-merge even if only one subtask landed (killed the #147 tracker
+  once). Use `Part of #N` / `Closes Tier-X (subtask of #N)`. Single-issue bugs may
+  use `Closes #N` normally.
+- **Backport security fixes master-first**, then cherry-pick to `release/3.1.x` (see
+  §8). Never open a fix PR directly against the maintenance branch.
 
 ---
 
