@@ -107,6 +107,7 @@ local ratelimit_handshake_started = ratelimit.handshake_started
 local ratelimit_handshake_finished = ratelimit.handshake_finished
 local ratelimit_expired_handshakes = ratelimit.expired_handshakes
 local iostream_newpipeline = iostream.newpipeline
+local iostream_newoutpipeline = iostream.newoutpipeline
 local ratelimit_tick = ratelimit.tick
 
 --// functions //--
@@ -439,16 +440,26 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
     local bufferqueue = { }    -- buffer array
     local bufferqueuelen = 0    -- end of buffer array
 
-    -- Phase 8 S1/S2: inbound framing pipeline. Replaces LuaSocket's
-    -- internal "*l" line buffer; reassembles raw reads into frames
-    -- across select() iterations. One per connection. The default
-    -- pipeline is a single ADC-line stage, so :feed() is byte-for-byte
-    -- identical to the S1 framer. S3: a listener may supply its own
-    -- pipeline factory (e.g. the hardened HTTP framer for the #82 API
-    -- listener) via listeners.pipeline; ADC listeners set none and get
-    -- the default. Same :feed( bytes ) -> units, overflow contract
-    -- either way, so this is the only server.lua seam.
+    -- Phase 8 S1/S2/S3/S4a: inbound + outbound transform pipelines.
+    -- Replace LuaSocket's internal "*l" line buffer (inbound) and add
+    -- a per-connection write-time transform seam (outbound). One pair
+    -- per connection.
+    --
+    -- Inbound default = a single ADC-line stage; ADC listeners get
+    -- that. HTTP listener supplies its own factory via
+    -- listeners.pipeline (the hardened HTTP framer for #82). S4a
+    -- changed the contract to lazy / iterator-style: server.lua does
+    -- feed() + while next() loop instead of "give me all frames",
+    -- because S4b will prepend an inflate stage mid-chunk on ZON and
+    -- the loop MUST stop feeding the framer after the ZON frame so
+    -- the post-ZON compressed suffix is not mis-parsed as ADC frames.
+    --
+    -- Outbound default = a single passthrough = identity transform,
+    -- byte-for-byte equivalent to pre-S4a write behaviour. A listener
+    -- may supply listeners.pipeline_out for a custom factory; S4b
+    -- prepends a deflate_stream stage on outbound ZON.
     local inframer = ( listeners.pipeline or iostream_newpipeline )( _maxreadlen )
+    local outframer = ( listeners.pipeline_out or iostream_newoutpipeline )( )
 
     local toclose
     local fatalerror
@@ -542,7 +553,20 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
         return serverport
     end
     local write = function( data )
-        bufferlen = bufferlen + string_len( data )
+        -- Phase 8 S4a: outbound transform pipeline runs at write
+        -- time, not at send time. Once a stage has produced output
+        -- bytes (e.g. zlib's deflate(Z_SYNC_FLUSH) for S4b) those
+        -- bytes are committed - the partial-send retry path operates
+        -- on the already-transformed wire bytes, which is the only
+        -- way to keep stateful transforms (deflate) correct under
+        -- partial sends. Default = passthrough = identity, so this is
+        -- byte-for-byte equivalent to the legacy path.
+        local wire = outframer:write( data )
+        local n = string_len( wire )
+        if n == 0 then
+            return true
+        end
+        bufferlen = bufferlen + n
         if bufferlen > maxsendlen then
             handler.close( "send buffer exceeded" )
             return false
@@ -552,7 +576,7 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
             _sendlist[ socket ] = _sendlistlen
         end
         bufferqueuelen = bufferqueuelen + 1
-        bufferqueue[ bufferqueuelen ] = data
+        bufferqueue[ bufferqueuelen ] = wire
         _writetimes[ handler ] = _writetimes[ handler ] or _currenttime
         return true
     end
@@ -622,9 +646,22 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
 
             out_put( "server.lua: function 'wrapconnection': read data '", data, "', error: ", err )
 
-            local frames, overflow = inframer:feed( data )
-            for i = 1, #frames do
-                local frame = frames[ i ]
+            -- Phase 8 S4a: feed + lazy iterator. We pull frames one
+            -- at a time so the ZON dispatcher (S4b) can call
+            -- inframer:prepend( inflate_stage ) BEFORE the loop asks
+            -- for the next frame. If we pulled all frames up front,
+            -- the ADC-line stage would have already mis-parsed the
+            -- post-ZON compressed suffix as plain ADC frames.
+            inframer:feed( data )
+            while true do
+                local frame, overflow = inframer:next( )
+                if overflow then
+                    handler.close( "receive buffer exceeded" )
+                    return false
+                end
+                if frame == nil then
+                    break
+                end
                 -- The per-unit oversize cap is an ADC-line transport
                 -- concern: that stage emits string frames. Non-string
                 -- units (e.g. the HTTP framer's parsed-request /
@@ -648,10 +685,6 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
                 if handler.readbuffer == return_false then
                     return true
                 end
-            end
-            if overflow then    -- unterminated remainder exceeded the cap
-                handler.close( "receive buffer exceeded" )
-                return false
             end
         elseif benign then
             -- No bytes and no terminal error: keep the read wiring sane

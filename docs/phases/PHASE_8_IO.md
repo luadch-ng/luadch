@@ -374,6 +374,150 @@ machinery. This is exactly the §1a.5 "verify every assumption
 against current source" miss the security two-pass gate exists to
 catch.
 
+## S4 spec (locked 2026-05-20, maintainer-approved)
+
+ZLIF = ADC-EXT zlib stream compression per connection. Hub <-> client
+agree on `ZLIF` in SUP, then either side can flip its outbound stream
+to a zlib stream with `ZON` (peer decompresses inbound after this
+line) and back with `ZOF` (in the compressed stream). `Z_SYNC_FLUSH`
+after each chunk. Spec is silent on error handling, TLS interaction,
+decompression-bomb caps -> all hardened by us.
+
+### S4 splits into two sub-PRs
+
+S4 is the biggest single step (pipeline contract change + outbound
+seam + new C dep + Lua binding + dispatch + cfg + smoke). Per CLAUDE.md
+§1a.8 (small reviewable PRs), it splits cleanly along the
+behaviour-neutral / additive boundary already used in S1->S2->S3:
+
+- **S4a - iterator pipeline + outbound passthrough seam
+  (behaviour-neutral).** Refactors the pipeline contract to lazy /
+  one-frame-at-a-time, adds an outbound pipeline seam to server.lua
+  (default = passthrough = byte-identical send path). No new
+  dependency, no protocol change. The clean review base for S4b.
+- **S4b - ZLIF feature.** zlib_stream C module + inflate/deflate
+  stages + ZON/ZOF dispatch + cfg gates + smoke. Built on the S4a
+  seams; this PR ONLY adds the compression layer, never restructures
+  IO. Maintains the S3 split-by-risk-surface pattern.
+
+### Locked design decisions (Q1-Q3, maintainer-approved)
+
+- **Q1 - zlib binding: own minimal C module.** New
+  `zlib_stream/zlib_stream.c` (`require "zlib_stream"`), exposes only
+  `deflate_stream` and `inflate_stream` objects with `:push(bytes) ->
+  bytes` (Z_SYNC_FLUSH). Mirrors the project pattern of `adclib` /
+  `slnunicode` shim - minimum surface, hub-specific. Build:
+  `find_package(ZLIB REQUIRED)` (system zlib on Linux + MinGW, CI
+  installs `zlib1g-dev`). Vendored `lua-zlib` rejected: 4x larger,
+  features we don't need, extra supply-chain surface.
+- **Q2 - default policy: opt-in.** New cfg key `zlif_enabled` (default
+  `false`). Hub advertises `ADZLIF` only when enabled. Matches the
+  S3 default-off pattern (`http_port = false`) - new IO surface is
+  opt-in by operator, not bundled into the default behaviour set.
+- **Q3 - TLS + ZLIF: default-off on TLS connections.** Independent
+  cfg flag `zlif_over_tls` (default `false`). CRIME-class chosen-
+  plaintext-length leak is theoretically possible on the hub's TLS
+  outbound (attacker PMs victim, hub forwards mixed with victim's
+  other traffic, observer infers length deltas). Mitigation:
+  opt-in only, document in SECURITY.md. Plain ADC connections see
+  ZLIF when `zlif_enabled = true` and the client advertises `ADZLIF`.
+
+### Pipeline contract change (S4a, load-bearing correctness)
+
+The pipeline's `:feed(bytes) -> frames, overflow` contract returns
+ALL frames in one shot. With S4b's mid-stream `ZON` arrival, an input
+chunk can carry `"ZON\nXXX..."` where `XXX` is compressed - the
+ADC-line stage cannot know `ZON` is the last plain frame and will
+happily parse compressed bytes as ADC frames before the dispatcher
+gets a chance to splice in the inflate stage. Result: dispatched
+garbage frames. This is the load-bearing correctness issue.
+
+Fix (S4a, behaviour-neutral): pipeline switches to **lazy / iterator**
+contract:
+
+    pipeline:feed( bytes )         -- inputs bytes, no return
+    pipeline:next( ) -> frame, overflow    -- pulls ONE frame; nil = drained
+    pipeline:drain( ) -> frames, overflow  -- convenience: loop next() to nil
+
+Internal model: top-down lazy pull. `_pull(i)` asks stage `i` for a
+unit; if stage `i` has none, ask stage `i-1` and feed its output to
+stage `i`. The stage contract is tightened: `stage:push(chunk) ->
+unit, overflow` returns AT MOST ONE unit (with `chunk = ""` meaning
+"drain pending state"). Stages also expose `:residual() -> bytes` so
+the pipeline can extract the front stage's unprocessed suffix on
+reshape.
+
+Reshape semantic:
+
+    pipeline:prepend( newstage )
+        residual = stages[1]:residual()         -- empty, or unprocessed suffix
+        stages = { newstage } ++ stages
+        input_buffer = residual ++ input_buffer  -- new front sees residual first
+
+So when the ZON dispatch handler (S4b) calls
+`pipeline:prepend(inflate_stage)` immediately after dispatching the
+ZON frame, the compressed bytes the ADC-line stage had buffered post-
+ZON get re-fed through the new inflate stage. By construction, the
+dispatcher's outer loop has not yet asked for the next frame, so no
+garbage was emitted. Verified by the new "ZON-mid-chunk" unit test
+(`tests/unit/iostream_test.lua`).
+
+Outbound seam (S4a): mirrors the inbound seam. `server.lua` gains a
+per-connection `outframer` constructed from `listeners.pipeline_out`
+(default = passthrough = current behaviour, byte-identical). Stage
+contract for outbound: `stage:write(bytes) -> bytes`. Pipeline:
+`outpipeline:write(bytes) -> bytes`, `outpipeline:prepend(stage)`.
+`handler.write(data)` becomes `bufferqueue ++= outframer:write(data)`.
+S4b adds a `deflate_stream` stage prepended on `IZON`-out.
+
+### S4a acceptance
+
+1. `tests/unit/iostream_test.lua` extends to cover the iterator API
+   (next/drain), ZON-mid-chunk reshape (a "ZON" line in a chunk with
+   compressed-looking suffix bytes is dispatched alone; subsequent
+   bytes are re-fed through a prepended stage and not mis-framed),
+   outbound pipeline composition (passthrough x passthrough is
+   byte-identical to the input).
+2. Full smoke green unchanged (no protocol behaviour change).
+3. S1/S2 behaviour-equivalence checks: `pipeline:drain(bytes)` on
+   the default pipeline returns the exact same `(frames, overflow)`
+   tuple S1/S2's feed did, for every existing test case.
+
+### S4b acceptance
+
+- Unit tests: deflate-stream / inflate-stream basic roundtrip
+  (Z_SYNC_FLUSH partial flush correctness); ZON activates inflate
+  mid-chunk in the pipeline; ZOF removes inflate stage; size-cap on
+  inflate output (decompression-bomb guard, hard byte cap per push
+  + ADC `_maxreadlen` enforced post-inflate as today); malformed
+  compressed input -> handler.close (no silent garbage frames).
+- Smoke: a "ZLIF roundtrip" test on a plain-ADC test client that
+  speaks ZON, login completes, +help routes correctly, ZOF reverts
+  cleanly. Default `zlif_enabled = false` path: existing smoke
+  unchanged (the ZLIF SUP token MUST NOT appear in the default
+  `_normalsup` advertise string, lest non-ZLIF clients try and we
+  fail).
+- Hardening: inflate output cap per `:push` call = 4 MiB (well above
+  any realistic ADC frame burst, well below memory-pressure); ratio
+  guard not needed (the byte cap already bounds decompression). Cfg
+  validator on `zlif_enabled` / `zlif_over_tls` = boolean only.
+- Two-pass review focus: decompression-bomb path, TLS interaction
+  (assert plain default; cfg gate works), correct reshape on edge
+  cases (ZON immediately followed by ZOF; multiple ZON/ZOF cycles;
+  client-initiated ZON before hub-initiated; only-one-side-ZON).
+
+### Build / CI (S4b)
+
+- Top-level `CMakeLists.txt`: `find_package(ZLIB REQUIRED)` next to
+  the OpenSSL find. Log the version (matches OpenSSL pattern).
+- New module dir `zlib_stream/` with `CMakeLists.txt` + `zlib_stream.c`.
+  Links `ZLIB::ZLIB` + `lua`. Builds to `lib/zlib_stream/zlib_stream.{so,dll}`
+  identical to `adclib` layout.
+- `.github/workflows/smoke.yml` Linux job: add `zlib1g-dev` to the
+  apt-get install line. Windows MinGW already ships zlib via the
+  default mingw distribution (verify in S4b CI run, bundle if not).
+- aarch64 Bullseye container build: zlib is base-system, no change.
+
 ## Log
 
 - 2026-05-15: phase opened, integration branch `phase8-io` created, design
