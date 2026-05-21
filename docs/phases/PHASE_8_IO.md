@@ -855,6 +855,8 @@ been mis-framed by the pre-S1 LuaSocket `*l` path.
       handshakes with `ADBLOM ADZLIF` in HSUP, asserts ADBLOM is NOT
       in the hub's ISUP (and ADZLIF is - the surviving side of the
       mutex). Provably fails pre-fix; provably passes post-fix.
+      *(Superseded later the same day by `test_blom_zlif_combined`
+      when #192 cleared the mutex - see the next journal entry.)*
   Plus C3 (HSND `start` numeric compare for `0` / `00` / `+0`
   parity). C1 (TLS hardening flagged by the reviewer as a drive-by
   refactor) re-verified in-scope per commit 50cc561, dismissed.
@@ -863,3 +865,33 @@ been mis-framed by the pre-S1 LuaSocket `*l` path.
   recap + journal pointer. Phase-9 follow-up tracked in **#192**
   (BLOM+ZLIF combined-mode needs `insert_before_terminal` pipeline
   semantic; mutex mitigation ships in this release).
+- 2026-05-21 (later): **#192 closed** as a Phase-8 follow-up PR
+  rather than a Phase-9 kickoff (maintainer scope call). New
+  pipeline op `insert_before_terminal(stage)` in `core/iostream.lua`
+  splices a stage at position N-1; for 2-stage pipelines it pulls
+  the OLD terminal's residual, drives it synchronously through the
+  new stage (residual bytes are post-upstream-processing, so re-
+  feeding via `input_buf` would re-run them through inflate /
+  corrupt the stream), and parks any frames the terminal emits
+  from that drain in a deferred FIFO that `next_frame` surfaces
+  before resuming `_pull`. Empty-string guard on the deferred
+  enqueue prevents a leading-`\n` tail from queuing a zero-length
+  ADC frame (post-review concern). HSND dispatcher switched from
+  `inframer_prepend` to `inframer_insert_before_terminal`; the
+  S5-shipped `_cfg_p8.zlif.enabled` mutex branch in
+  `loadsettings` removed; `examples/cfg/cfg.tbl` doc string for
+  `blom_enabled` updated to describe the combined-mode behaviour
+  instead of "mutually exclusive". The S5-shipped smoke
+  `test_blom_zlif_mutex_no_adblom` is **superseded** by the new
+  `test_blom_zlif_combined`: full HGET / BZON / compressed HSND /
+  compressed BSCH roundtrip over a single zlib stream from the
+  python harness, asserts both the in-filter TR echo and the
+  not-in-filter TR drop. §1a.7 proof: temporarily reverting the
+  dispatcher to `inframer_prepend` makes the combined test FAIL
+  with "timed out waiting for BSCH echo" (counted captures
+  deflated noise -> filter bits random -> inserted TTH misses its
+  own filter), restoring the fix makes it PASS. Independent
+  review caught two test-quality issues (1-stage unit test would
+  not actually exercise the deferred FIFO path; empty-frame guard
+  needed on the synchronous drain enqueue), both addressed before
+  merge. Windows smoke after the fixes: **54 PASS / 0 FAIL**.

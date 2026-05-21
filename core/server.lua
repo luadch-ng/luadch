@@ -604,6 +604,18 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
     handler.outframer_prepend = function( stage )
         return outframer:prepend( stage )
     end
+    -- Phase-9 follow-up (#192): splice a stage immediately before
+    -- the terminal (the ADC-line framer). Used by BLOM HSND to put
+    -- the counted-binary capture between inflate and adcline when
+    -- ZLIF is active; for 1-stage pipelines it degenerates to
+    -- prepend. The terminal's residual is drained synchronously
+    -- through the new stage and any frames the terminal produces
+    -- are parked in a per-pipeline deferred queue surfaced before
+    -- the next _pull cycle - see `_newpipeline` in core/iostream.lua
+    -- for the semantic.
+    handler.inframer_insert_before_terminal = function( stage )
+        return inframer:insert_before_terminal( stage )
+    end
 
     local try_sending_on_write
     local try_reading_on_write

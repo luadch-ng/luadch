@@ -49,12 +49,15 @@ local adclib = use "adclib"
 local bloom = use "bloom"    -- Phase 8 S5: hash-search membership oracle
 local cfg = use "cfg"
 local iostream = use "iostream"
+local out = use "out"        -- audit-trail log for BLOM filter capture (#192)
 local ratelimit = use "ratelimit"
 local scripts = use "scripts"
 local signal = use "signal"
 local unicode = use "unicode"
 local util = use "util"
 local os = use "os"
+
+local out_put = out.put
 
 -- Stable upvalues - resolved once at file load.
 local adclib_createsalt = adclib.createsalt
@@ -778,10 +781,17 @@ _normal = {
             return true
         end
         local k, h, m = _cfg_blom_k, _cfg_blom_h, _cfg_blom_m
-        user:client().inframer_prepend(
+        -- Phase-9 follow-up (#192): splice counted BEFORE the
+        -- terminal, not at the front. With ZLIF active the pipeline
+        -- is [inflate, adcline]; counted must sit between them so
+        -- it captures decompressed filter bytes, not raw deflated
+        -- wire bytes. Without ZLIF the pipeline is [adcline] and
+        -- insert_before_terminal degenerates to prepend.
+        user:client().inframer_insert_before_terminal(
             iostream_newcountedstage( bytes, function( blob )
                 local filter = bloom.newfilter( blob, k, h, m )
                 user:setblom( filter )
+                out_put( "hub_dispatch.lua: BLOM filter captured for user ", user.sid( ), " (", bytes, " bytes)" )
             end )
         )
         return true

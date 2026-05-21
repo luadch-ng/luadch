@@ -2470,35 +2470,222 @@ def test_zlif_pre_hsup_zon_rejected(staging_dir: Path, proc=None):
         sock.close()
 
 
-def test_blom_zlif_mutex_no_adblom(staging_dir: Path, proc=None):
-    """Phase 9 follow-up (#192) safety regression: with BOTH
-    `blom_enabled = true` AND `zlif_enabled = true` the hub MUST
-    disable BLOM at startup (the inframer_prepend semantic places the
-    counted-binary capture in the wrong pipeline slot when an inflate
-    stage is already active, so the bloom-filter blob would be built
-    from raw deflated bytes -> 100% false-negative routing). Until
-    insert_before_terminal lands in Phase 9, hub.lua loadsettings
-    declares the two flags mutually exclusive.
-    This test FAILS pre-fix (ADBLOM advertised + HGET sent) and
-    PASSES post-fix (ADBLOM absent from ISUP, no HGET on login)."""
+def test_blom_zlif_combined(staging_dir: Path, proc=None):
+    """#192 combined-mode regression: with BOTH `blom_enabled = true`
+    AND `zlif_enabled = true` the hub MUST advertise ADBLOM + ADZLIF,
+    install inflate on the inbound pipeline when the client BZONs,
+    splice the BLOM counted-binary capture BEFORE the ADC-line framer
+    (i.e. AFTER inflate) when HSND arrives, and build the bloom
+    filter from the DECOMPRESSED filter bytes. Pre-fix (Phase-8 S5
+    inframer_prepend semantic) this test FAILS: counted sits in
+    front of inflate, captures raw deflated noise, the bloom filter
+    bits are random -> hash-search for an inserted TTH gets dropped
+    (false negative).
+
+    Runs in the same dual-flag hub state the preceding ZLIF tests
+    set up (`blom_enabled = true` persisted from the BLOM mode
+    switch, `zlif_enabled = true` from the ZLIF switch; the cfg
+    mutex from Phase-8 S5 has been removed)."""
     wait_for_port(HUB_HOST, TEST_PORT_PLAIN, START_TIMEOUT_SEC)
 
-    with socket.create_connection(
+    in_filter_tth = secrets.token_bytes(24)
+    not_in_filter_tth = secrets.token_bytes(24)
+    filter_blob = bytes(BLOM_M // 8)
+    filter_blob = _blom_insert(filter_blob, in_filter_tth)
+
+    sock = socket.create_connection(
         (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
-    ) as s:
-        s.sendall(b"HSUP ADBASE ADTIGR ADBLOM ADZLIF\n")
-        reader = _ADCReader(s)
-        isup = reader.recv_until(lambda f: f.startswith("ISUP "))
-        if "ADBLOM" in isup:
+    )
+    try:
+        # ---- HSUP advertising BOTH ADBLOM + ADZLIF
+        sock.sendall(b"HSUP ADBASE ADTIGR ADBLOM ADZLIF\n")
+
+        # Read uncompressed bytes until IZON\n - the hub switches its
+        # OUTBOUND to deflate after IZON. ADBLOM / ADZLIF / ISID /
+        # IINF all arrive in the plain prefix.
+        buf = b""
+        deadline = time.monotonic() + PROTOCOL_TIMEOUT_SEC
+        while b"IZON\n" not in buf:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TestFailure(
+                    f"combined: timed out waiting for IZON; got {buf!r}"
+                )
+            sock.settimeout(remaining)
+            try:
+                chunk = sock.recv(4096)
+            except socket.timeout:
+                continue
+            if not chunk:
+                raise TestFailure(
+                    f"combined: connection closed before IZON; got {buf!r}"
+                )
+            buf += chunk
+
+        plain, compressed_tail = buf.split(b"IZON\n", 1)
+        if b"ADBLOM" not in plain:
             raise TestFailure(
-                f"mutex broken: ISUP advertises ADBLOM despite "
-                f"zlif_enabled=true; got {isup!r}"
+                f"combined: hub did not advertise ADBLOM; got {plain!r}"
             )
-        if "ADZLIF" not in isup:
+        if b"ADZLIF" not in plain:
             raise TestFailure(
-                f"mutex sanity: ISUP missing ADZLIF (the surviving "
-                f"side of the mutex); got {isup!r}"
+                f"combined: hub did not advertise ADZLIF; got {plain!r}"
             )
+        sid = None
+        for f in plain.split(b"\n"):
+            if f.startswith(b"ISID "):
+                sid = f.split(b" ", 1)[1].decode("ascii")
+                break
+        if not sid:
+            raise TestFailure(
+                f"combined: no ISID in plain SUP frames; got {plain!r}"
+            )
+
+        decomp = zlib.decompressobj()
+        decoded = bytearray()
+        comp_buf = bytearray(compressed_tail)
+
+        def pump_recv(needle: bytes, timeout=PROTOCOL_TIMEOUT_SEC):
+            end = time.monotonic() + timeout
+            while needle not in decoded:
+                if comp_buf:
+                    decoded.extend(decomp.decompress(bytes(comp_buf)))
+                    del comp_buf[:]
+                    if needle in decoded:
+                        return
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    raise TestFailure(
+                        f"combined: timed out waiting for {needle!r}; "
+                        f"decoded so far: {bytes(decoded)!r}"
+                    )
+                sock.settimeout(remaining)
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    continue
+                if not chunk:
+                    raise TestFailure(
+                        f"combined: connection closed mid-stream; "
+                        f"decoded {bytes(decoded)!r}"
+                    )
+                comp_buf.extend(chunk)
+
+        # ---- BINF (plain client outbound; client has not BZON'd yet)
+        pid = secrets.token_bytes(24)
+        cid = _b32_encode(_tiger.tiger(pid))
+        sock.sendall((
+            f"BINF {sid} ID{cid} PD{_b32_encode(pid)}"
+            f" NIdummy I40.0.0.0 SUTCP4\n"
+        ).encode("utf-8"))
+
+        # IGPA arrives compressed (hub outbound is now deflated).
+        pump_recv(b"IGPA ")
+        idx = decoded.index(b"IGPA ")
+        nl = decoded.index(b"\n", idx)
+        gpa = decoded[idx:nl].decode("ascii")
+        salt = _b32_decode(gpa.split(" ", 1)[1])
+        resp = _tiger.tiger(b"test" + salt)
+        sock.sendall(f"HPAS {_b32_encode(resp)}\n".encode("utf-8"))
+
+        # Login completes when the hub echoes our BINF.
+        pump_recv(f"BINF {sid}".encode("ascii"))
+
+        # Hub sends HGET after login (compressed).
+        pump_recv(b"HGET ")
+        idx = decoded.index(b"HGET ")
+        nl = decoded.index(b"\n", idx)
+        hget = decoded[idx:nl].decode("ascii")
+        if " blom " not in hget:
+            raise TestFailure(
+                f"combined: HGET shape wrong (expected blom); got {hget!r}"
+            )
+
+        # ---- Switch CLIENT outbound to compression: BZON plain, then
+        # all subsequent client bytes are deflate(Z_SYNC_FLUSH). The
+        # hub installs inflate on inbound when BZON arrives. After
+        # that, the next HSND header + binary blob both pass through
+        # the hub's inflate stage. The BLOM HSND handler calls
+        # insert_before_terminal(counted), splicing counted BETWEEN
+        # inflate and adcline so the binary blob is captured
+        # POST-INFLATE (decompressed) - the #192 fix point.
+        sock.sendall(f"BZON {sid}\n".encode("utf-8"))
+
+        # SINGLE compressobj for the whole post-BZON client-to-hub
+        # stream. The hub's inflate stage holds one zlib state across
+        # pushes - a fresh compressobj per message would insert a new
+        # zlib prefix mid-stream and crash the inflate state.
+        comp = zlib.compressobj()
+
+        # HSND header + filter blob: both compressed together so the
+        # hub's inflate sees them as one stream. The hub's HSND
+        # dispatch will surface the header, splice counted, and the
+        # binary tail (already in adcline's residual post-inflate)
+        # gets routed through counted via insert_before_terminal's
+        # residual transfer.
+        hsnd = f"HSND blom / 0 {BLOM_M // 8}\n".encode("utf-8")
+        payload = hsnd + filter_blob
+        sock.sendall(
+            comp.compress(payload) + comp.flush(zlib.Z_SYNC_FLUSH)
+        )
+
+        # Brief settle for the counted-stage callback to install the
+        # filter on the user object.
+        time.sleep(0.5)
+
+        # ---- hash-search for TTH IN the filter; expect echo.
+        # Same compressobj continues the stream.
+        tr_in = _b32_encode(in_filter_tth)
+        bsch = f"BSCH {sid} TR{tr_in}\n".encode("utf-8")
+        sock.sendall(comp.compress(bsch) + comp.flush(zlib.Z_SYNC_FLUSH))
+        pump_recv(f"BSCH {sid} TR{tr_in}".encode("ascii"),
+                  timeout=PROTOCOL_TIMEOUT_SEC * 2)
+
+        # ---- hash-search for TTH NOT in filter; expect NO echo.
+        # If the #192 fix is wrong (counted captured deflated noise),
+        # the bloom filter bits are random and the "inserted" TTH
+        # search above usually MISSES the filter -> the test fails
+        # there. This second assert covers the path where the random
+        # bits happen to set the in_filter bit pattern.
+        tr_out = _b32_encode(not_in_filter_tth)
+        bsch_out = f"BSCH {sid} TR{tr_out}\n".encode("utf-8")
+        sock.sendall(comp.compress(bsch_out) + comp.flush(zlib.Z_SYNC_FLUSH))
+
+        # Drain any pending bytes, then wait briefly and assert no
+        # echo arrives for tr_out.
+        end_drain = time.monotonic() + 1.5
+        before = bytes(decoded)
+        echo_marker = f"BSCH {sid} ".encode("ascii") + f"TR{tr_out}".encode("ascii")
+        while time.monotonic() < end_drain:
+            if comp_buf:
+                decoded.extend(decomp.decompress(bytes(comp_buf)))
+                del comp_buf[:]
+            if echo_marker in bytes(decoded):
+                raise TestFailure(
+                    "combined: hash-search for not-in-filter TTH still "
+                    "reached the user; the BLOM filter was not built "
+                    "from decompressed bytes (insert_before_terminal "
+                    "regression)."
+                )
+            sock.settimeout(0.3)
+            try:
+                chunk = sock.recv(4096)
+            except socket.timeout:
+                continue
+            if not chunk:
+                break
+            comp_buf.extend(chunk)
+        if comp_buf:
+            decoded.extend(decomp.decompress(bytes(comp_buf)))
+            del comp_buf[:]
+        if echo_marker in bytes(decoded):
+            raise TestFailure(
+                "combined: not-in-filter TTH was echoed (filter built "
+                "from garbage bytes - #192 regression)."
+            )
+
+    finally:
+        sock.close()
 
 
 def _switch_to_public_hub_mode(staging_dir: Path, current_proc, current_log_file):
@@ -3079,18 +3266,19 @@ def main():
         else:
             log("PASS  ZLIF pre-HSUP ZON rejected (S4b B1)")
 
-        # B-1 mutex regression (#192): with both blom_enabled=true and
-        # zlif_enabled=true the hub MUST disable BLOM at startup and
-        # MUST NOT advertise ADBLOM in its ISUP. The previous ZLIF
-        # mode-switch left zlif_enabled=true; combined with the still-
-        # set blom_enabled=true from earlier, the mutex must fire.
+        # #192 combined-mode regression: with both blom_enabled=true
+        # and zlif_enabled=true (the persistent post-ZLIF cfg state)
+        # the hub MUST splice the BLOM counted-binary capture BEFORE
+        # the ADC-line framer (i.e. AFTER inflate). Pre-fix the
+        # counted stage was prepended and saw raw deflated bytes,
+        # producing a corrupt filter -> false-negative routing.
         try:
-            test_blom_zlif_mutex_no_adblom(staging_dir, proc=proc)
+            test_blom_zlif_combined(staging_dir, proc=proc)
         except Exception as e:
-            log(f"FAIL  BLOM+ZLIF mutex: ADBLOM suppressed (#192): {e}")
-            failed.append("BLOM+ZLIF mutex: ADBLOM suppressed (#192)")
+            log(f"FAIL  BLOM+ZLIF combined-mode routing (#192): {e}")
+            failed.append("BLOM+ZLIF combined-mode routing (#192)")
         else:
-            log("PASS  BLOM+ZLIF mutex: ADBLOM suppressed (#192)")
+            log("PASS  BLOM+ZLIF combined-mode routing (#192)")
 
         # #186: hub_listen must actually restrict the bind address
         # (last test - mutates hub_listen + blanks v6; nothing after).

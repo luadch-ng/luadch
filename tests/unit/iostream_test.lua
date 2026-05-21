@@ -508,6 +508,200 @@ do
 end
 
 ----------------------------------------------------------------------
+-- #192 insert_before_terminal: pipeline splice operation that puts
+-- the new stage at position N-1 (immediately before the current
+-- terminal). Needed when ZLIF + BLOM are both active: the BLOM
+-- counted-binary capture must sit AFTER inflate (so it captures the
+-- decompressed filter bytes), but BEFORE the ADC-line framer (so
+-- binary content with \n is not misinterpreted as frames). The
+-- prepend semantic from S4a sits the new stage at the FRONT, which
+-- is wrong when ZLIF is active because counted then sees raw
+-- deflated wire bytes.
+
+-- Degenerate case: 1-stage pipeline. insert_before_terminal must
+-- behave identically to prepend - there is no terminal to insert
+-- "before" if the pipeline has nothing else, so the new stage
+-- becomes the front-and-only-non-terminal, matching prepend's
+-- ordering exactly.
+do
+    local captured
+    p = iostream.newpipeline( 1048576 )
+    p:feed( "HSND blom / 0 5" .. NL .. "ABCDE" )
+    local frame = p:next( )
+    eq( "ibt 1-stage: first frame is HSND header", frame, "HSND blom / 0 5" )
+    p:insert_before_terminal(
+        iostream.newcountedstage( 5, function( blob ) captured = blob end )
+    )
+    eq( "ibt 1-stage: no further frame (counted swallowed binary)", p:next( ), nil )
+    eq( "ibt 1-stage: counted callback fired with full blob",
+        captured, "ABCDE" )
+end
+
+-- Two-stage pipeline (inflate, adcline): feed a deflated stream
+-- containing `HSND blom / 0 8\nB1\nB2\nB3` where the binary blob
+-- contains \n bytes. Insert counted before terminal AFTER the
+-- HSND header surfaces. The inserted stage must capture the
+-- post-inflate bytes (the binary blob), NOT the raw deflated wire
+-- bytes. Equivalent test against the OLD prepend semantic FAILS
+-- (counted would see deflated noise) - this is the §1a.7
+-- pre-fix-fails proof at the unit level. Uses the "C:"-prefix
+-- mock deflate format from the file-top shim.
+do
+    local binary_blob = "B1" .. NL .. "B2" .. NL .. "B3"    -- 8 bytes, has \n
+    local plaintext = "HSND blom / 0 8" .. NL .. binary_blob
+    local compressed = "C:" .. plaintext
+
+    p = iostream.newpipeline( 1048576 )
+    p:prepend( iostream.newinflatestage( ) )    -- topology: [inflate, adcline]
+    p:feed( compressed )
+    local frame = p:next( )
+    eq( "ibt 2-stage: first frame is HSND header (post-inflate)",
+        frame, "HSND blom / 0 8" )
+
+    local captured
+    p:insert_before_terminal(
+        iostream.newcountedstage( 8, function( blob ) captured = blob end )
+    )
+
+    eq( "ibt 2-stage: no further frame (counted swallowed binary)", p:next( ), nil )
+    eq( "ibt 2-stage: counted captured DECOMPRESSED blob (not zlib noise)",
+        captured, binary_blob )
+end
+
+-- Edge: residual contains the COMPLETE blob plus tail bytes whose
+-- first byte is NOT `\n`, so counted's >budget tail produces a
+-- non-empty frame from adcline at splice time. The frame must
+-- surface via the deferred FIFO on the next next() call - not be
+-- lost. Needs a 2-stage pipeline (the path that actually exercises
+-- the synchronous-drain + deferred-FIFO code; a 1-stage pipeline
+-- would fall through to prepend and the callback would not fire
+-- at splice time). Layout: blob = "12345" (5 bytes, exactly the
+-- budget), tail = "67\nBMSG AAAA hi\n". counted's tail "67\nBMSG..."
+-- fed to adcline emits "67" as the deferred frame, leaves
+-- "BMSG AAAA hi\n" buffered for the next normal pull. Uses the
+-- "C:"-prefix mock deflate format so the test works against a
+-- standalone lua interpreter.
+do
+    local binary_blob = "12345"
+    local plaintext = "HSND blom / 0 5" .. NL .. binary_blob .. "67" .. NL .. "BMSG AAAA hi" .. NL
+    local compressed = "C:" .. plaintext
+
+    p = iostream.newpipeline( 1048576 )
+    p:prepend( iostream.newinflatestage( ) )    -- topology: [inflate, adcline]
+    p:feed( compressed )
+    eq( "ibt deferred: HSND header (post-inflate)",
+        p:next( ), "HSND blom / 0 5" )
+
+    local captured
+    p:insert_before_terminal(
+        iostream.newcountedstage( 5, function( blob ) captured = blob end )
+    )
+
+    eq( "ibt deferred: counted captured the budget bytes synchronously",
+        captured, binary_blob )
+    -- The first surfaced frame is the deferred one ("67"); the
+    -- second comes from the normal post-deferred pull.
+    eq( "ibt deferred: tail's first frame surfaces via deferred FIFO",
+        p:next( ), "67" )
+    eq( "ibt deferred: trailing buffered frame drains normally",
+        p:next( ), "BMSG AAAA hi" )
+    eq( "ibt deferred: nothing else queued", p:next( ), nil )
+end
+
+-- Edge: residual tail contains MULTIPLE frames after the counted
+-- blob. With the eager-drain semantic, all N frames should be
+-- enqueued in the deferred queue at splice time (not only frame #1
+-- with #2..N stranded in adcline's buf waiting for the next TCP
+-- read). Layout: blob = "12345" (5 bytes), post-blob tail =
+-- "67\nM1\nM2\n" (3 frames in the tail).
+do
+    local binary_blob = "12345"
+    local plaintext = "HSND blom / 0 5" .. NL .. binary_blob
+        .. "67" .. NL .. "M1" .. NL .. "M2" .. NL
+    local compressed = "C:" .. plaintext
+
+    p = iostream.newpipeline( 1048576 )
+    p:prepend( iostream.newinflatestage( ) )
+    p:feed( compressed )
+    p:next( )    -- swallow HSND header
+
+    local captured
+    p:insert_before_terminal(
+        iostream.newcountedstage( 5, function( blob ) captured = blob end )
+    )
+    eq( "ibt multi-frame deferred: blob captured", captured, binary_blob )
+    -- All 3 tail frames must have been eagerly drained into the
+    -- deferred queue at splice time (issue #192 review C2).
+    eq( "ibt multi-frame deferred: frame 1", p:next( ), "67" )
+    eq( "ibt multi-frame deferred: frame 2", p:next( ), "M1" )
+    eq( "ibt multi-frame deferred: frame 3", p:next( ), "M2" )
+    eq( "ibt multi-frame deferred: nothing else queued",
+        p:next( ), nil )
+end
+
+-- Edge: blob ends EXACTLY on a `\n` (the >budget tail starts with
+-- `\n`). Adcline's first push therefore returns "" (the slice
+-- before the leading `\n` is empty). The empty-string guard in
+-- insert_before_terminal must NOT enqueue that empty frame; the
+-- frame AFTER the leading `\n` should still surface via the
+-- subsequent next() driving adcline normally.
+do
+    local binary_blob = "12345678"    -- 8 bytes, no \n
+    local tail_frame = "BMSG AAAA hi"
+    -- binary_blob immediately followed by `\n` then the frame -
+    -- counted's tail starts with `\n` so adcline.push returns ""
+    -- on its first call.
+    local plaintext = "HSND blom / 0 8" .. NL .. binary_blob .. NL .. tail_frame .. NL
+    -- Already the same plaintext as above; the SAME shape exercises
+    -- the empty-leading-newline guard because counted's tail is
+    -- (length - 8) bytes = NL + tail_frame + NL = leading-\n case.
+    local compressed = "C:" .. plaintext
+
+    p = iostream.newpipeline( 1048576 )
+    p:prepend( iostream.newinflatestage( ) )
+    p:feed( compressed )
+    p:next( )    -- swallow HSND header
+
+    local captured
+    p:insert_before_terminal(
+        iostream.newcountedstage( 8, function( blob ) captured = blob end )
+    )
+    eq( "ibt empty-frame guard: blob captured", captured, binary_blob )
+    -- The deferred FIFO must NOT contain an empty string from the
+    -- first adcline emit (which saw the leading `\n` and returned
+    -- ""). The next surfaced frame is the real trailing one.
+    eq( "ibt empty-frame guard: empty leading frame not enqueued",
+        p:next( ), tail_frame )
+    eq( "ibt empty-frame guard: nothing else queued",
+        p:next( ), nil )
+end
+
+-- Edge: empty residual on the terminal at splice time. No
+-- synchronous drain happens; the deferred FIFO stays empty;
+-- subsequent feed() drives the pipeline through the inserted
+-- stage normally. Uses the "C:"-prefix mock deflate format.
+do
+    p = iostream.newpipeline( 1048576 )
+    p:prepend( iostream.newinflatestage( ) )    -- 2-stage, terminal empty
+    local captured
+    p:insert_before_terminal(
+        iostream.newcountedstage( 4, function( blob ) captured = blob end )
+    )
+    -- Pipeline shape now: [inflate, counted, adcline].
+    -- Feed mock-compressed `XXXX` (4 bytes, no \n) - counted
+    -- swallows it post-inflate and fires the callback.
+    p:feed( "C:XXXX" )
+    eq( "ibt empty-residual: no frame surfaces (counted swallowed)", p:next( ), nil )
+    eq( "ibt empty-residual: counted captured the 4 bytes",
+        captured, "XXXX" )
+    -- After capture, counted is in passthrough. Feed a mock-
+    -- compressed ADC frame; it should now make it to the terminal.
+    p:feed( "C:BMSG AAAA hi" .. NL )
+    eq( "ibt empty-residual: post-capture passthrough surfaces frame",
+        p:next( ), "BMSG AAAA hi" )
+end
+
+----------------------------------------------------------------------
 
 io.write( string.format( "\n%d checks, %d failures\n", checks, failures ) )
 os.exit( failures == 0 and 0 or 1 )
