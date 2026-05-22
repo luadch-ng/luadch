@@ -487,10 +487,13 @@ newhttpstage = function( )
 
     -- [collecting-body] state. Set when the header parse succeeded
     -- and a non-zero Content-Length is declared; cleared on emit.
+    -- buf is append-only across pushes (the body bytes get added at
+    -- the top of push()), so string_len(buf) is the running total -
+    -- no separate accumulator needed. Body lookup against
+    -- body_target on each push decides emit-or-keep-waiting.
     local body_pending = false
     local body_unit              -- the success unit shell, body filled when complete
     local body_target  = 0       -- target Content-Length
-    local body_have    = 0       -- bytes accumulated so far across pushes
 
     local emit = function( unit )
         done = true
@@ -507,21 +510,23 @@ newhttpstage = function( )
 
         -- [collecting-body] - the header parse already succeeded;
         -- buf contains body bytes only (header substring was sliced
-        -- off when we transitioned in). Accumulate up to body_target.
+        -- off when we transitioned in). Wait until buf is at least
+        -- body_target bytes long, then emit.
+        --
+        -- NOTE on slowloris-on-body: there is no wall-clock or
+        -- chunk-count bound on how long the framer waits for the
+        -- declared bytes to arrive. server.lua's per-connection
+        -- idle timeout bounds it externally; if that proves
+        -- insufficient under hostile load, add a chunk-count
+        -- cap here (deferred until real client behaviour shows up).
         if body_pending then
-            local need = body_target - body_have
-            local have_now = string_len( buf )
-            if have_now < need then
-                -- still waiting for more; keep accumulating
-                body_have = have_now
-                return nil, false
+            if string_len( buf ) < body_target then
+                return nil, false    -- still waiting for more bytes
             end
-            -- body complete (exactly need; any beyond is bug - the
-            -- header parser already sliced off the header). buf
-            -- contains exactly body_target bytes when we transitioned
-            -- in PLUS any trailing chunks; on a one-request-per-
-            -- connection contract there is no trailing data, but
-            -- defence-in-depth: take only the first body_target bytes.
+            -- body complete. On a one-request-per-connection
+            -- contract there is no trailing data, but
+            -- defence-in-depth: take only the first body_target
+            -- bytes - any trailing is discarded along with `done`.
             body_unit.body = string_sub( buf, 1, body_target )
             return emit( body_unit )
         end
@@ -646,6 +651,9 @@ newhttpstage = function( )
             return emit{ reject = 413 }
         end
 
+        -- body defaults to "" for the CL=0 / no-body path; the
+        -- collecting-body path overwrites it with the actual bytes
+        -- before emit.
         local success_unit = {
             method = method, target = target, version = version,
             headers = headers, body = "",
@@ -664,10 +672,9 @@ newhttpstage = function( )
         buf = string_sub( buf, body_start )
         body_unit    = success_unit
         body_target  = cl_num
-        body_have    = string_len( buf )
         body_pending = true
 
-        if body_have >= body_target then
+        if string_len( buf ) >= body_target then
             -- body arrived in the same chunk as the header.
             body_unit.body = string_sub( buf, 1, body_target )
             return emit( body_unit )

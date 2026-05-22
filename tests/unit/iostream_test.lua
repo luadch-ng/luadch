@@ -484,6 +484,55 @@ do
         .. "Content-Length: " .. #body .. CRLF .. CRLF .. body
     )
     eq( "ibt: POST body with CRLFCRLF preserved", b, body )
+    eq( "ibt: POST body length sanity", #b, 12 )
+end
+
+-- Body exactly at MAXBODY boundary (CL = 65536) -> success. Locks
+-- the off-by-one against the CL > MAXBODY -> 413 case above.
+do
+    local body = string.rep( "x", 65536 )
+    local u, b = http_with_body(
+        "POST /v1/announce HTTP/1.1" .. CRLF
+        .. "Content-Length: 65536" .. CRLF .. CRLF .. body
+    )
+    eq( "ibt: POST CL == MAXBODY -> success", u and u.method, "POST" )
+    eq( "ibt: POST CL == MAXBODY body length", b and #b, 65536 )
+end
+
+-- Body containing NUL bytes - the framer must be byte-transparent.
+-- A naive header-parser that strtok'd on NUL would truncate; the
+-- byte-precise sub() / find() Lua primitives keep it whole.
+do
+    local body = "before" .. string.char( 0 ) .. "after" .. string.char( 0, 0, 0 )
+    local u, b = http_with_body(
+        "POST /v1/announce HTTP/1.1" .. CRLF
+        .. "Content-Length: " .. #body .. CRLF .. CRLF .. body
+    )
+    eq( "ibt: POST body with NUL bytes preserved", b, body )
+    eq( "ibt: POST body NUL count", #b, #body )
+end
+
+-- Lowercase method ("post") rejected by the request-line regex
+-- `^(%u+)`. Pins the case-sensitivity so a future Phase-1b "let's
+-- be lenient with case" cannot silently regress.
+do
+    local u = http_with_body(
+        "post /v1/announce HTTP/1.1" .. CRLF
+        .. "Content-Length: 0" .. CRLF .. CRLF
+    )
+    eq( "ibt: lowercase method -> 400", du( u ), "reject=400" )
+end
+
+-- GET with non-zero Content-Length -> 400. The implementation
+-- explicitly rejects bodies on non-write methods (smuggling
+-- vector); pin it so a future "RFC says GET MAY carry a body"
+-- relaxation requires an explicit decision.
+do
+    local u = http_with_body(
+        "GET /v1/users HTTP/1.1" .. CRLF
+        .. "Content-Length: 5" .. CRLF .. CRLF .. "12345"
+    )
+    eq( "ibt: GET CL > 0 -> 400", du( u ), "reject=400" )
 end
 
 ----------------------------------------------------------------------

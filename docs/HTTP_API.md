@@ -116,20 +116,29 @@ Concrete contracts:
   arrives with `Content-Length > 0`, framer emits `400`.
 - **Connection close mid-body:** when the underlying socket closes
   before `Content-Length` bytes have been collected, the framer
-  emits `400` (incomplete request); the router responds + closes
-  (responses on a closing socket may not reach the client - that
-  is fine, the client crashed first).
+  stays in `[collecting-body]` with no emitted unit. server.lua's
+  read loop tears down the handler on EOF, the framer state is
+  GC'd. **No response is sent** - the client crashed first, a
+  partial-write would have nowhere to land. Matches RFC 7230 §3.4
+  (implicit recovery). The stage has no close-hook today; if a
+  future use-case demands an explicit 400 on mid-body EOF, add a
+  `flush_on_close()` method to the stage contract then.
 
 Unit-test coverage required for phase-1 framer extension:
 
 - POST with `Content-Length: 0` and no body → success unit, empty body
 - POST with `Content-Length: N` and exactly N body bytes → success
 - POST with `Content-Length: N` arriving in 1, 2, N TCP segments → success
-- POST with `Content-Length: 65537` → 413, no body read
+- POST with `Content-Length: MAXBODY` (exact boundary) → success
+- POST with `Content-Length: MAXBODY+1` → 413, no body read
 - POST with `Transfer-Encoding: chunked` → 400 (smuggling defence)
 - POST with `Content-Length: 0\r\nContent-Length: 5\r\n` → 400 (multi-CL)
+- POST with lowercase method (`post`) → 400 (request-line regex anchors `^(%u+)`)
+- POST with NUL bytes in body → success, body byte-exact
+- POST with body containing `\r\n\r\n` → success, body byte-exact (must not mis-parse as header end)
+- GET with `Content-Length: 5` → 400 (no GET endpoint accepts a body)
 - HEAD with `Content-Length: 5` → 400
-- Connection close after partial body → 400
+- HEAD with `Content-Length: 0` → success (HEAD)
 
 ---
 
