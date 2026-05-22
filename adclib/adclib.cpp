@@ -605,6 +605,50 @@ int cert_fingerprint_sha256(lua_State* L)
     return 1;
 }
 
+// Constant-time string equality (#82 Phase 1c). Compares two Lua
+// strings byte-for-byte without short-circuiting at the first
+// mismatch - the loop fully unrolls over the shorter operand so
+// timing does not leak the position of the first differing byte
+// the way `==` does. Used by core/http_router.lua's resolve_token
+// to compare an incoming Bearer token against the cfg.http_api_tokens
+// keys; the pure-Lua fallback in http_router.lua applies the same
+// algorithm if adclib failed to load.
+//
+// Lua signature:  bool = adclib.constant_time_eq(a, b)
+//   - both must be strings (any byte content, including NUL)
+//   - returns false if either is not a string or if lengths differ
+//     (length itself is not the secret in our use case; the cfg key
+//     IS the token, the operator picked it)
+//   - returns true iff lengths match AND every byte matches
+//
+// Differs from random_bytes / hash_pas: no error path, no OpenSSL
+// (pure CPU op), no size limits (Lua's string-length cap applies).
+int constant_time_eq(lua_State* L)
+{
+    size_t a_len, b_len;
+    // luaL_checklstring is the explicit-length form (matches the
+    // F-C-3 hardening pattern: any byte content allowed, NULs OK).
+    const char* a = luaL_checklstring(L, 1, &a_len);
+    const char* b = luaL_checklstring(L, 2, &b_len);
+
+    if (a_len != b_len) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    // XOR-accumulate over the full length. `volatile` on the
+    // accumulator and the loop bound discourages the compiler from
+    // rewriting the loop into a short-circuiting memcmp when it
+    // proves a_len > 0 etc.
+    volatile unsigned char diff = 0;
+    volatile size_t n = a_len;
+    for (size_t i = 0; i < n; ++i) {
+        diff |= static_cast<unsigned char>(a[i] ^ b[i]);
+    }
+    lua_pushboolean(L, diff == 0 ? 1 : 0);
+    return 1;
+}
+
 int unescape(lua_State* L)
 {
     std::string s = (std::string) luaL_optstring(L, 1, "");
@@ -647,6 +691,7 @@ static const luaL_Reg adclib[] = {
     {"aes_gcm_open", aes_gcm_open},
     {"gen_self_signed_cert", gen_self_signed_cert},
     {"cert_fingerprint_sha256", cert_fingerprint_sha256},
+    {"constant_time_eq", constant_time_eq},
     {NULL, NULL}
 };
 

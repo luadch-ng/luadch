@@ -74,6 +74,9 @@ local user_inf
 local user_ctm
 local user_search
 local record_authfail
+local http_token
+local http_token_retry_after
+local http_authfail_prefix
 local tick
 
 --// tables //--
@@ -95,6 +98,11 @@ local _hs_timeout
 local _authfail_rate_per_sec
 local _authfail_burst
 local _authfail_lockout
+local _http_rate_read           -- HTTP API per-token rate (read scope), per-second
+local _http_rate_admin          -- HTTP API per-token rate (admin scope), per-second
+local _http_burst               -- HTTP API per-token burst (shared across scopes)
+local _http_authfail_prefix_rate    -- HTTP per-prefix failed-auth bucket, per-second
+local _http_authfail_prefix_burst   -- HTTP per-prefix failed-auth bucket, burst
 local _msg_rate
 local _msg_burst
 local _pm_rate
@@ -323,6 +331,75 @@ record_authfail = function( ip )
     return ok
 end
 
+--// HTTP API rate-limit (#82 §6.3 + §4.8) //--
+
+-- HTTP API per-token-bucket (#82 §6.3). Returns true if a token is
+-- available (request may proceed) and false if the bucket is empty.
+-- `label` is the non-secret token label produced by resolve_token
+-- (comment + first4...last4); we key the bucket on it so the per-
+-- token-prefix accounting is stable across both `read` and `admin`
+-- tokens with the same label. `scope` selects the per-second fill
+-- rate; both scopes share `_http_burst` so a quiet WebUI does not
+-- block a sudden admin batch.
+--
+-- Always returns true if the rate limiter is globally disabled
+-- (cfg `ratelimit_activate = false`) - matches the per-user
+-- functions' semantics. The HTTP API has no level-bypass; even an
+-- admin token is subject to the bucket (operator-recovery
+-- endpoints carve out via X-Confirm, see http_router.lua).
+http_token = function( label, scope )
+    if not _activate then return true end
+    if not label or label == "" then return true end
+    local rate = ( scope == "admin" ) and _http_rate_admin or _http_rate_read
+    return _consume( "http:" .. label, "token", _http_burst, rate )
+end
+
+-- Retry-After helper for http_token: returns the integer number of
+-- seconds the caller should wait before re-trying. Reads the bucket
+-- state without consuming; if the bucket is full or non-existent
+-- returns 1 (a safe floor - clients should not hammer in tight
+-- loops). The token-bucket fill rate is per-second, so the wait is
+-- approximately `(1 - tokens) / fill_per_sec` ceiling'd to integer
+-- seconds.
+http_token_retry_after = function( label, scope )
+    if not _activate then return 1 end
+    local rate = ( scope == "admin" ) and _http_rate_admin or _http_rate_read
+    if rate <= 0 then return 1 end
+    local b = _buckets[ "http:" .. label ]
+    local tk = b and b[ "token" ]
+    if not tk then return 1 end
+    local now = socket_gettime( )
+    local elapsed = now - tk.ts
+    local current = math_min( _http_burst, tk.tokens + elapsed * rate )
+    if current >= 1 then return 1 end
+    local needed = 1 - current
+    local wait = needed / rate
+    -- ceil to integer second; never return < 1
+    local secs = wait - ( wait % 1 )
+    if wait > secs then secs = secs + 1 end
+    if secs < 1 then secs = 1 end
+    return secs
+end
+
+-- HTTP per-prefix failed-auth bucket (#82 §4.8). Second line of
+-- defence behind the per-connection counter: an attacker walking
+-- the token space across many short connections (one request per
+-- TCP conn, our transport) hits this bucket keyed on the first 4
+-- chars of the Bearer token. Defaults 10/min/prefix, burst 5.
+-- Returns true if the request may proceed, false if the prefix
+-- bucket is empty.
+--
+-- `prefix` is the first 4 chars of the Bearer payload (length-leak
+-- limited; we never log the full token). Caller passes "" if no
+-- Authorization header is present - that case is not throttled
+-- here (the missing-token codepath is cheap and not a prefix).
+http_authfail_prefix = function( prefix )
+    if not _activate then return true end
+    if not prefix or prefix == "" then return true end
+    return _consume( "httpprefix:" .. prefix, "authfail",
+        _http_authfail_prefix_burst, _http_authfail_prefix_rate )
+end
+
 tick = function( )
     local now = socket_gettime( )
     if ( now - _last_cleanup ) < _cleanup_interval then return end
@@ -384,6 +461,20 @@ init = function( )
             end
         end
     end
+    -- HTTP API rate-limit defaults are cfg'd as requests-per-minute
+    -- for human legibility; convert to per-second fill rate.
+    local r_read = cfg_get "http_api_rate_read"
+    local r_admin = cfg_get "http_api_rate_admin"
+    _http_rate_read  = ( r_read  and r_read  > 0 ) and ( r_read  / 60 ) or ( 120 / 60 )
+    _http_rate_admin = ( r_admin and r_admin > 0 ) and ( r_admin / 60 ) or (  60 / 60 )
+    _http_burst = cfg_get "http_api_burst" or 10
+    -- HTTP per-prefix failed-auth bucket (§4.8). Cfg'd as
+    -- per-minute for symmetry with the perip authfail key. Defaults
+    -- match the spec (10/min, burst 5).
+    local pf_rate = cfg_get "http_api_authfail_prefix_rate"
+    _http_authfail_prefix_rate = ( pf_rate and pf_rate > 0 )
+        and ( pf_rate / 60 ) or ( 10 / 60 )
+    _http_authfail_prefix_burst = cfg_get "http_api_authfail_prefix_burst" or 5
     _last_cleanup = socket_gettime( )
 end
 
@@ -404,6 +495,9 @@ return {
     user_ctm = user_ctm,
     user_search = user_search,
     record_authfail = record_authfail,
+    http_token = http_token,
+    http_token_retry_after = http_token_retry_after,
+    http_authfail_prefix = http_authfail_prefix,
     tick = tick,
 
 }

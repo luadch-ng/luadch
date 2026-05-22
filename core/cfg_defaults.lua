@@ -265,6 +265,55 @@ local defaults = {
             return types_boolean( value, nil, true )
         end
     },
+    -- Phase 1c of #82 HTTP API rate-limit (docs/HTTP_API.md §6.3).
+    -- Read default is doubled (120/min) because WebUI polling shares
+    -- the read scope; admin (60/min) is the operator/CI surface.
+    -- Burst is shared across scopes - a quiet WebUI does not block
+    -- a sudden admin batch. Values are requests per MINUTE; the
+    -- ratelimit module converts to per-second internally.
+    -- X-Confirm endpoints are exempt regardless of this setting
+    -- (operator recovery must succeed under load).
+    http_api_rate_read = { 120,
+        function( value )
+            return ratelimit_pos_number( value )
+        end
+    },
+    http_api_rate_admin = { 60,
+        function( value )
+            return ratelimit_pos_number( value )
+        end
+    },
+    http_api_burst = { 10,
+        function( value )
+            return ratelimit_pos_number( value )
+        end
+    },
+    -- Per-prefix failed-auth bucket (docs/HTTP_API.md §4.8). Keyed
+    -- on the first 4 chars of the Bearer token; defaults rate 10/min
+    -- burst 5 cap walk-the-token-space attacks without affecting
+    -- legitimate WebUI restarts (token unchanged -> bucket unrelated).
+    http_api_authfail_prefix_rate = { 10,
+        function( value )
+            return ratelimit_pos_number( value )
+        end
+    },
+    http_api_authfail_prefix_burst = { 5,
+        function( value )
+            return ratelimit_pos_number( value )
+        end
+    },
+    -- Idempotency-key cache cap (docs/HTTP_API.md §6.2). Cache is
+    -- always bounded by both the 5-min TTL AND this entry count;
+    -- FIFO eviction on cap hit. Default 1024 fits comfortably even
+    -- on a hub with thousands of admin actions per hour.
+    http_api_idempotency_max_entries = { 1024,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 1
+                and value <= 1048576
+        end
+    },
     -- Phase 8 S4b: ADC-EXT ZLIF (zlib stream compression). Off by
     -- default - operator opt-in, matches the S3 http_port pattern.
     -- When enabled and the client also advertises ADZLIF in HSUP, the

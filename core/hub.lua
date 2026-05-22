@@ -1803,6 +1803,14 @@ return {
     init = init,
     loop = loop,
 
-    object = _luadch,
+    -- `object` is a thunk, not a direct assignment, because _luadch
+    -- is forward-declared at file scope and only assigned inside
+    -- init() via createhub(). A direct `object = _luadch` would
+    -- snapshot the (then-nil) value at module-return time and stay
+    -- nil forever. The thunk resolves the current value lazily on
+    -- each call, so callers (e.g. core/http_router.lua's endpoint
+    -- handlers, which need getusers / getuser) get the live hub
+    -- table once init() has constructed it.
+    object = function( ) return _luadch end,
 
 }

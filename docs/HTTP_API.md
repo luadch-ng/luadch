@@ -312,30 +312,35 @@ brute-forcer hitting random tokens gets `401` but no token-bucket
 attribution. To bound that traffic without locking out the WebUI
 that happens to share the loopback IP with a misbehaving client:
 
-- **Per-connection failed-auth counter, not per-IP.** Each TCP
-  connection gets a counter; after `MAX_FAILED_AUTHS_PER_CONN = 3`
-  the framer closes the connection. One bad curl invocation
-  cannot rate-limit the WebUI's connection sitting next to it.
-- **Per-prefix failed-auth bucket as second line of defence.** When
-  an `Authorization: Bearer <X>` header is present, the bucket is
+- **Per-prefix failed-auth bucket.** When an
+  `Authorization: Bearer <X>` header is present and resolves to no
+  known token, the per-prefix bucket is consumed. The bucket is
   keyed on the first 4 chars of `<X>` (length-leak limited; not the
   full token because we don't want to log it). Default 10
-  failed-auths / minute / prefix, burst 5. Prevents the
-  walk-the-token-space attack from succeeding by churning many
-  short connections.
+  failed-auths / minute / prefix, burst 5. Cfg keys
+  `http_api_authfail_prefix_rate` / `_burst`. Bucket exhaustion
+  returns `429 E_RATE_LIMITED` with `Retry-After: 60`.
+  Anonymous probes (no `Authorization` header) and malformed headers
+  do NOT consume the prefix bucket - they fall straight into 401.
+- **Per-connection counter is moot under the current transport.**
+  The spec originally called for a per-TCP-connection counter
+  (`MAX_FAILED_AUTHS_PER_CONN = 3`) as the first line of defence.
+  The HTTP listener currently issues `Connection: close` on every
+  response (one HTTP request per TCP connection), which makes the
+  per-connection counter equivalent to a 1-strike rule before TCP
+  teardown. The per-prefix bucket already carries the abuse-
+  defence load on its own; the per-connection counter would only
+  add value if we ever introduced HTTP keep-alive, at which point
+  it can be revisited.
 - **Reverse-proxy-aware:** if the listener is reached via a reverse
   proxy (operator deployment), the proxy SHOULD set
-  `X-Forwarded-For`. When present and the connecting peer is
-  `127.0.0.1` (i.e. the proxy itself), the failed-auth-prefix
-  bucket is augmented with the X-F-F value, recovering true
-  per-remote-IP accounting. Without trusted X-F-F, accounting
-  stays at the prefix level.
-- Reuses Phase 7 `core/ratelimit.lua:check_failed_auth`
-  infrastructure where shapes are compatible; the per-connection
-  counter is new (small addition).
-- Loopback hits are NOT exempt - same reasoning as before, plus
-  the per-connection counter is exactly what stops the loopback
-  WebUI from getting starved.
+  `X-Forwarded-For`. Loopback proxy → use `X-Forwarded-For` value
+  to augment the prefix bucket. Without trusted X-F-F, accounting
+  stays at the prefix level. The reverse-proxy X-F-F augmentation
+  is not implemented in Phase 1c (no proxy in the loopback-only
+  default deployment); it is reserved for the Phase 2+ WebUI work.
+- Loopback hits are NOT exempt: the prefix bucket fires even when
+  the connecting peer is `127.0.0.1`.
 
 ---
 
@@ -493,14 +498,20 @@ req = {
 ### 6.2 Idempotency-key
 
 - Header `X-Idempotency-Key: <opaque-string>` (recommended UUID).
-- Per-token cache mapping `(token_label, key) → (status, body)` with a
+- Per-token cache mapping `(token_label, key) → (status, body, headers)` with a
   5-minute TTL.
 - Cache hit ⇒ router returns the cached response immediately, handler
   is not invoked, **audit log NOT re-emitted** (the original write
   was already logged; an idempotent retry must not double-log).
+  The current request's `X-Request-ID` is overlaid on the replay
+  so the client can correlate its log line with this turn rather
+  than the original.
 - Cache miss ⇒ handler runs, the response is stored before being
   returned, audit log emits once.
-- Applies only to write methods. GET responses are not cached.
+- Applies only to write methods (POST/PUT/PATCH/DELETE). GET / HEAD
+  responses are not cached. Errors (4xx/5xx) ARE cached: a retry of
+  a deterministically-failing request gets the same response, not
+  a re-execution that might race differently.
 - **Bounded size.** Cfg `http_api_idempotency_max_entries`
   (default 1024). When the cap is hit, oldest entry by insertion
   time is evicted (FIFO, not LRU - keeps the data structure
@@ -518,22 +529,34 @@ req = {
 ### 6.3 Rate-limit
 
 - Token-bucket per `token_label`. Defaults: `read` scope 120/min,
-  `admin` scope 60/min, burst 10. Cfg-tunable per scope
-  (`http_api_rate_read`, `http_api_rate_admin`). Read default is
-  doubled because the WebUI polls.
+  `admin` scope 60/min, burst 10 (shared across scopes). Cfg-
+  tunable per scope (`http_api_rate_read`, `http_api_rate_admin`)
+  and burst (`http_api_burst`). Read default is doubled because
+  the WebUI polls.
 - Exceeded ⇒ `429 E_RATE_LIMITED` with `Retry-After: <seconds>` header.
-- Buckets share `core/ratelimit.lua` infrastructure with the ADC side.
+- Buckets share `core/ratelimit.lua` infrastructure with the ADC
+  side. Per-token buckets are keyed on the resolved token *label*
+  (non-secret comment + first4...last4); the full token never
+  enters the bucket map, so the rate-limit state cannot leak
+  secrets even if dumped.
 - The failed-auth bucket (§4.8) is checked BEFORE the token bucket:
   an attacker grinding tokens hits the failed-auth defences first.
-- `/health` is NOT rate-limited (probes are noisy by design).
-- **X-Confirm endpoints exempt** (§4.6):
-  `/v1/reload`, `/v1/restart`, `/v1/shutdown`, and
-  `DELETE /v1/registered/{nick}` do NOT consume token-bucket budget.
-  Rationale: an operator's recovery action (e.g. `+reload` after
-  a misconfiguration) must succeed even if a runaway script just
-  burned the admin token's budget. The X-Confirm header is the
-  abuse-protection guard for these endpoints (forces human intent);
-  the audit log is the forensic trail.
+- `/health` is NOT rate-limited (probes are noisy by design;
+  scope=none routes bypass auth and therefore have no token to
+  attribute the bucket to).
+- **Scope=none routes (`/health`) bypass rate-limit** entirely as a
+  consequence of bypassing auth. **X-Confirm endpoints
+  (`/v1/reload`, `/v1/restart`, `/v1/shutdown`,
+  `DELETE /v1/registered/{nick}`) are exempt** from the per-token
+  bucket budget (§4.6): an operator's recovery action must succeed
+  even if a runaway script just burned the admin token's budget.
+  The X-Confirm header is the abuse-protection guard for these
+  endpoints (forces human intent); the audit log is the forensic
+  trail.
+- **403 / X-Confirm-missing responses do not consume bucket
+  budget.** The rate-limit gate runs after the scope check + the
+  X-Confirm carve-out lookup, so a token that lacks scope (403) or
+  fails the X-Confirm check (400) does not pay the bucket cost.
 
 ### 6.4 Pagination
 

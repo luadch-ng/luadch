@@ -61,6 +61,10 @@ local string_lower = string.lower
 local string_byte = string.byte
 local table_concat = table.concat
 local table_insert = table.insert
+local table_remove = table.remove
+local table_sort = table.sort
+local math_min = math.min
+local math_floor = math.floor
 
 local cfg = use "cfg"
 local out = use "out"
@@ -69,6 +73,11 @@ local cfg_get = cfg.get
 local out_put = out.put
 local out_error = out.error
 local out_api_audit = out.api_audit
+
+-- socket.gettime for idempotency-cache TTL (monotonic-enough; same
+-- source as ratelimit.lua's bucket timestamps).
+local socket = use "socket"
+local socket_gettime = socket.gettime
 
 -- forward declarations
 local register
@@ -89,30 +98,59 @@ local bootstrap_first_token
 local register_core_endpoints
 local parse_query
 local status_reason
+local idem_lookup
+local idem_store
+local idem_clear
 
 -- module state
 local _routes      = { }    -- _routes[method][path_pattern] = { handler, scope, plugin, meta, path_template }
 local _routes_flat = { }    -- flat list for /v1/endpoints; populated alongside _routes
 local _initialized = false
 
+-- Idempotency-key cache (#82 §6.2). Per-token map keyed by the
+-- non-secret token label + the client-supplied X-Idempotency-Key.
+-- Bounded by both 5-min TTL AND `http_api_idempotency_max_entries`
+-- (FIFO eviction, oldest insert evicted first; we don't track LRU
+-- because the cap+TTL combo bounds memory regardless of order).
+-- Cleared on +reload because the handler closures producing the
+-- cached responses may no longer exist.
+--
+-- The cache uses a monotonically-increasing `ord` field per entry
+-- so the FIFO order array can carry stale slots safely: replace-
+-- in-place bumps the entry's ord and pushes a new {k, ord} to the
+-- order array; eviction pops the head and only deletes the map
+-- entry if its current ord matches the popped slot's ord (i.e. it
+-- has not been replaced since). Stale order slots are silently
+-- skipped. This keeps replace-in-place correct without an O(n)
+-- order-list shift.
+local _IDEM_TTL = 300    -- seconds; spec §6.2 fixed at 5 minutes
+local _idem_map = { }    -- map: key -> { status, body, headers, ts, ord }
+local _idem_order = { }  -- FIFO array of {k, ord} pairs, oldest first
+local _idem_ord_next = 1 -- next ordinal to hand out
+local _idem_size = 0     -- live entry count (matches #{k for k,_ in pairs(_idem_map)})
+
 ----------------------------------// DEFINITION //--
 
 -- Constant-time string equality. Lua's `==` short-circuits at the
 -- first mismatching byte which leaks length + prefix-match timing
--- for token comparisons. This pure-Lua fallback XOR-accumulates the
--- byte differences over equal-length inputs and never short-circuits.
--- Phase 1c will replace the body with a C binding
--- (adclib.constant_time_eq) for the same algorithm at C speed; the
--- API contract here stays.
---
--- Returns true iff #a == #b AND every byte matches. Inputs of
--- different lengths return false immediately (the length itself is
--- not secret in our use case - the token is whatever the operator
--- put in cfg).
+-- for token comparisons. Phase 1c wires the C implementation
+-- (adclib.constant_time_eq) which runs at C speed; if adclib is
+-- absent (e.g. a stripped build), fall through to the pure-Lua
+-- XOR-accumulate equivalent. Both implementations share the same
+-- contract: returns true iff #a == #b AND every byte matches.
+-- The length itself is not secret in our use case (the operator
+-- picked the token), so we bail out fast on length mismatch.
+local _adclib = use "adclib"
+local _adclib_cte = _adclib and _adclib.constant_time_eq
 constant_time_eq = function( a, b )
     if type( a ) ~= "string" or type( b ) ~= "string" then
         return false
     end
+    if _adclib_cte then
+        return _adclib_cte( a, b )
+    end
+    -- Pure-Lua fallback (never used when adclib loaded). Algorithm
+    -- must match the C version above byte-for-byte.
     local len_a = string_len( a )
     if len_a ~= string_len( b ) then
         return false
@@ -283,6 +321,74 @@ unregister_all = function( )
     _routes      = { }
     _routes_flat = { }
     _initialized = false
+    -- §6.2: idempotency cache MUST be cleared on +reload (handler
+    -- closures the cached responses came from may no longer exist
+    -- in the new route table).
+    idem_clear( )
+end
+
+-- Idempotency cache: lookup. Returns (status, body, headers) on
+-- cache hit or nil on miss. Lazily drops a TTL-expired entry it
+-- finds during the lookup so the cache size remains bounded even
+-- if no write happens for a long time. (The stale order slot is
+-- skipped by the ord-mismatch check at eviction time.)
+idem_lookup = function( label, idem_key )
+    if not label or not idem_key or idem_key == "" then return nil end
+    local k = label .. "\0" .. idem_key
+    local entry = _idem_map[ k ]
+    if not entry then return nil end
+    if ( socket_gettime( ) - entry.ts ) >= _IDEM_TTL then
+        _idem_map[ k ] = nil
+        _idem_size = _idem_size - 1
+        return nil
+    end
+    return entry.status, entry.body, entry.headers
+end
+
+-- Idempotency cache: store. Adds the (status, body, headers) tuple
+-- under (label, idem_key). FIFO-evicts oldest INSERTION order entry
+-- (by ordinal) to keep size <= cap. Stores replace in place but
+-- still push a fresh order slot; the prior slot becomes stale and
+-- is skipped on eviction.
+idem_store = function( label, idem_key, status, body, headers )
+    if not label or not idem_key or idem_key == "" then return end
+    local k = label .. "\0" .. idem_key
+    local now = socket_gettime( )
+    local ord = _idem_ord_next
+    _idem_ord_next = _idem_ord_next + 1
+    if _idem_map[ k ] then
+        -- Replace in place: bump ord so an in-flight eviction
+        -- looking for the OLD ord skips this slot. The old
+        -- _idem_order slot {k, old_ord} is now stale and gets
+        -- discarded harmlessly on its turn.
+        _idem_map[ k ] = { status = status, body = body, headers = headers, ts = now, ord = ord }
+        table_insert( _idem_order, { k = k, ord = ord } )
+        return
+    end
+    -- Fresh insert: track size, evict if at cap.
+    local cap = cfg_get "http_api_idempotency_max_entries" or 1024
+    while _idem_size >= cap do
+        local head = _idem_order[ 1 ]
+        if not head then break end    -- defence: order empty but size says full -> bail
+        table_remove( _idem_order, 1 )
+        local m = _idem_map[ head.k ]
+        if m and m.ord == head.ord then
+            -- live entry; delete
+            _idem_map[ head.k ] = nil
+            _idem_size = _idem_size - 1
+        end
+        -- ord mismatch / map miss = stale slot, just drop it and keep looping
+    end
+    _idem_map[ k ] = { status = status, body = body, headers = headers, ts = now, ord = ord }
+    _idem_size = _idem_size + 1
+    table_insert( _idem_order, { k = k, ord = ord } )
+end
+
+idem_clear = function( )
+    _idem_map = { }
+    _idem_order = { }
+    _idem_ord_next = 1
+    _idem_size = 0
 end
 
 -- /v1/endpoints discovery: scope-filtered live route registry.
@@ -313,7 +419,22 @@ list_endpoints = function( req )
 end
 
 -- Resolve `Authorization: Bearer <token>` against cfg.http_api_tokens.
--- Returns (label, scope) on success or (nil, error_code) on failure.
+-- Returns (label, scope, bucket_id) on success or (nil, error_code)
+-- on failure.
+--
+-- `label` is the loggable, intentionally-obfuscated identifier
+-- (comment + first4...last4). It goes to the audit log and to
+-- operator-visible error messages.
+--
+-- `bucket_id` is an INTERNAL stable identifier for rate-limit and
+-- idempotency-cache keying. It MUST be unique per cfg-token even
+-- when two tokens share a comment + first4 + last4 (e.g. an
+-- operator rotated a 52-char base32 token and kept the comment).
+-- The full cfg_token would collide-proof but lives only in
+-- ratelimit's _buckets table (never logged); we use first8 + last8
+-- which is collision-proof for any realistic deployment (32^16 ≈
+-- 1.2e24 possibilities) AND tolerates very short tokens by
+-- gracefully falling back to the full token below 16 chars.
 resolve_token = function( authz_header )
     if type( authz_header ) ~= "string" then
         return nil, "missing"
@@ -323,14 +444,18 @@ resolve_token = function( authz_header )
     local tokens = cfg_get "http_api_tokens" or { }
     for cfg_token, spec in pairs( tokens ) do
         if constant_time_eq( token, cfg_token ) then
-            -- non-secret label = "<comment> (<first4>...<last4>)";
-            -- safe to log + carry around.
             local first4 = string_sub( cfg_token, 1, 4 )
             local last4  = string_sub( cfg_token, -4 )
             local comment = ( spec.comment and spec.comment ~= "" )
                 and ( spec.comment .. " " ) or ""
             local label = comment .. "(" .. first4 .. "..." .. last4 .. ")"
-            return label, spec.scope
+            local bucket_id
+            if string_len( cfg_token ) >= 16 then
+                bucket_id = string_sub( cfg_token, 1, 8 ) .. string_sub( cfg_token, -8 )
+            else
+                bucket_id = cfg_token    -- tiny token; uniqueness == identity
+            end
+            return label, spec.scope, bucket_id
         end
     end
     return nil, "unknown"
@@ -514,7 +639,39 @@ dispatch = function( framer_unit, source_ip )
     end
 
     -- Auth resolution (label = nil means anonymous / bad token).
-    local label, scope_or_err = resolve_token( framer_unit.headers[ "authorization" ] )
+    local authz_header = framer_unit.headers[ "authorization" ]
+    local label, scope_or_err, bucket_id = resolve_token( authz_header )
+
+    -- Per-prefix failed-auth bucket (§4.8 second line of defence).
+    -- Only consumed when a Bearer token IS present but does NOT
+    -- match: that is the brute-force walk-the-token-space surface.
+    -- An absent header is just an anonymous probe (cheap) and a
+    -- malformed header is filtered into the same anonymous bucket.
+    -- See note in §4.8 of the spec: the per-connection counter is
+    -- moot under our `Connection: close` transport (one HTTP
+    -- request per TCP conn), so the prefix bucket carries the
+    -- abuse defence on its own.
+    if label == nil and scope_or_err == "unknown" then
+        local ratelimit = use "ratelimit"
+        local bearer = authz_header and string_match( authz_header, "^Bearer (.+)$" )
+        local prefix = bearer and string_sub( bearer, 1, 4 ) or ""
+        if not ratelimit.http_authfail_prefix( prefix ) then
+            -- Prefix bucket exhausted. Treat the same as a normal
+            -- 401 from the caller's perspective (no leak about
+            -- whether the prefix is hot) but emit a different
+            -- audit entry so operators can see brute-force noise.
+            -- Surface the prefix in the audit token field (not the
+            -- full token bytes - the prefix is already a §4.8
+            -- length-leak-limited identifier) so brute-force
+            -- attribution shows up in api_audit.log rather than as
+            -- token=-.
+            req.token_label = "prefix(" .. prefix .. ")"
+            audit_log( req, 429 )
+            resp_headers[ "Retry-After" ] = "60"
+            return 429, envelope_error( "E_RATE_LIMITED",
+                "too many failed authentications; back off" ), resp_headers
+        end
+    end
 
     -- Method/path resolution outcomes - all require auth except
     -- the OPTIONS introspection above. Path-existence is not
@@ -552,11 +709,29 @@ dispatch = function( framer_unit, source_ip )
         end
         req.token_label = label
         req.token_scope = scope_or_err
+        req.token_bucket_id = bucket_id
 
         -- Scope check.
         if matched_route.scope == "admin" and req.token_scope ~= "admin" then
             audit_log( req, 403 )
             return 403, envelope_error( "E_FORBIDDEN", "endpoint requires admin scope" ), resp_headers
+        end
+
+        -- Per-token-bucket rate-limit (§6.3). X-Confirm endpoints
+        -- exempt (§6.3 carve-out: operator recovery actions must
+        -- always succeed). Checked AFTER scope (a 403 should not
+        -- consume bucket budget either - that is the same operator-
+        -- mistake-recovery argument).
+        local xconfirm_key = method .. " " .. matched_route.template
+        if not _xconfirm_required[ xconfirm_key ] then
+            local ratelimit = use "ratelimit"
+            if not ratelimit.http_token( bucket_id, req.token_scope ) then
+                local secs = ratelimit.http_token_retry_after( bucket_id, req.token_scope )
+                resp_headers[ "Retry-After" ] = tostring( secs )
+                audit_log( req, 429 )
+                return 429, envelope_error( "E_RATE_LIMITED",
+                    "per-token rate limit exceeded; see Retry-After" ), resp_headers
+            end
         end
     end
 
@@ -565,6 +740,28 @@ dispatch = function( framer_unit, source_ip )
         audit_log( req, 400 )
         return 400, envelope_error( "E_CONFIRMATION_REQUIRED",
             "endpoint requires header 'X-Confirm: yes'" ), resp_headers
+    end
+
+    -- Idempotency cache lookup (§6.2). WRITE methods only; GETs
+    -- are not cached because they have no side-effects worth
+    -- deduplicating. Cache hit returns the prior (status, body,
+    -- headers) immediately, handler is NOT invoked, audit log is
+    -- NOT re-emitted. We DO still echo the current X-Request-ID so
+    -- the client sees this turn's correlation id, not the cached one.
+    local _is_write = ( method ~= "GET" and method ~= "HEAD" and method ~= "OPTIONS" )
+    if _is_write and req.idempotency_key and req.token_bucket_id then
+        local cstatus, cbody, cheaders = idem_lookup( req.token_bucket_id, req.idempotency_key )
+        if cstatus then
+            -- Replay cached response. cheaders is the original
+            -- handler-time set; overlay this turn's X-Request-ID on
+            -- top so the wire reply carries the current request id.
+            local replay = { }
+            if cheaders then
+                for k, v in pairs( cheaders ) do replay[ k ] = v end
+            end
+            replay[ "X-Request-ID" ] = req.request_id
+            return cstatus, cbody, replay
+        end
     end
 
     -- Body parse (only for methods that accept a body and only when
@@ -640,6 +837,17 @@ dispatch = function( framer_unit, source_ip )
     if method == "HEAD" then
         resp_headers[ "Content-Length-Override" ] = tostring( string_len( body ) )
         body = ""
+    end
+
+    -- Idempotency cache store (§6.2). Write methods only; stash the
+    -- (status, body, headers) tuple under (label, idem_key). A
+    -- retry within the 5-min TTL replays this without re-invoking
+    -- the handler. We deliberately store the FULL handler response
+    -- (incl. status) so error responses are also cached - a retry
+    -- of a request that failed validation deterministically gets
+    -- the same 400, not a re-run that might race differently.
+    if _is_write and req.idempotency_key and req.token_bucket_id then
+        idem_store( req.token_bucket_id, req.idempotency_key, status, body, resp_headers )
     end
 
     audit_log( req, status )
@@ -743,6 +951,211 @@ local function health_handler( )
     }
 end
 
+-- ISO 8601 UTC second-precision timestamp (§7.4). Always trailing Z.
+local function iso8601_utc( t )
+    return os.date( "!%Y-%m-%dT%H:%M:%SZ", t )
+end
+
+-- /v1/version: hub identity + uptime. Read-scoped.
+local function version_handler( )
+    local const = use "const"
+    local start = ( use "signal" ).get( "start" ) or os.time( )
+    local now = os.time( )
+    return { status = 200, data = {
+        name           = const.PROGRAM_NAME,
+        version        = const.VERSION,
+        copyright      = const.COPYRIGHT,
+        fork           = const.FORK,
+        hub_name       = cfg_get "hub_name",
+        hub_description = cfg_get "hub_description",
+        start_time     = iso8601_utc( start ),
+        server_time    = iso8601_utc( now ),
+        uptime_seconds = now - start,
+    } }
+end
+
+-- /v1/stats: hub-wide counters. Read-scoped. Returns what is
+-- natively tracked by the hub (online user count, share, files,
+-- by-level breakdown). Byte-traffic counters are NOT exposed -
+-- the hub does not natively track them; that surface lives in
+-- etc_trafficmanager plugin and is out of scope for the core API
+-- in Phase 1. A future Phase-N could add a `traffic` block once
+-- the hub gains native byte counters.
+local function stats_handler( )
+    local hub_obj = ( use "hub" ).object( )
+    -- 1st return value is _nobot_normalstatesids (humans only); bots
+    -- do not implement the full user-object surface (no :files() /
+    -- :share()) so iterating the bot-inclusive table crashes the
+    -- handler. The headline "online users" stat is also more
+    -- meaningful without bots inflating the count.
+    local nobots = hub_obj.getusers( )
+    local online_count = 0
+    local share_total = 0
+    local files_total = 0
+    local by_level = { }
+    for _, user in pairs( nobots ) do
+        online_count = online_count + 1
+        local s = user:share( ) or 0
+        share_total = share_total + s
+        local f = user:files( ) or 0
+        files_total = files_total + f
+        local lvl = user:level( ) or 0
+        by_level[ tostring( lvl ) ] = ( by_level[ tostring( lvl ) ] or 0 ) + 1
+    end
+    return { status = 200, data = {
+        online_count       = online_count,
+        share_total_bytes  = share_total,
+        files_total        = files_total,
+        by_level           = by_level,
+    } }
+end
+
+-- Build the JSON-safe representation of a user object. Used by
+-- both /v1/users (list) and /v1/users/{sid} (detail). Pulls the
+-- subset of INF fields the API documents publicly.
+local function _user_to_json( user )
+    -- user.hubs returns (HN, HR, HO); guard the unpack so a user
+    -- without an INF doesn't crash the serializer.
+    local hn, hr, ho = user.hubs( user )
+    return {
+        sid            = user:sid( ),
+        nick           = user:nick( ),
+        cid            = user:cid( ),
+        description    = user:description( ),
+        email          = user:email( ),
+        level          = user:level( ),
+        share_bytes    = user:share( ),
+        share_files    = user:files( ),
+        slots          = user:slots( ),
+        features       = user:features( ),
+        hubs_normal    = hn,
+        hubs_regged    = hr,
+        hubs_op        = ho,
+        version        = user:version( ),
+    }
+end
+
+-- /v1/users: paginated list (§6.4). limit/offset clamped to
+-- [1, 1000] / [0, total]. Read-scoped.
+local function users_list_handler( req )
+    local hub_obj = ( use "hub" ).object( )
+    -- 1st return value is _nobot_normalstatesids - humans only.
+    -- /v1/users is for connected human clients; bot listing belongs
+    -- to a future /v1/bots endpoint (not Phase 1).
+    local nobots = hub_obj.getusers( )
+    -- Snapshot to a list so we can paginate deterministically.
+    -- Sorting by SID gives a stable order across calls within a
+    -- session (SIDs do not change for a connected user).
+    local users_list = { }
+    for sid, user in pairs( nobots ) do
+        table_insert( users_list, user )
+    end
+    table_sort( users_list, function( a, b )
+        return ( a:sid( ) or "" ) < ( b:sid( ) or "" )
+    end )
+
+    local limit = tonumber( req.query.limit ) or 200
+    local offset = tonumber( req.query.offset ) or 0
+    if limit < 1 then limit = 1 end
+    if limit > 1000 then limit = 1000 end
+    if offset < 0 then offset = 0 end
+    offset = math_floor( offset )
+    limit  = math_floor( limit )
+
+    local total = #users_list
+    local page = { }
+    for i = offset + 1, math_min( offset + limit, total ) do
+        table_insert( page, _user_to_json( users_list[ i ] ) )
+    end
+    local next_offset
+    if offset + limit < total then
+        next_offset = offset + limit
+    end
+
+    -- The envelope helper produces `{ok, data}`. /v1/users wants
+    -- `pagination` as a SIBLING of `data` (spec §6.4). We bypass
+    -- envelope_success and ship a custom raw_body via dkjson.encode
+    -- so the envelope's sibling field can land.
+    local wire = json_encode( {
+        ok         = true,
+        data       = { users = page },
+        pagination = {
+            total       = total,
+            limit       = limit,
+            offset      = offset,
+            next_offset = next_offset,
+        },
+    } )
+    return { status = 200, raw_body = wire,
+        content_type = "application/json; charset=utf-8" }
+end
+
+-- /v1/users/{sid}: full INF + session metadata for one user.
+-- 404 if SID not online. Read-scoped.
+local function users_detail_handler( req )
+    local sid = req.path_vars and req.path_vars[ "sid" ]
+    if not sid or sid == "" then
+        return { status = 400, error = { code = "E_BAD_INPUT", message = "missing sid" } }
+    end
+    local hub_obj = ( use "hub" ).object( )
+    -- Detail endpoint also restricts to humans (matches /v1/users).
+    local nobots = hub_obj.getusers( )
+    local user = nobots[ sid ]
+    if not user then
+        return { status = 404, error = { code = "E_NOT_FOUND", message = "no such online sid" } }
+    end
+    return { status = 200, data = _user_to_json( user ) }
+end
+
+-- /v1/log/api: tail the api_audit log file. Admin-scoped.
+-- ?lines=N (default 100, max 1000) follows the §6.4 tail
+-- convention. Returns the last N lines as an array under
+-- `data.lines`; an empty file or missing-file gives [].
+local function log_api_handler( req )
+    local lines_q = tonumber( req.query.lines ) or 100
+    if lines_q < 1 then lines_q = 1 end
+    if lines_q > 1000 then lines_q = 1000 end
+    lines_q = math_floor( lines_q )
+
+    local log_path = cfg_get "log_path" or "././log/"
+    local path = log_path .. "api_audit.log"
+    local f, err = io.open( path, "rb" )
+    if not f then
+        -- Missing-file is normal in a hub that never recorded an
+        -- audit-worthy event (the createlog only creates the file
+        -- on first write, which gates on log_api_audit cfg).
+        return { status = 200, data = { lines = { }, path = path } }
+    end
+    -- Tail-read: seek near the end, walk back in 4 KiB chunks until
+    -- we have at least `lines_q` newlines or hit BOF. Caps the read
+    -- at ~1 MiB to bound memory even with very long lines.
+    local MAX_TAIL = 1024 * 1024
+    local size = f:seek( "end" )
+    local read_size = size
+    if read_size > MAX_TAIL then read_size = MAX_TAIL end
+    f:seek( "end", -read_size )
+    local data = f:read( read_size ) or ""
+    f:close( )
+    -- Split into lines; drop trailing empty line if file ends \n.
+    local all = { }
+    for line in string_gmatch( data, "([^\n]+)" ) do
+        table_insert( all, line )
+    end
+    -- If we truncated the head of the file (read_size < size) the
+    -- first line may be partial. Drop it to avoid mid-line output.
+    if read_size < size and #all > 0 then
+        table_remove( all, 1 )
+    end
+    -- Tail to the requested line count.
+    local start_i = #all - lines_q + 1
+    if start_i < 1 then start_i = 1 end
+    local out_lines = { }
+    for i = start_i, #all do
+        table_insert( out_lines, all[ i ] )
+    end
+    return { status = 200, data = { lines = out_lines, path = path } }
+end
+
 -- /v1/endpoints + /health registration. Called from
 -- register_core_endpoints below at module-init time so the discovery
 -- surface is always available (no plugin owns it).
@@ -756,6 +1169,26 @@ register_core_endpoints = function( )
         plugin = "core",
         description = "list all registered endpoints (scope-filtered to the caller's token)",
         response_schema = { endpoints = { type = "array", required = true } },
+    } )
+    register( "GET", "/v1/version", "read", version_handler, {
+        plugin = "core",
+        description = "hub identity, version, and uptime",
+    } )
+    register( "GET", "/v1/stats", "read", stats_handler, {
+        plugin = "core",
+        description = "hub-wide counters: online users, share total, by-level breakdown",
+    } )
+    register( "GET", "/v1/users", "read", users_list_handler, {
+        plugin = "core",
+        description = "online users (paginated; ?limit=200&offset=0)",
+    } )
+    register( "GET", "/v1/users/{sid}", "read", users_detail_handler, {
+        plugin = "core",
+        description = "full session metadata for one online user (by SID)",
+    } )
+    register( "GET", "/v1/log/api", "admin", log_api_handler, {
+        plugin = "core",
+        description = "tail of api_audit.log (admin-scoped; ?lines=N default 100 max 1000)",
     } )
 end
 
@@ -785,5 +1218,8 @@ return {
     _envelope_error       = envelope_error,
     _resolve_token        = resolve_token,
     _generate_request_id  = generate_request_id,
+    _idem_lookup          = function( ... ) return idem_lookup( ... ) end,
+    _idem_store           = function( ... ) return idem_store( ... ) end,
+    _idem_clear           = function( ... ) return idem_clear( ... ) end,
 
 }

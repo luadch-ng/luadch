@@ -17,13 +17,21 @@
 ]]--
 
 -- minimal `use` shim, lockstep with http_router.lua's imports.
+-- http_router.lua snapshots `cfg.get` to a local at module-load
+-- time (`local cfg_get = cfg.get`), so we MUST NOT swap the
+-- _mock_cfg.get field after the module loads - the local won't
+-- track the swap. Instead, the original closure reads tunable
+-- module-locals so per-test config (e.g. shrunk idempotency cap)
+-- can be applied without reassigning the function.
 local _stub_cfg_tokens = { }
+local _stub_cfg_idem_cap = nil    -- nil = use default; integer overrides
 local _last_audit_args = nil
 local _mock_cfg = {
     get = function( key )
         if key == "http_api_tokens" then return _stub_cfg_tokens end
         if key == "log_api_audit" then return true end
         if key == "http_api_log_reads" then return false end
+        if key == "http_api_idempotency_max_entries" then return _stub_cfg_idem_cap end
         return nil
     end,
 }
@@ -56,11 +64,21 @@ local _mock_dkjson = {
     end,
 }
 
+-- Phase 1c: http_router now also calls `use "socket"` (idempotency
+-- cache TTL) and `use "adclib"` (constant_time_eq C binding).
+-- `socket.gettime` is the only field touched at module load; a
+-- minimal stub backed by os.time() is enough for unit tests.
+-- `adclib = false` exercises the pure-Lua constant_time_eq fallback;
+-- the C binding is covered by the smoke harness which runs against
+-- a real build.
+local _mock_socket = { gettime = function( ) return os.time( ) end }
+
 local _real = {
     string = string, table = table, os = os, io = io, math = math,
     pairs = pairs, ipairs = ipairs, tostring = tostring, tonumber = tonumber,
     type = type, pcall = pcall, select = select, error = error,
     cfg = _mock_cfg, out = _mock_out, dkjson = _mock_dkjson,
+    socket = _mock_socket, adclib = false,
 }
 _G.use = function( name )
     local v = _real[ name ]
@@ -162,18 +180,39 @@ end
 
 do
     _stub_cfg_tokens = {
-        [ "admin-tokens-here" ] = { scope = "admin", comment = "ops cli" },
-        [ "readonlytoken99" ]   = { scope = "read",  comment = "grafana" },
+        [ "admin-tokens-here-which-is-long-enough" ] = { scope = "admin", comment = "ops cli" },
+        [ "readonlytoken99-also-long-enough" ]       = { scope = "read",  comment = "grafana" },
+        [ "shorty7" ]                                = { scope = "read",  comment = "tiny" },
     }
-    local label, scope = router._resolve_token( "Bearer admin-tokens-here" )
+    local label, scope, bid = router._resolve_token( "Bearer admin-tokens-here-which-is-long-enough" )
     eq( "resolve: admin scope", scope, "admin" )
     eq( "resolve: admin label has comment", label:find( "ops cli", 1, true ) ~= nil, true )
     eq( "resolve: admin label NO full secret",
-        label:find( "tokens-here", 1, true ), nil )
+        label:find( "tokens-here-which-is", 1, true ), nil )
+    eq( "resolve: bucket_id is 16 chars for long token", #bid, 16 )
+    eq( "resolve: bucket_id is non-empty", #bid > 0, true )
 
-    local _, scope_r = router._resolve_token( "Bearer readonlytoken99" )
-    eq( "resolve: read scope", scope_r, "read" )
+    -- Two distinct tokens with the same comment + same first4 +
+    -- same last4 would have collided in the PR-B label-as-bucket
+    -- scheme. Confirm their bucket_ids differ here.
+    _stub_cfg_tokens = {
+        [ "abcd-XXXX-aaaaaaaa-wxyz" ] = { scope = "read", comment = "dup" },
+        [ "abcd-YYYY-bbbbbbbb-wxyz" ] = { scope = "read", comment = "dup" },
+    }
+    local lbl1, _, bid1 = router._resolve_token( "Bearer abcd-XXXX-aaaaaaaa-wxyz" )
+    local lbl2, _, bid2 = router._resolve_token( "Bearer abcd-YYYY-bbbbbbbb-wxyz" )
+    eq( "resolve: label collides (audit only)", lbl1, lbl2 )
+    eq( "resolve: bucket_id does NOT collide", bid1 == bid2, false )
 
+    -- Short token (< 16 chars): bucket_id falls back to full token
+    _stub_cfg_tokens = {
+        [ "shorty7" ] = { scope = "read", comment = "tiny" },
+    }
+    local _, _, bid_s = router._resolve_token( "Bearer shorty7" )
+    eq( "resolve: short token bucket_id == full token", bid_s, "shorty7" )
+
+    -- restore for the unknown-token tests below
+    _stub_cfg_tokens = { }
     local nil_l, err = router._resolve_token( "Bearer nope-not-a-token" )
     eq( "resolve: unknown -> nil", nil_l, nil )
     eq( "resolve: unknown -> error code", err, "unknown" )
@@ -235,6 +274,79 @@ do
     eq( "register: non-function handler rejected", ok7, false )
 
     router.unregister_all( )
+end
+
+----------------------------------------------------------------------
+-- idempotency cache (FIFO + TTL + replace-in-place + clear)
+----------------------------------------------------------------------
+
+do
+    router._idem_clear( )
+
+    -- miss on cold cache
+    local status, body, headers = router._idem_lookup( "label", "k1" )
+    eq( "idem: cold miss", status, nil )
+
+    -- store + hit
+    router._idem_store( "label", "k1", 201, "BODY1", { foo = "bar" } )
+    local st, bd, hd = router._idem_lookup( "label", "k1" )
+    eq( "idem: hit status", st, 201 )
+    eq( "idem: hit body",   bd, "BODY1" )
+    eq( "idem: hit header keeps foo", hd and hd.foo, "bar" )
+
+    -- different label, same key -> miss (per-token isolation)
+    local st2 = router._idem_lookup( "other_label", "k1" )
+    eq( "idem: per-token isolation", st2, nil )
+
+    -- replace in place (same key)
+    router._idem_store( "label", "k1", 409, "CONFLICT", { } )
+    local st3, bd3 = router._idem_lookup( "label", "k1" )
+    eq( "idem: replace status", st3, 409 )
+    eq( "idem: replace body",   bd3, "CONFLICT" )
+
+    -- empty / missing key -> no-op (not cached, not looked up)
+    router._idem_store( "label", "", 200, "X", { } )
+    local stN = router._idem_lookup( "label", "" )
+    eq( "idem: empty key never hits", stN, nil )
+    local stN2 = router._idem_lookup( "label", nil )
+    eq( "idem: nil key never hits", stN2, nil )
+
+    -- clear
+    router._idem_clear( )
+    local stC = router._idem_lookup( "label", "k1" )
+    eq( "idem: cleared", stC, nil )
+
+    -- Cap-eviction: shrink cap to 2 via mock cfg, store 3 entries,
+    -- confirm oldest insert was evicted FIFO. Also confirms the
+    -- replace-in-place + ord-bump path: replacing k1 between k2
+    -- and k3 stores does NOT evict the live k1 when k3 trips cap.
+    _stub_cfg_idem_cap = 2
+    router._idem_clear( )
+    router._idem_store( "L", "k1", 200, "B1", { } )
+    router._idem_store( "L", "k2", 200, "B2", { } )
+    eq( "idem-cap: pre-evict k1 alive", router._idem_lookup( "L", "k1" ), 200 )
+    eq( "idem-cap: pre-evict k2 alive", router._idem_lookup( "L", "k2" ), 200 )
+    router._idem_store( "L", "k3", 200, "B3", { } )
+    eq( "idem-cap: oldest k1 evicted", router._idem_lookup( "L", "k1" ), nil )
+    eq( "idem-cap: k2 survives", router._idem_lookup( "L", "k2" ), 200 )
+    eq( "idem-cap: k3 alive", router._idem_lookup( "L", "k3" ), 200 )
+
+    -- Replace-in-place + cap: store k1+k2, then replace k1, then
+    -- store k3 (would trigger 1 eviction). The replaced k1 must
+    -- survive because its ord is the NEWEST; k2 should be evicted.
+    router._idem_clear( )
+    router._idem_store( "L", "k1", 200, "B1-old", { } )
+    router._idem_store( "L", "k2", 200, "B2",     { } )
+    router._idem_store( "L", "k1", 200, "B1-new", { } )    -- replace; k1.ord becomes newest
+    router._idem_store( "L", "k3", 200, "B3",     { } )    -- evict cycle: pops k1-stale, sees ord mismatch, keeps live k1; pops k2 next, evicts.
+    local k1_st, k1_bd = router._idem_lookup( "L", "k1" )
+    eq( "idem-cap-replace: replaced k1 alive", k1_st, 200 )
+    eq( "idem-cap-replace: replaced k1 body is NEW", k1_bd, "B1-new" )
+    eq( "idem-cap-replace: k2 evicted (older ord)", router._idem_lookup( "L", "k2" ), nil )
+    eq( "idem-cap-replace: k3 alive", router._idem_lookup( "L", "k3" ), 200 )
+
+    -- restore default cap (other tests don't care, but be tidy)
+    _stub_cfg_idem_cap = nil
 end
 
 ----------------------------------------------------------------------

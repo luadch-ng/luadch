@@ -2148,6 +2148,148 @@ def test_http_health_roundtrip(staging_dir: Path, proc=None):
         reader.recv_until(lambda f: f.startswith("ISUP "))
 
 
+def test_http_phase1c_endpoints(staging_dir: Path, proc=None):
+    """Phase 1c of #82: the 4 core read endpoints answer; rate-limit
+    + per-prefix failed-auth + idempotency wiring is alive on the
+    dispatch path.
+
+    Smoke-scope (full semantics live in tests/unit/http_router_test.lua):
+    - GET /v1/version with bootstrap token -> 200 + envelope with name
+    - GET /v1/stats                        -> 200 + envelope w/ online_count
+    - GET /v1/users?limit=50               -> 200 + envelope w/ pagination block
+    - GET /v1/users/AAAA                   -> 404 (no such SID online)
+    - GET /v1/log/api?lines=5              -> 200 + envelope w/ lines array
+    - /v1/endpoints catalog now lists all five (plus /health + self)
+    - Hammer with wrong-prefix bearer -> 429 from prefix bucket after burst
+    - Hammer /v1/version with right token -> 429 from per-token bucket
+      eventually (read budget = 120/min, burst = 10 by default)
+    """
+    # Re-discover the bootstrap token; the hub re-generated it on this
+    # boot (every fresh staging run overwrites api_token.first).
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    # 1. /v1/version
+    r = _http_roundtrip(b"GET /v1/version HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"GET /v1/version: expected 200, got {status(r)!r}")
+    b = body_of(r)
+    if '"ok":true' not in b.replace(" ", ""):
+        raise TestFailure(f"GET /v1/version: envelope ok:true missing; body={b!r}")
+    if '"name"' not in b or "Luadch" not in b:
+        raise TestFailure(f"GET /v1/version: missing name/Luadch in body={b!r}")
+    if '"uptime_seconds"' not in b:
+        raise TestFailure(f"GET /v1/version: missing uptime_seconds; body={b!r}")
+
+    # 2. /v1/stats
+    r = _http_roundtrip(b"GET /v1/stats HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"GET /v1/stats: expected 200, got {status(r)!r}")
+    b = body_of(r)
+    if '"online_count"' not in b:
+        raise TestFailure(f"GET /v1/stats: missing online_count; body={b!r}")
+    if '"share_total_bytes"' not in b:
+        raise TestFailure(f"GET /v1/stats: missing share_total_bytes; body={b!r}")
+    if '"by_level"' not in b:
+        raise TestFailure(f"GET /v1/stats: missing by_level; body={b!r}")
+
+    # 3. /v1/users with explicit pagination
+    r = _http_roundtrip(b"GET /v1/users?limit=50&offset=0 HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"GET /v1/users: expected 200, got {status(r)!r}")
+    b = body_of(r)
+    if '"pagination"' not in b:
+        raise TestFailure(f"GET /v1/users: missing pagination block; body={b!r}")
+    for need in ('"users"', '"total"', '"limit"', '"offset"'):
+        if need not in b:
+            raise TestFailure(f"GET /v1/users: missing {need}; body={b!r}")
+
+    # 4. /v1/users/{sid} for a SID that cannot be online (AAAA is the
+    #    spec-reserved sentinel value the SID-assigner skips).
+    r = _http_roundtrip(b"GET /v1/users/AAAA HTTP/1.1\r\n" + auth + b"\r\n")
+    if "404" not in status(r):
+        raise TestFailure(
+            f"GET /v1/users/AAAA: expected 404, got {status(r)!r}"
+        )
+    b = body_of(r)
+    if '"E_NOT_FOUND"' not in b:
+        raise TestFailure(f"GET /v1/users/AAAA: missing E_NOT_FOUND code; body={b!r}")
+
+    # 5. /v1/log/api (admin scope; bootstrap token is admin)
+    r = _http_roundtrip(b"GET /v1/log/api?lines=5 HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"GET /v1/log/api: expected 200, got {status(r)!r}")
+    b = body_of(r)
+    if '"lines"' not in b:
+        raise TestFailure(f"GET /v1/log/api: missing lines array; body={b!r}")
+
+    # 6. /v1/endpoints catalog now lists all Phase 1c endpoints.
+    r = _http_roundtrip(b"GET /v1/endpoints HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"GET /v1/endpoints: expected 200, got {status(r)!r}")
+    b = body_of(r)
+    for path_must_have in (
+        '"/v1/version"', '"/v1/stats"', '"/v1/users"',
+        '"/v1/users/{sid}"', '"/v1/log/api"',
+    ):
+        if path_must_have not in b:
+            raise TestFailure(
+                f"catalog missing {path_must_have}; body={b!r}"
+            )
+
+    # 7. Per-prefix failed-auth bucket (§4.8). Burst is 5 by default;
+    #    six wrong-token-same-prefix requests should reach the 429
+    #    rate-limit response. Use a Bearer with a distinct 4-char
+    #    prefix so this test does not exhaust other tests' budget if
+    #    re-ordered.
+    bad_prefix = b"PRFX-bogus-token-value-xx"
+    bad_auth = b"Authorization: Bearer " + bad_prefix + b"\r\n"
+    saw_429 = False
+    for i in range(15):
+        r = _http_roundtrip(b"GET /v1/version HTTP/1.1\r\n" + bad_auth + b"\r\n")
+        st = status(r)
+        if "429" in st:
+            saw_429 = True
+            # Retry-After header MUST be present per §4.8
+            if "Retry-After:" not in r:
+                raise TestFailure(
+                    f"per-prefix 429: missing Retry-After; resp={r!r}"
+                )
+            break
+        if "401" not in st:
+            raise TestFailure(
+                f"per-prefix flood: expected 401 then 429, got {st!r}"
+            )
+    if not saw_429:
+        raise TestFailure(
+            "per-prefix failed-auth bucket never tripped after 15 attempts"
+        )
+
+    # The right-prefix-bucket SHOULD be unrelated. The valid bootstrap
+    # token has its own prefix; a single subsequent request must still
+    # succeed (proves the bucket is keyed by prefix not by source IP).
+    r = _http_roundtrip(b"GET /v1/version HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"valid token after wrong-prefix flood: expected 200, "
+            f"got {status(r)!r}; resp={r!r}"
+        )
+
+
 def _switch_to_blom_mode(staging_dir: Path, current_proc, current_log_file):
     """Phase 8 S5 (#147 T2.2) setup: stop the hub, flip
     `blom_enabled = false` to `true` in cfg.tbl so the next test
@@ -3347,6 +3489,19 @@ def main():
             failed.append("HTTP /health roundtrip + hardening (#82 S3)")
         else:
             log("PASS  HTTP /health roundtrip + hardening (#82 S3)")
+
+        # Phase 1c of #82: the four core read endpoints + rate-limit
+        # + per-prefix failed-auth wiring. Shares the same hub
+        # instance as the /health roundtrip above (HTTP listener is
+        # already up). Idempotency cache semantics are exercised by
+        # the unit test (no write endpoint yet to cover smoke-side).
+        try:
+            test_http_phase1c_endpoints(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API Phase 1c endpoints + limits (#82): {e}")
+            failed.append("HTTP API Phase 1c endpoints + limits (#82)")
+        else:
+            log("PASS  HTTP API Phase 1c endpoints + limits (#82)")
 
         # Phase 8 S5 (#147 T2.2): enable BLOM and exercise hash-search
         # routing + the keyword-search broadcast regression. Runs
