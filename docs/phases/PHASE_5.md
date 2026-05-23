@@ -3,7 +3,7 @@
 > Working agreement: see [`CLAUDE.md`](../../CLAUDE.md) §1.
 > Roadmap: see [`CLAUDE.md`](../../CLAUDE.md) §5.
 
-**Status:** complete (pending maintainer sign-off on the merged PR)
+**Status:** complete
 **Started:** 2026-05-03
 **Closed:** 2026-05-03
 **Goal:** Replace the ad-hoc `compile` shell script and the fragile
