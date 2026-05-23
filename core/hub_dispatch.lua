@@ -431,6 +431,16 @@ _identify = {
                 user:kill( "ISTA 246 " .. _i18n_invalid_ip .. userip .. "/" .. infip_match .. "\n", "TL10" )
                 scripts_firelistener( "onFailedAuth", nick, userip, cid,  escapefrom( _i18n_invalid_ip .. userip .. "/" .. infip_match ) )
                 return true
+            else
+                -- #214 Gap 2: kill_wrong_ips=false is the NAT-weird-
+                -- deployment opt-out from killing-on-mismatch. The
+                -- opt-out preserves the user's connection but the
+                -- claimed (wrong) IP MUST NOT be broadcast - other
+                -- clients would then direct CTM / RCM at the spoofed
+                -- address (DDoS-amplification, see issue body). Stamp
+                -- the authenticated TCP-source IP over the lie so the
+                -- broadcast INF carries `userip`, not the claim.
+                adccmd:setnp( userfam, userip )
             end
         end
         if cid ~= adclib_hash( pid ) then

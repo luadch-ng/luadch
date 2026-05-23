@@ -3357,6 +3357,125 @@ def test_inf_integer_clamps(staging_dir: Path, proc=None):
         sock.close()
 
 
+def _switch_to_kill_wrong_ips_off_mode(staging_dir, current_proc, current_log_file):
+    """#214 Gap 2 regression setup: stop the hub, set `kill_wrong_ips
+    = false` in cfg.tbl so the next test exercises the NAT-weird-
+    deployment opt-out path. The key is not in `examples/cfg/cfg.tbl`
+    by default (only in `core/cfg_defaults.lua` at true), so we inject
+    it before the closing brace of the cfg.tbl table. Mirrors the
+    `_switch_to_http_mode` `ratelimit_perip_conn_burst` injection
+    pattern (same #82 lesson: cfg keys not always present in the
+    example - regex must handle both)."""
+    stop_hub(current_proc, current_log_file)
+    cfg_path = staging_dir / "cfg" / "cfg.tbl"
+    text = cfg_path.read_text(encoding="utf-8")
+    if re.search(r"kill_wrong_ips\s*=", text):
+        new_text, n = re.subn(
+            r"kill_wrong_ips\s*=\s*\w+",
+            "kill_wrong_ips = false",
+            text,
+            count=1,
+        )
+    else:
+        new_text, n = re.subn(
+            r"^\}\s*$",
+            "    kill_wrong_ips = false,  -- smoke override (#214 Gap 2 test)\n}",
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    if n != 1:
+        raise TestFailure(
+            "could not set kill_wrong_ips=false in cfg.tbl - neither "
+            "the in-place substitution nor the inject-before-} pattern "
+            "matched. Did the cfg.tbl format change?"
+        )
+    cfg_path.write_text(new_text, encoding="utf-8")
+    time.sleep(1.0)
+    return start_hub(staging_dir)
+
+
+def test_kill_wrong_ips_off_stamps_userip(staging_dir: Path, proc=None):
+    """#214 Gap 2 regression. With `kill_wrong_ips = false` (the NAT-
+    weird-deployment opt-out), a BINF claiming a different IP than the
+    TCP source MUST NOT broadcast the lie - the hub MUST stamp the
+    verified `userip` over the wrong claim before the BINF goes out to
+    other clients. Pre-fix the wrong claim was forwarded as-is, which
+    let a hostile client redirect other users' CTM / RCM frames at an
+    arbitrary victim address (DDoS-amplification, see #214 body +
+    Wikipedia DC++ DDoS history).
+
+    Test:
+      1. Login dummy/test with `I4203.0.113.1` (RFC 5737 documentation
+         range - syntactically valid IPv4, definitely not 127.0.0.1).
+      2. Login MUST succeed (kill_wrong_ips=false preserves the
+         user's connection - that is the whole point of the opt-out).
+      3. Read the own-BINF echo. It MUST carry `I4127.0.0.1` (verified
+         userip), NOT `I4203.0.113.1` (the claim).
+
+    Falsifiable: on unpatched code the echo carries the lie, the
+    final `I4203.0.113.1 in final` check raises.
+    """
+    wait_for_port(HUB_HOST, TEST_PORT_PLAIN, START_TIMEOUT_SEC)
+    sock = socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    try:
+        reader = _ADCReader(sock)
+        sock.sendall(b"HSUP ADBASE ADTIGR\n")
+        reader.recv_until(lambda f: f.startswith("ISUP "))
+        isid = reader.recv_until(lambda f: f.startswith("ISID "))
+        sid = isid.split(" ", 1)[1].strip()
+        reader.recv_until(lambda f: f.startswith("IINF "))
+
+        pid_bytes = secrets.token_bytes(24)
+        cid_b32 = _b32_encode(_tiger.tiger(pid_bytes))
+        pid_b32 = _b32_encode(pid_bytes)
+        binf = (
+            f"BINF {sid}"
+            f" ID{cid_b32} PD{pid_b32} NIdummy"
+            f" I4203.0.113.1 SUTCP4\n"
+        )
+        sock.sendall(binf.encode("utf-8"))
+
+        gpa = reader.recv_until(lambda f: f.startswith("IGPA "))
+        salt_b32 = gpa.split(" ", 1)[1].strip()
+        salt_bytes = _b32_decode(salt_b32)
+        response = _tiger.tiger("test".encode("utf-8") + salt_bytes)
+        sock.sendall(f"HPAS {_b32_encode(response)}\n".encode("utf-8"))
+
+        final = reader.recv_until(
+            lambda f: f.startswith(f"BINF {sid}") or f.startswith("ISTA "),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if final.startswith("ISTA "):
+            raise TestFailure(
+                f"#214 Gap 2: kill_wrong_ips=false should preserve the "
+                f"user's connection on IP mismatch (the whole point of "
+                f"the opt-out). Got ISTA: {final!r}"
+            )
+
+        # The broadcast BINF echo MUST carry the verified userip
+        # (127.0.0.1), not the lie (203.0.113.1).
+        if "I4127.0.0.1" not in final:
+            raise TestFailure(
+                f"#214 Gap 2: broadcast BINF should carry "
+                f"I4127.0.0.1 (verified userip stamped over the claim) "
+                f"but does not. Frame: {final!r}"
+            )
+        if "I4203.0.113.1" in final:
+            raise TestFailure(
+                f"#214 Gap 2 regression: broadcast BINF carries the "
+                f"claimed wrong IP `I4203.0.113.1` (DDoS-amplification "
+                f"vector - other clients would direct CTM / RCM at the "
+                f"spoofed address). The unverified claim MUST be "
+                f"stamped over with userip before broadcast. "
+                f"Frame: {final!r}"
+            )
+    finally:
+        sock.close()
+
+
 def _switch_to_blom_mode(staging_dir: Path, current_proc, current_log_file):
     """Phase 8 S5 (#147 T2.2) setup: stop the hub, flip
     `blom_enabled = false` to `true` in cfg.tbl so the next test
@@ -4629,6 +4748,25 @@ def main():
             failed.append("F-INF-2 integer clamps on user accessors (#219)")
         else:
             log("PASS  F-INF-2 integer clamps on user accessors (#219)")
+
+        # #214 Gap 2: flip kill_wrong_ips=false (the NAT-weird opt-out)
+        # and verify the hub stamps the verified userip over a
+        # mismatched primary-IP claim before broadcasting the BINF.
+        # Falsifiable: pre-#214 the lie was forwarded as-is. The
+        # cfg flip persists for subsequent tests, which is fine -
+        # no currently-registered downstream test sends a mismatching
+        # primary-IP claim from 127.0.0.1, so the opt-out has no
+        # observable effect on BLOM / ZLIF / combined / hub_listen.
+        try:
+            proc, log_file = _switch_to_kill_wrong_ips_off_mode(
+                staging_dir, proc, log_file
+            )
+            test_kill_wrong_ips_off_stamps_userip(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  kill_wrong_ips=false stamps userip (#214 Gap 2): {e}")
+            failed.append("kill_wrong_ips=false stamps userip (#214 Gap 2)")
+        else:
+            log("PASS  kill_wrong_ips=false stamps userip (#214 Gap 2)")
 
         # Phase 8 S5 (#147 T2.2): enable BLOM and exercise hash-search
         # routing + the keyword-search broadcast regression. Runs
