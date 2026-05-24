@@ -3971,6 +3971,126 @@ def test_http_phase3_etc_log_cleaner(staging_dir: Path, proc=None):
         raise TestFailure(f"catalog missing /v1/log/{{name}}; body={b!r}")
 
 
+def test_http_topic(staging_dir: Path, proc=None):
+    """#82 deferred Phase-2-spec item: cmd_topic plugin migrates to
+    POST /v1/topic. Coexists with the ADC `+topic` chat-cmd.
+
+    Coverage:
+    - Anonymous POST -> 401.
+    - POST {topic: "Smoke set"} -> 200 + action:topic-set + topic +
+      previous.
+    - POST {topic: ""} -> 200 + action:topic-reset + topic=default
+      (the previous set above is "previous").
+    - POST {} -> 200 + action:topic-reset (missing field = reset).
+    - POST {topic: "default"} -> action:topic-set (literal value, NOT
+      magic-keyword reset - HTTP path documented to differ from ADC).
+    - Schema: {topic: 12345} (non-string) -> 400 E_BAD_INPUT.
+    - /v1/endpoints catalog lists POST /v1/topic.
+    """
+    import json as _json
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def post(body: bytes, with_auth: bool = True):
+        h = auth if with_auth else b""
+        return _http_roundtrip(
+            b"POST /v1/topic HTTP/1.1\r\n" + h +
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"\r\n" + body
+        )
+
+    # 1. Anonymous -> 401.
+    r = post(b"{}", with_auth=False)
+    if "401" not in status(r):
+        raise TestFailure(
+            f"anonymous POST /v1/topic: expected 401, got {status(r)!r}"
+        )
+
+    # 2. Set topic to a known value.
+    r = post(b'{"topic":"Smoke set"}')
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"POST /v1/topic set: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    if data.get("action") != "topic-set" or data.get("topic") != "Smoke set":
+        raise TestFailure(
+            f"POST /v1/topic set: unexpected envelope; body={body_of(r)!r}"
+        )
+
+    # 3. Reset via empty topic field.
+    r = post(b'{"topic":""}')
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    if data.get("action") != "topic-reset":
+        raise TestFailure(
+            f"POST /v1/topic reset (empty): expected action=topic-reset; "
+            f"body={body_of(r)!r}"
+        )
+    if data.get("previous") != "Smoke set":
+        raise TestFailure(
+            f"POST /v1/topic reset: expected previous='Smoke set' (the "
+            f"value set in step 2); body={body_of(r)!r}"
+        )
+
+    # 4. Reset via missing topic field (empty body).
+    r = post(b'{}')
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    if data.get("action") != "topic-reset":
+        raise TestFailure(
+            f"POST /v1/topic reset (missing field): expected "
+            f"action=topic-reset; body={body_of(r)!r}"
+        )
+
+    # 5. Literal "default" sets the topic to the WORD "default" on
+    # the HTTP path (NOT magic-keyword reset). Documented difference
+    # from the ADC `+topic default` cmd.
+    r = post(b'{"topic":"default"}')
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    if data.get("action") != "topic-set" or data.get("topic") != "default":
+        raise TestFailure(
+            f"POST /v1/topic literal default: expected action=topic-set "
+            f"+ topic='default' (HTTP path differs from ADC magic-keyword); "
+            f"body={body_of(r)!r}"
+        )
+
+    # 6. Schema reject: non-string topic.
+    r = post(b'{"topic":12345}')
+    if "400" not in status(r):
+        raise TestFailure(
+            f"POST /v1/topic with non-string: expected 400, got {status(r)!r}"
+        )
+    if '"E_BAD_INPUT"' not in body_of(r):
+        raise TestFailure(
+            f"POST /v1/topic non-string: expected E_BAD_INPUT; body={body_of(r)!r}"
+        )
+
+    # 7. /v1/endpoints catalog lists POST /v1/topic.
+    r = _http_roundtrip(b"GET /v1/endpoints HTTP/1.1\r\n" + auth + b"\r\n")
+    b = body_of(r)
+    if '"/v1/topic"' not in b:
+        raise TestFailure(f"catalog missing /v1/topic; body={b!r}")
+
+
 def test_http_reload(staging_dir: Path, proc=None):
     """#82 deferred Phase-2-spec item: cmd_reload plugin migrates to
     POST /v1/reload (X-Confirm). Coexists with the ADC `+reload`
@@ -5652,6 +5772,18 @@ def main():
             failed.append("HTTP API Phase 3 etc_log_cleaner (#82 / #225)")
         else:
             log("PASS  HTTP API Phase 3 etc_log_cleaner (#82 / #225)")
+
+        # #82 deferred Phase-2-spec: cmd_topic migrated to
+        # POST /v1/topic. Set + reset + schema-reject + catalog.
+        # Runs before reload (which clears the topic_tbl state via
+        # restartscripts).
+        try:
+            test_http_topic(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API cmd_topic (#82): {e}")
+            failed.append("HTTP API cmd_topic (#82)")
+        else:
+            log("PASS  HTTP API cmd_topic (#82)")
 
         # #82 deferred Phase-2-spec: cmd_reload migrated to
         # POST /v1/reload (X-Confirm). Exercises both reject + success

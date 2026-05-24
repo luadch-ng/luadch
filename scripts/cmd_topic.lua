@@ -5,6 +5,10 @@
         - this script adds a command "topic"
         - usage: [+!#]topic <NEW-TOPIC>|default
 
+        v0.04:
+            - HTTP API: POST /v1/topic (admin scope)  #82 deferred Phase-2-spec
+            - extract do_set_topic / do_reset_topic helpers shared by ADC + HTTP
+
         v0.03: by pulsar
             - add possibility to reset topic to default  / requested by Sopor
             - using report import functionality now
@@ -24,7 +28,7 @@
 --// settings begin //--
 
 local scriptname = "cmd_topic"
-local scriptversion = "0.03"
+local scriptversion = "0.04"
 
 local cmd = "topic"
 
@@ -80,6 +84,38 @@ local ucmd_popup = lang.ucmd_popup or "New Topic:"
 local old, new = "old", "new"
 
 --// CODE
+
+-- Shared action helpers used by BOTH the ADC `+topic` chat-cmd path
+-- AND the HTTP `POST /v1/topic` path (#82). Each helper performs
+-- the persistence + IINF broadcast for its operation and returns
+-- the formatted report message string for the caller to send via
+-- report.send at the right moment for its surface.
+--
+-- `actor_label` is whatever name the operator uses on their
+-- surface: a nick for the ADC path, a non-secret token label for
+-- the HTTP path. Caller is responsible for control-byte
+-- sanitisation of the inputs (defence in depth around adclib
+-- escape, matching Phase 2/3 plugin migrations).
+local do_set_topic = function( topic, actor_label )
+    if topic_tbl[ new ] then
+        topic_tbl[ old ] = topic_tbl[ new ]
+        topic_tbl[ new ] = topic
+    else
+        topic_tbl[ old ] = default_topic
+        topic_tbl[ new ] = topic
+    end
+    util_savetable( topic_tbl, "topic_tbl", topic_file )
+    hub_sendtoall( "IINF DE" .. hub_escapeto( topic ) .. "\n" )
+    return utf_format( msg_topic_changed, actor_label, topic, topic_tbl[ old ] )
+end
+
+local do_reset_topic = function( actor_label )
+    topic_tbl = { }
+    util_savetable( topic_tbl, "topic_tbl", topic_file )
+    hub_sendtoall( "IINF DE" .. hub_escapeto( default_topic ) .. "\n" )
+    return utf_format( msg_topic_reset, actor_label, default_topic )
+end
+
 local ontopic = function( user, command, parameters )
     local user_level = user:level()
     local user_nick = user:nick()
@@ -92,28 +128,54 @@ local ontopic = function( user, command, parameters )
         user:reply( msg_usage, hub_getbot )
         return PROCESSED
     end
+    local msg
     if topic == "default" then
-        topic_tbl = {}
-        util_savetable( topic_tbl, "topic_tbl", topic_file )
-        hub_sendtoall( "IINF DE" .. hub_escapeto( default_topic ) .. "\n" )
-        local msg = utf_format( msg_topic_reset, user_nick, default_topic )
-        user:reply( msg, hub_getbot )
-        report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
-        return PROCESSED
-    end
-    if topic_tbl[ new ] then
-        topic_tbl[ old ] = topic_tbl[ new ]
-        topic_tbl[ new ] = topic
+        msg = do_reset_topic( user_nick )
     else
-        topic_tbl[ old ] = default_topic
-        topic_tbl[ new ] = topic
+        msg = do_set_topic( topic, user_nick )
     end
-    util_savetable( topic_tbl, "topic_tbl", topic_file )
-    hub_sendtoall( "IINF DE" .. hub_escapeto( topic ) .. "\n" )
-    local msg = utf_format( msg_topic_changed, user_nick, topic, topic_tbl[ old ] )
     user:reply( msg, hub_getbot )
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
     return PROCESSED
+end
+
+-- HTTP handler: POST /v1/topic (#82). Admin scope.
+--
+-- Body shape: `{topic?: string}` (max 256 chars, control-byte
+-- sanitised). Missing OR empty topic field resets the hub topic
+-- to `cfg.hub_description`. Non-empty topic sets it.
+--
+-- Operators wanting to literally set the hub topic to the word
+-- "default" can do so via HTTP (`{"topic": "default"}`) - the
+-- magic-keyword pattern from the ADC `+topic default` cmd does
+-- NOT apply on the HTTP path because we have a structured body
+-- to express "reset" via absence.
+--
+-- The ADC-side `cmd_topic_minlevel` does NOT apply on the HTTP
+-- path: the bearer token's `admin` scope IS the authorisation
+-- gate (consistent with the rest of #82).
+local http_handler_topic = function( req )
+    local body = req.body or { }
+    local topic = body.topic
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    local previous = topic_tbl[ new ] or default_topic
+    local msg, action, new_topic
+    if not topic or topic == "" then
+        msg = do_reset_topic( actor_label )
+        action = "topic-reset"
+        new_topic = default_topic
+    else
+        local clean_topic = util.strip_control_bytes( topic )
+        msg = do_set_topic( clean_topic, actor_label )
+        action = "topic-set"
+        new_topic = clean_topic
+    end
+    report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+    return { status = 200, data = {
+        action   = action,
+        topic    = new_topic,
+        previous = previous,
+    } }
 end
 
 hub.setlistener( "onLogin", { },
@@ -139,6 +201,23 @@ hub.setlistener( "onStart", { },
         hubcmd = hub_import( "etc_hubcommands" )    -- add hubcommand
         assert( hubcmd )
         assert( hubcmd.add( cmd, ontopic ) )
+        -- HTTP API endpoint (#82). Coexists with the ADC `+topic`
+        -- chat-cmd above. Raw hub.http_register (not util_http)
+        -- because this is a hub-control endpoint with no SID target.
+        if hub.http_register then
+            hub.http_register( "POST", "/v1/topic", "admin", http_handler_topic, {
+                plugin = scriptname,
+                description = "set or reset the hub topic (= ADC `+topic <text>` or `+topic default`). body { topic?: string }; absent / empty resets to cfg.hub_description, non-empty sets.",
+                request_schema = {
+                    topic = { type = "string", max_length = 256 },
+                },
+                response_schema = {
+                    action   = { type = "string", required = true },
+                    topic    = { type = "string", required = true },
+                    previous = { type = "string", required = true },
+                },
+            } )
+        end
         return nil
     end
 )

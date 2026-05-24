@@ -984,10 +984,12 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 | Method | Path | Scope | Plugin |
 |---|---|---|---|
 | POST | `/v1/announce` | admin | `cmd_mass` - body: `{message, scope: "all"\|"hub"\|"level", level?: int}`. `all` = announce to everyone (`+mass`), `hub` = announce without sender (`+masshub`), `level` = announce to level N (`+masslvl N`). |
-| POST | `/v1/topic` | admin | `cmd_topic` |
+| POST | `/v1/topic` | admin | `cmd_topic` - **migrated** [^http-topic-1] |
 | POST | `/v1/reload` | admin | `cmd_reload` - requires `X-Confirm: yes` (§4.6) - **migrated** [^http-reload-1] |
 | POST | `/v1/restart` | admin | `cmd_restart` - requires `X-Confirm: yes` (§4.6) - **migrated (Phase 3 PR-1)** [^http-restart-1] |
 | POST | `/v1/shutdown` | admin | `cmd_shutdown` - requires `X-Confirm: yes` (§4.6) - **migrated (Phase 3 PR-2)** [^http-shutdown-1] |
+
+[^http-topic-1]: Body `{topic?: string}` (max 256 chars, control-byte sanitised). Missing OR empty `topic` resets the hub topic to `cfg.hub_description`; non-empty sets it. The ADC `+topic default` magic-keyword does NOT apply on the HTTP path - the structured body expresses "reset" via absence, so HTTP callers CAN literally set the topic to the word "default" via `{"topic": "default"}`. Returns 200 with `data: {action:"topic-set"|"topic-reset", topic, previous}` per §7.1.1. The new topic is broadcast to all connected users via `IINF DE...` and persisted to `scripts/data/cmd_topic.tbl`. ADC-side `cmd_topic_minlevel` does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
 
 [^http-reload-1]: No request body. Returns 200 with `data: {action:"reload", reloaded:["cfg", "scripts"]}` per §7.1.1 (hub-control variant: no `sid`/`nick`). `hub.restartscripts()` clears + re-registers the entire HTTP route table from plugin `onStart` listeners; the in-flight handler's closure is captured and the response is sent normally. Lua is single-threaded so no concurrent-reload guard is needed. Idempotent retries via `X-Idempotency-Key` replay the cached 200 (desired - operator-tool retry should not double-reload). The ADC-side `cmd_reload_permission` level table does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
 
