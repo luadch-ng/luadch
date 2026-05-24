@@ -4237,6 +4237,254 @@ def test_http_topic(staging_dir: Path, proc=None):
         raise TestFailure(f"catalog missing /v1/topic; body={b!r}")
 
 
+def test_http_registered_users_pr1(staging_dir: Path, proc=None):
+    """#82 registered-users family PR-1 (#236): cmd_reg plugin migrates
+    GET /v1/registered (paginated, read), POST /v1/registered (admin),
+    PATCH /v1/registered/{nick} (admin). Coexists with the ADC `+reg`
+    chat-cmd.
+
+    Coverage:
+    - Anonymous GET -> 401.
+    - GET /v1/registered -> 200 + envelope.data.registered[] +
+      pagination sibling per §6.4.
+    - GET ?limit=1 -> respects limit clamp.
+    - POST missing nick -> 400 E_BAD_INPUT.
+    - POST with valid body (no password) -> 200 + action:register +
+      password echoed back, comment empty by default.
+    - POST same nick again -> 409 E_CONFLICT (nick already regged).
+    - POST with caller-supplied password -> 200 + password matches.
+    - PATCH /v1/registered/{nick} {comment: "smoke"} -> 200 + action:
+      patch-registered + comment="smoke".
+    - PATCH with empty body -> 400 (no patchable fields).
+    - PATCH unknown nick -> 404 E_NOT_FOUND.
+    - GET shows the patched comment in the entry.
+    - /v1/endpoints catalog lists all three routes.
+
+    Placement note: runs BEFORE test_http_reload so the test's persisted
+    users are still in-memory + on-disk when the reload tests fire. The
+    reload test asserts route-table survival, not data survival.
+    """
+    import json as _json
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def req(method: bytes, path: bytes, body: bytes = b"", with_auth: bool = True):
+        h = auth if with_auth else b""
+        if body:
+            return _http_roundtrip(
+                method + b" " + path + b" HTTP/1.1\r\n" + h +
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+                b"\r\n" + body
+            )
+        return _http_roundtrip(
+            method + b" " + path + b" HTTP/1.1\r\n" + h + b"\r\n"
+        )
+
+    # 1. Anonymous GET -> 401.
+    r = req(b"GET", b"/v1/registered", with_auth=False)
+    if "401" not in status(r):
+        raise TestFailure(
+            f"anonymous GET /v1/registered: expected 401, got {status(r)!r}"
+        )
+
+    # 2. GET list -> 200 with envelope + pagination.
+    r = req(b"GET", b"/v1/registered")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"GET /v1/registered: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    if not parsed.get("ok"):
+        raise TestFailure(f"GET /v1/registered: ok!=true; body={body_of(r)!r}")
+    if "registered" not in (parsed.get("data") or {}):
+        raise TestFailure(
+            f"GET /v1/registered: data.registered missing; body={body_of(r)!r}"
+        )
+    pag = parsed.get("pagination") or {}
+    for key in ("total", "limit", "offset"):
+        if key not in pag:
+            raise TestFailure(
+                f"GET /v1/registered: pagination missing {key!r}; body={body_of(r)!r}"
+            )
+
+    # 3. limit=1 respected.
+    r = req(b"GET", b"/v1/registered?limit=1")
+    parsed = _json.loads(body_of(r))
+    page = parsed.get("data", {}).get("registered", [])
+    if len(page) > 1:
+        raise TestFailure(
+            f"GET /v1/registered?limit=1: expected <=1 entries, got {len(page)}"
+        )
+    if parsed.get("pagination", {}).get("limit") != 1:
+        raise TestFailure(
+            f"GET /v1/registered?limit=1: pagination.limit != 1; body={body_of(r)!r}"
+        )
+
+    # 4. POST missing nick -> 400.
+    r = req(b"POST", b"/v1/registered", b'{"level":20}')
+    if "400" not in status(r):
+        raise TestFailure(
+            f"POST /v1/registered missing nick: expected 400, got {status(r)!r}"
+        )
+    if '"E_BAD_INPUT"' not in body_of(r):
+        raise TestFailure(
+            f"POST /v1/registered missing nick: expected E_BAD_INPUT; body={body_of(r)!r}"
+        )
+
+    # 5. POST create -> 200 + password echoed back.
+    r = req(b"POST", b"/v1/registered",
+            b'{"nick":"smoke_pr1_a","level":20}')
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"POST /v1/registered create: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    if data.get("action") != "register" or data.get("nick") != "smoke_pr1_a":
+        raise TestFailure(
+            f"POST /v1/registered create: unexpected envelope; body={body_of(r)!r}"
+        )
+    if not data.get("password"):
+        raise TestFailure(
+            f"POST /v1/registered create: expected non-empty password; body={body_of(r)!r}"
+        )
+
+    # 6. POST same nick again -> 409.
+    r = req(b"POST", b"/v1/registered",
+            b'{"nick":"smoke_pr1_a","level":20}')
+    if "409" not in status(r):
+        raise TestFailure(
+            f"POST /v1/registered duplicate: expected 409, got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 7. POST with caller-supplied password.
+    r = req(b"POST", b"/v1/registered",
+            b'{"nick":"smoke_pr1_b","level":20,"password":"supplied_pw_xyz"}')
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    if data.get("password") != "supplied_pw_xyz":
+        raise TestFailure(
+            f"POST /v1/registered with password: expected echo back; body={body_of(r)!r}"
+        )
+
+    # 8. PATCH comment -> 200.
+    r = req(b"PATCH", b"/v1/registered/smoke_pr1_a",
+            b'{"comment":"smoke test note"}')
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"PATCH /v1/registered/smoke_pr1_a: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    if data.get("action") != "patch-registered" or data.get("comment") != "smoke test note":
+        raise TestFailure(
+            f"PATCH /v1/registered/smoke_pr1_a: unexpected envelope; body={body_of(r)!r}"
+        )
+
+    # 9. PATCH empty body -> 400 (no patchable fields).
+    r = req(b"PATCH", b"/v1/registered/smoke_pr1_a", b'{}')
+    if "400" not in status(r):
+        raise TestFailure(
+            f"PATCH empty body: expected 400, got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 10. PATCH unknown nick -> 404.
+    r = req(b"PATCH", b"/v1/registered/nonexistent_smoke_user",
+            b'{"comment":"x"}')
+    if "404" not in status(r):
+        raise TestFailure(
+            f"PATCH unknown nick: expected 404, got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 11. GET shows the patched comment in the entry.
+    r = req(b"GET", b"/v1/registered?limit=1000")
+    parsed = _json.loads(body_of(r))
+    page = parsed.get("data", {}).get("registered", [])
+    found = None
+    for entry in page:
+        if entry.get("nick") == "smoke_pr1_a":
+            found = entry
+            break
+    if not found:
+        raise TestFailure(
+            f"GET /v1/registered: smoke_pr1_a missing from list; body={body_of(r)!r}"
+        )
+    if found.get("comment") != "smoke test note":
+        raise TestFailure(
+            f"GET /v1/registered: smoke_pr1_a comment mismatch; got {found!r}"
+        )
+    if found.get("level") != 20:
+        raise TestFailure(
+            f"GET /v1/registered: smoke_pr1_a level != 20; got {found!r}"
+        )
+    if "password" in found:
+        raise TestFailure(
+            f"GET /v1/registered: password leaked in list view; got {found!r}"
+        )
+
+    # 12. Empty-string comment clears the description entirely:
+    # a follow-up GET must show comment="" for that nick (no
+    # stale empty-reason record left behind).
+    r = req(b"PATCH", b"/v1/registered/smoke_pr1_a", b'{"comment":""}')
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"PATCH empty comment (clear): expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    r = req(b"GET", b"/v1/registered?limit=1000")
+    parsed = _json.loads(body_of(r))
+    for entry in parsed.get("data", {}).get("registered", []):
+        if entry.get("nick") == "smoke_pr1_a":
+            if entry.get("comment") != "":
+                raise TestFailure(
+                    f"GET after PATCH-empty: expected comment=''; got {entry!r}"
+                )
+            break
+
+    # 13. PATCH on a bot nick -> 404 (bots are excluded from
+    # /v1/registered surface; PATCH must mirror GET).
+    r = req(b"PATCH", b"/v1/registered/luadch-NG",
+            b'{"comment":"should not stick"}')
+    # The bot's actual nick depends on cfg `hub_bot_nick`; the
+    # smoke staging uses "luadch-NG" (see cfg_defaults). If the
+    # name happens to differ we get 404 anyway via the
+    # not-registered branch - either way the contract holds:
+    # PATCH on the bot's nick must NOT return 200.
+    if "200" in status(r):
+        raise TestFailure(
+            f"PATCH on hubbot nick must not return 200; got {status(r)!r}"
+        )
+
+    # 14. /v1/endpoints catalog lists all three routes - precise
+    # match on the PATCH /v1/registered/{nick} combination, not
+    # just the path string + method letters in isolation.
+    r = req(b"GET", b"/v1/endpoints")
+    cat = body_of(r)
+    for needle in (
+        '"/v1/registered"',
+        '"/v1/registered/{nick}"',
+        '"register a new user',
+        '"update free-form fields',
+    ):
+        if needle not in cat:
+            raise TestFailure(f"catalog missing {needle!r}; body={cat!r}")
+
+
 def test_http_reload(staging_dir: Path, proc=None):
     """#82 deferred Phase-2-spec item: cmd_reload plugin migrates to
     POST /v1/reload (X-Confirm). Coexists with the ADC `+reload`
@@ -5941,6 +6189,20 @@ def main():
             failed.append("HTTP API cmd_topic (#82)")
         else:
             log("PASS  HTTP API cmd_topic (#82)")
+
+        # #82 registered-users family PR-1 (#236): cmd_reg migrated to
+        # GET / POST /v1/registered + PATCH /v1/registered/{nick}.
+        # Pagination + create + duplicate-409 + caller-pw + patch +
+        # password-not-leaked + catalog. Runs BEFORE reload so the
+        # created users are still in-memory when reload fires (reload
+        # asserts route-table survival, not data survival).
+        try:
+            test_http_registered_users_pr1(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API cmd_reg (#82 / #236 PR-1): {e}")
+            failed.append("HTTP API cmd_reg (#82 / #236 PR-1)")
+        else:
+            log("PASS  HTTP API cmd_reg (#82 / #236 PR-1)")
 
         # #82 deferred Phase-2-spec: cmd_reload migrated to
         # POST /v1/reload (X-Confirm). Exercises both reject + success

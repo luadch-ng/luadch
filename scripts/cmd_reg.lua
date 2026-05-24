@@ -7,6 +7,13 @@
         - this script adds a command "reg" to reg users
         - note: be careful when using the nick prefix script: you should reg user nicks always WITHOUT prefix
 
+        v0.33:
+            - HTTP API (#82 registered-users family PR-1, #236):
+                - GET    /v1/registered           (read,  paginated; humans only)
+                - POST   /v1/registered           (admin; = ADC `+reg nick`)
+                - PATCH  /v1/registered/{nick}    (admin; = ADC `+reg desc`)
+            - Coexist with ADC `+reg`; ADC path unchanged.
+
         v0.32: by pulsar
             - refresh "cfg/user.tbl.bak" if a new user gets regged
 
@@ -128,7 +135,7 @@
 --------------
 
 local scriptname = "cmd_reg"
-local scriptversion = "0.32"
+local scriptversion = "0.33"
 
 local cmd = "reg"
 
@@ -288,6 +295,18 @@ local description_add = function( targetnick, nick, reason )
     util.savetable( description_tbl, "description_tbl", description_file )
 end
 
+-- Mirror of description_add for the empty-comment case on the
+-- HTTP PATCH path: removes the entry entirely so the GET list
+-- shows comment="" via the `desc and desc.tReason or ""` fallback,
+-- rather than persisting an empty-reason record forever.
+local description_del = function( targetnick )
+    description_tbl = util.loadtable( description_file ) or {}
+    if description_tbl[ targetnick ] then
+        description_tbl[ targetnick ] = nil
+        util.savetable( description_tbl, "description_tbl", description_file )
+    end
+end
+
 local onbmsg = function( user, command, parameters )
     local user_nick = user:nick()
     local user_firstnick = user:firstnick()
@@ -388,6 +407,249 @@ local onbmsg = function( user, command, parameters )
     return PROCESSED
 end
 
+-- HTTP API endpoints (#82 registered-users family PR-1, #236).
+-- Coexist with the ADC `+reg` chat-cmd above. Registered via raw
+-- `hub.http_register` (NOT util_http.http_register_user_action)
+-- because /v1/registered is not a SID-target resource - nick is
+-- the natural primary key (§7.4 / §10.2). Pattern mirrors cmd_ban
+-- PR-4 (#209).
+--
+-- The ADC-side `cmd_reg_permission` level-ladder does NOT apply
+-- on the HTTP path: the bearer token's `admin` scope IS the
+-- authorisation gate (consistent with all prior #82 phases).
+
+local format_reguser_entry = function( profile, desc_tbl )
+    local level = tonumber( profile.level ) or 0
+    local levels = cfg.get( "levels" ) or {}
+    local desc = desc_tbl[ profile.nick ]
+    return {
+        nick       = profile.nick or "",
+        level      = level,
+        level_name = levels[ level ] or "Unreg",
+        by         = profile.by or "",
+        regged_at  = profile.date or "",
+        lastseen   = tonumber( profile.lastseen ) or 0,
+        comment    = ( desc and desc.tReason ) or "",
+    }
+end
+
+local http_handler_list_regusers = function( req )
+    local regusers = hub.getregusers()
+    -- Per-request snapshot of the description side-table; consistent
+    -- within one paginated response, freshly re-read on the next call.
+    local desc_tbl = util.loadtable( description_file ) or {}
+    -- Exclude bots (matches /v1/users humans-only semantics; bot
+    -- listing belongs to a future /v1/bots endpoint, not Phase 8).
+    local humans = {}
+    for _, profile in ipairs( regusers ) do
+        if profile.is_bot ~= 1 and profile.nick then
+            humans[ #humans + 1 ] = profile
+        end
+    end
+    table.sort( humans, function( a, b ) return ( a.nick or "" ) < ( b.nick or "" ) end )
+
+    local limit  = tonumber( req.query and req.query.limit ) or 200
+    local offset = tonumber( req.query and req.query.offset ) or 0
+    if limit  < 1    then limit  = 1    end
+    if limit  > 1000 then limit  = 1000 end
+    if offset < 0    then offset = 0    end
+    limit  = math.floor( limit )
+    offset = math.floor( offset )
+
+    local total = #humans
+    local page  = {}
+    for i = offset + 1, math.min( offset + limit, total ) do
+        page[ #page + 1 ] = format_reguser_entry( humans[ i ], desc_tbl )
+    end
+    local next_offset
+    if offset + limit < total then next_offset = offset + limit end
+
+    -- §6.4 wants `pagination` as a sibling of `data` - the envelope
+    -- helper carries only `data`, so we encode the wire body
+    -- ourselves and return it as raw_body. Mirrors /v1/users.
+    local wire = dkjson.encode( {
+        ok         = true,
+        data       = { registered = page },
+        pagination = {
+            total       = total,
+            limit       = limit,
+            offset      = offset,
+            next_offset = next_offset,
+        },
+    } )
+    return { status = 200, raw_body = wire,
+        content_type = "application/json; charset=utf-8" }
+end
+
+-- POST /v1/registered: register a new user.
+-- Body: { nick, level, password?, comment? }. Absent password =>
+-- auto-generated server-side (matches ADC behaviour) and returned
+-- in the response so the admin can communicate it to the user.
+-- `level` must be a valid level in cfg.levels. Blacklisted nicks
+-- (from cmd_delreg) return 409 to make the operator clear the
+-- blacklist deliberately rather than silently re-reg.
+local http_handler_create_reguser = function( req )
+    local body = req.body or {}
+    local nick = body.nick
+    local level = tonumber( body.level )
+    if type( nick ) ~= "string" or nick == "" then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "missing or empty `nick` field" } }
+    end
+    if not level or level ~= math.floor( level ) or level < 0 then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "missing or invalid `level` field (expected non-negative integer)" } }
+    end
+    -- Coerce to a Lua integer: math.floor returns an integer in 5.4,
+    -- so `tostring(level)` is "20" not "20.0" - the latter would
+    -- fail hub.reguser's `^%d+$` regex on the `level` field.
+    level = math.floor( level )
+    local clean_nick = util.strip_control_bytes( nick )
+    if clean_nick:find( " " ) or clean_nick:find( "\n" ) then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "`nick` may not contain whitespace" } }
+    end
+    if #clean_nick < min_length or #clean_nick > max_length then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = utf.format( "nick length must be between %s and %s characters", min_length, max_length ) } }
+    end
+    local levels = cfg.get( "levels" ) or {}
+    if not levels[ level ] then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "unknown level " .. level .. " (not present in cfg.levels)" } }
+    end
+
+    local blacklist_tbl_local = util.loadtable( blacklist_file ) or {}
+    if blacklist_tbl_local[ clean_nick ] then
+        local entry = blacklist_tbl_local[ clean_nick ]
+        return { status = 409, error = { code = "E_CONFLICT",
+            message = "nick is on the cmd_delreg blacklist (deleted " .. ( entry.tDate or "?" ) .. " by " .. ( entry.tBy or "?" ) .. ")" } }
+    end
+
+    local password
+    if body.password ~= nil and body.password ~= "" then
+        if type( body.password ) ~= "string" then
+            return { status = 400, error = { code = "E_BAD_INPUT",
+                message = "`password` must be a string" } }
+        end
+        password = util.strip_control_bytes( body.password )
+        if password:find( "%s" ) then
+            return { status = 400, error = { code = "E_BAD_INPUT",
+                message = "`password` may not contain whitespace" } }
+        end
+    else
+        password = util.generatepass()
+    end
+
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    -- `by` field is persisted into user.tbl and matched against
+    -- `_regex.reguser.by = "^[^ \n]+$"` by hub.reguser; the router
+    -- builds token_label as `<comment> (first4...last4)` which has
+    -- spaces, so strip whitespace to a single underscore before
+    -- handing it to hub.reguser. Empty-string actor (very unusual,
+    -- caller built it that way) falls back to a fixed sentinel so
+    -- the regex never sees `""`. Audit log keeps the raw label.
+    local by_label = ( actor_label:gsub( "[%s]+", "_" ) )
+    if by_label == "" then by_label = "http-api" end
+    local ok, err = hub.reguser{
+        nick = clean_nick, password = password, level = level, by = by_label,
+    }
+    if not ok then
+        if err == "nick already regged" then
+            return { status = 409, error = { code = "E_CONFLICT",
+                message = "nick already regged" } }
+        end
+        return { status = 500, error = { code = "E_INTERNAL",
+            message = "hub.reguser failed: " .. ( err or "unknown" ) } }
+    end
+
+    local clean_comment = ""
+    if body.comment ~= nil and body.comment ~= "" then
+        if type( body.comment ) ~= "string" then
+            return { status = 400, error = { code = "E_BAD_INPUT",
+                message = "`comment` must be a string" } }
+        end
+        clean_comment = util.strip_control_bytes( body.comment )
+        description_add( clean_nick, actor_label, clean_comment )
+    end
+
+    cfg.checkusers()
+
+    local levelname = levels[ level ] or "Unreg"
+    local msg = utf.format( msg_report, actor_label, clean_nick, level, levelname,
+                            ( clean_comment ~= "" and clean_comment or msg_nocomment ) )
+    report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+
+    return { status = 200, data = {
+        action     = "register",
+        nick       = clean_nick,
+        level      = level,
+        level_name = levelname,
+        password   = password,
+        comment    = clean_comment,
+    } }
+end
+
+-- PATCH /v1/registered/{nick}: update free-form fields. Currently
+-- only `comment` is supported (mirrors ADC `+reg desc`). The
+-- structured fields (password, nick, level) have dedicated PUT
+-- subresources per spec §10.2. Empty-string comment clears the
+-- description entry; absent comment field => 400 (no-op PATCH is
+-- a usage error, not an idempotent success).
+local http_handler_patch_reguser = function( req )
+    local nick_raw = req.path_vars and req.path_vars.nick
+    if not nick_raw or nick_raw == "" then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "missing {nick} path variable" } }
+    end
+    -- Router does not URL-decode or control-byte-strip path vars;
+    -- a request line with raw control bytes the framer let through
+    -- would otherwise reach the audit log + side-table key unclean.
+    local nick = util.strip_control_bytes( nick_raw )
+    local body = req.body or {}
+    if body.comment == nil then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "no patchable fields in body (supported: `comment`)" } }
+    end
+    if type( body.comment ) ~= "string" then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "`comment` must be a string" } }
+    end
+    local _, regnicks, _ = hub.getregusers()
+    local profile = regnicks[ nick ]
+    if not profile then
+        return { status = 404, error = { code = "E_NOT_FOUND",
+            message = "no registered user with nick '" .. nick .. "'" } }
+    end
+    -- Bots are excluded from GET /v1/registered for uniformity;
+    -- reject PATCH on bots so the surface contract stays consistent.
+    if profile.is_bot == 1 then
+        return { status = 404, error = { code = "E_NOT_FOUND",
+            message = "no registered user with nick '" .. nick .. "' (bots are not addressable via /v1/registered)" } }
+    end
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    local clean_comment = util.strip_control_bytes( body.comment )
+    -- Empty-string comment clears the description entry entirely
+    -- (matches the doc'd semantics; the ADC `+reg desc <nick> ""`
+    -- path silently no-ops, but the HTTP surface treats this as
+    -- an explicit "remove" so subsequent GET shows comment="").
+    if clean_comment == "" then
+        description_del( nick )
+    else
+        description_add( nick, actor_label, clean_comment )
+    end
+
+    local msg = utf.format( msg_desc, actor_label, nick,
+                            ( clean_comment ~= "" and clean_comment or msg_nocomment ) )
+    report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+
+    return { status = 200, data = {
+        action  = "patch-registered",
+        nick    = nick,
+        comment = clean_comment,
+    } }
+end
+
 hub.setlistener( "onStart", {},
     function()
         help = hub.import( "cmd_help" )
@@ -416,6 +678,51 @@ hub.setlistener( "onStart", {},
         hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
         assert( hubcmd.add( cmd, onbmsg ) )
+
+        if hub.http_register then
+            hub.http_register( "GET", "/v1/registered", "read", http_handler_list_regusers, {
+                plugin = scriptname,
+                description = "list registered users (humans only); paginated per §6.4 (?limit=<1..1000>&offset=<int>)",
+                response_schema = {
+                    registered = { type = "array", required = true },
+                },
+            } )
+            hub.http_register( "POST", "/v1/registered", "admin", http_handler_create_reguser, {
+                plugin = scriptname,
+                description = "register a new user (= ADC `+reg nick`). body { nick, level, password?, comment? }; absent/empty password => auto-generated + returned",
+                request_schema = {
+                    -- No max_length on nick: the handler enforces the
+                    -- cfg-driven `min_nickname_length` / `max_nickname_length`
+                    -- range, so an operator who has raised either above
+                    -- the schema's hardcoded ceiling is not silently
+                    -- shut out of the HTTP path.
+                    nick     = { type = "string",  required = true },
+                    level    = { type = "integer", required = true },
+                    password = { type = "string",  max_length = 256 },
+                    comment  = { type = "string",  max_length = 256 },
+                },
+                response_schema = {
+                    action     = { type = "string",  required = true },
+                    nick       = { type = "string",  required = true },
+                    level      = { type = "integer", required = true },
+                    level_name = { type = "string",  required = true },
+                    password   = { type = "string",  required = true },
+                    comment    = { type = "string",  required = true },
+                },
+            } )
+            hub.http_register( "PATCH", "/v1/registered/{nick}", "admin", http_handler_patch_reguser, {
+                plugin = scriptname,
+                description = "update free-form fields on a registered user (currently only `comment`; = ADC `+reg desc`). body { comment }; empty string clears the description",
+                request_schema = {
+                    comment = { type = "string", max_length = 256 },
+                },
+                response_schema = {
+                    action  = { type = "string", required = true },
+                    nick    = { type = "string", required = true },
+                    comment = { type = "string", required = true },
+                },
+            } )
+        end
         return nil
     end
 )
