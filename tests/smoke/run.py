@@ -5220,6 +5220,102 @@ def test_http_delreg_pr6(staging_dir: Path, proc=None):
         )
 
 
+def test_239_cmd_ban_stale_bans_ref(staging_dir: Path, proc=None):
+    """#239 regression: cmd_ban exported `bans` table goes stale
+    after `+ban clear` rebinds the local `bans = {}`. cmd_accinfo's
+    file-scope `local bans_tbl = ban.bans` (captured at module
+    import time) holds the OLD reference, so any subsequent ban-
+    status lookup (`+accinfoop` AND the new `GET /v1/registered/
+    {nick}` ban field) returns a stale snapshot.
+
+    Pre-fix repro:
+    1. POST /v1/bans to ban smoke_pr1_a (regged from PR-1, offline).
+    2. GET /v1/registered/smoke_pr1_a -> ban != null.
+    3. ADC `+ban clear` via dummy (level 100) -> triggers cleanbans.
+    4. GET /v1/registered/smoke_pr1_a -> ban != null (BUG; should
+       be null because the persisted bans table is now empty).
+
+    Post-fix (cleanbans mutates in place): step 4 returns ban=null.
+
+    Runs LAST in the HTTP suite before reload so the family's
+    persisted users / bans state is still intact.
+    """
+    import json as _json
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    # Step 1: POST /v1/bans on the offline-regged nick.
+    create_body = (
+        b'{"target_type":"nick","target":"smoke_pr1_a",'
+        b'"duration_minutes":60,"reason":"#239 regression test"}'
+    )
+    r = _http_roundtrip(
+        b"POST /v1/bans HTTP/1.1\r\n" + auth +
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: " + str(len(create_body)).encode("ascii") + b"\r\n"
+        b"\r\n" + create_body
+    )
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"#239 setup: POST /v1/bans expected 200, got {status(r)!r}; "
+            f"body={body_of(r)!r}"
+        )
+
+    # Step 2: ban shows up in GET /v1/registered/{nick}.
+    r = _http_roundtrip(
+        b"GET /v1/registered/smoke_pr1_a HTTP/1.1\r\n" + auth + b"\r\n"
+    )
+    parsed = _json.loads(body_of(r))
+    pre_ban = parsed.get("data", {}).get("ban")
+    if not pre_ban:
+        raise TestFailure(
+            f"#239 setup: GET expected ban != null after POST /v1/bans; "
+            f"got {parsed!r}"
+        )
+
+    # Step 3: trigger cleanbans via ADC `+ban clear` (level 100).
+    # ADC BMSG escapes spaces as `\s` (matches the existing pattern
+    # at the `[+!#]help` literal-prefix test); a literal space would
+    # otherwise terminate the message field early. The 3s sleep is
+    # the safer synchronisation than recv-on-pattern because the
+    # hub-bot reply can arrive AS a BMSG (the test sees it via the
+    # initial socket buffer if drained too early on a fast machine),
+    # so we just let the dispatch tick complete before the next GET.
+    with _logged_in_user() as (sock, sid, _reader):
+        sock.sendall(f"BMSG {sid} +ban\\sclear\n".encode("utf-8"))
+        time.sleep(3.0)
+
+    # Step 4: ban should be null after cleanbans. Pre-fix, the
+    # cmd_accinfo-held stale reference would still surface the
+    # ban entry here.
+    r = _http_roundtrip(
+        b"GET /v1/registered/smoke_pr1_a HTTP/1.1\r\n" + auth + b"\r\n"
+    )
+    parsed = _json.loads(body_of(r))
+    post_ban = parsed.get("data", {}).get("ban")
+    if post_ban is not None:
+        raise TestFailure(
+            f"#239 regression: GET after `+ban clear` expected ban=null; "
+            f"got {post_ban!r} - cmd_accinfo's bans_tbl is stale "
+            f"(cleanbans rebound the local, the import reference is now orphan)"
+        )
+
+
 def test_http_reload(staging_dir: Path, proc=None):
     """#82 deferred Phase-2-spec item: cmd_reload plugin migrates to
     POST /v1/reload (X-Confirm). Coexists with the ADC `+reload`
@@ -6995,6 +7091,19 @@ def main():
             failed.append("HTTP API cmd_delreg (#82 / #236 PR-6)")
         else:
             log("PASS  HTTP API cmd_delreg (#82 / #236 PR-6)")
+
+        # #239: cmd_ban exported bans table goes stale after the
+        # `+ban clear` rebind; cmd_accinfo's import-time bans_tbl
+        # snapshot keeps surfacing the old ban entry. Repros via
+        # ADC `+ban clear` + GET /v1/registered/{nick}. Runs after
+        # the family so smoke_pr1_a still exists.
+        try:
+            test_239_cmd_ban_stale_bans_ref(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  cmd_ban stale bans ref (#239): {e}")
+            failed.append("cmd_ban stale bans ref (#239)")
+        else:
+            log("PASS  cmd_ban stale bans ref (#239)")
 
         # #82 deferred Phase-2-spec: cmd_reload migrated to
         # POST /v1/reload (X-Confirm). Exercises both reject + success

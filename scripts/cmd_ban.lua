@@ -11,6 +11,19 @@
             - <time> and <reason> are optional
 
 
+        v0.38:
+            - fix #239: cleanbans() now mutates the `bans` table in
+              place instead of rebinding `bans = {}`. The exported
+              `ban.bans` reference (captured at module-load time by
+              importers like cmd_accinfo's `local bans_tbl = ban.bans`)
+              previously went stale across `+ban clear`, so
+              `+accinfoop` and the HTTP `GET /v1/registered/{nick}`
+              ban field surfaced ghost entries that no longer
+              existed on disk. Only `cleanbans()` rebound the local;
+              all other mutations (add / del / HTTP delete-by-index)
+              already used `table.insert` / `table.remove` /
+              `bans[k] = ...` in place. Smoke regression test added.
+
         v0.37: by Aybo
             - HTTP API endpoints (#82 Phase 2 PR-4):
                 GET    /v1/bans                  (= +ban show)
@@ -191,7 +204,7 @@
 --------------
 
 local scriptname = "cmd_ban"
-local scriptversion = "0.37"
+local scriptversion = "0.38"
 
 local cmd = "ban"
 local cmd2 = "unban"
@@ -517,7 +530,14 @@ local showhistory = function( hnick )
 end
 
 local cleanbans = function()
-    bans = {}
+    -- In-place clear instead of `bans = {}` rebind: the exported
+    -- `ban.bans` reference (line ~1089) is captured at module-load
+    -- time, so a local-rebind would leave importers
+    -- (cmd_accinfo's `local bans_tbl = ban.bans`) holding a stale
+    -- snapshot - and `+ban clear` is the only mutation that
+    -- previously REBOUND the local. Mutating in place keeps the
+    -- export reference live across `+ban clear`. Closes #239.
+    for k in pairs( bans ) do bans[ k ] = nil end
     util.savearray( bans, bans_path )
 end
 
