@@ -4,6 +4,9 @@
 
         usage: [+!#]cleanlog error|cmd
         
+        v0.9:
+            - HTTP API: DELETE /v1/log/{name} (admin scope)  #82 Phase 3 PR-5
+
         v0.8:
             - improved rightclick entries  / thx Sopor
             - improved some parts of code (table lookups etc)
@@ -36,7 +39,17 @@
 --------------
 
 local scriptname = "etc_log_cleaner"
-local scriptversion = "0.8"
+local scriptversion = "0.9"
+
+-- Allowed log names for the HTTP `DELETE /v1/log/{name}` endpoint
+-- (#82 Phase 3 PR-5). The ADC `+cleanlog <name>` cmd supports the
+-- same set; spec line in docs/HTTP_API.md §10.2 was originally
+-- aspirational about adding `event` / `script` later (the plugin
+-- never supported those - the spec was wrong, not the plugin).
+local HTTP_LOG_PATHS = {
+    error = "log/error.log",
+    cmd   = "log/cmd.log",
+}
 
 local cmd = "cleanlog"
 
@@ -95,6 +108,52 @@ local cleanlog = function( log )
     f:close()
 end
 
+-- File-size lookup for the HTTP response's `bytes_before` field.
+-- Returns 0 if the file does not exist or cannot be sized.
+local file_size = function( path )
+    local f = io_open( path, "r" )
+    if not f then return 0 end
+    local n = f:seek( "end" ) or 0
+    f:close()
+    return n
+end
+
+-- HTTP handler: DELETE /v1/log/{name} (#82 Phase 3 PR-5).
+-- Admin scope. `{name}` must be one of the keys in HTTP_LOG_PATHS
+-- (currently `error` or `cmd`). Truncates the corresponding file
+-- to 0 bytes and returns 200 with `data: {action:"log-cleared",
+-- name, bytes_before}` per §7.1.1 (hub-control variant: no
+-- `sid`/`nick`).
+--
+-- The ADC-side `etc_log_cleaner_activate_error` /
+-- `_activate_cmd` flags do NOT apply on the HTTP path: the
+-- bearer token's `admin` scope IS the authorisation gate
+-- (consistent with the rest of Phase 3 and matching the
+-- "admin token = god mode" convention from Phase 2 PRs). An
+-- operator who needs to deny cleanup from a specific token
+-- should simply not issue that token at admin scope.
+local http_handler_clean_log = function( req )
+    local name = req.path_vars and req.path_vars.name
+    local path = name and HTTP_LOG_PATHS[ name ]
+    if not path then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "log name must be one of: error, cmd" } }
+    end
+    local bytes_before = file_size( path )
+    -- Truncate via "w+" mode (creates file if absent). The write+
+    -- close pair flushes the empty buffer to disk. cleanlog crashes
+    -- if io.open returns nil (no permission / disk full); we accept
+    -- that here because the legacy ADC path has the same risk
+    -- profile and the http_router catches handler errors as
+    -- 500 E_INTERNAL.
+    cleanlog( path )
+    return { status = 200, data = {
+        action       = "log-cleared",
+        name         = name,
+        bytes_before = bytes_before,
+    } }
+end
+
 local onbmsg = function( user, adccmd, parameters, txt )
     local user_level = user:level()
     local id = utf_match( parameters, "^(%S+)$" )
@@ -138,6 +197,19 @@ hub.setlistener( "onStart", {},
         local hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
         assert( hubcmd.add( cmd, onbmsg ) )
+        -- HTTP API endpoint (#82 Phase 3 PR-5). Write-endpoint;
+        -- admin scope. Bypasses the ADC-side activate_X cfg gates.
+        if hub.http_register then
+            hub.http_register( "DELETE", "/v1/log/{name}", "admin", http_handler_clean_log, {
+                plugin = scriptname,
+                description = "truncate a hub log file (= ADC `+cleanlog <name>`); {name} is one of: error, cmd",
+                response_schema = {
+                    action       = { type = "string", required = true },
+                    name         = { type = "string", required = true },
+                    bytes_before = { type = "integer", required = true },
+                },
+            } )
+        end
         return nil
     end
 )

@@ -3709,6 +3709,125 @@ def test_http_phase3_etc_cmdlog(staging_dir: Path, proc=None):
         raise TestFailure(f"catalog missing /v1/log/cmd; body={b!r}")
 
 
+def test_http_phase3_etc_log_cleaner(staging_dir: Path, proc=None):
+    """Phase 3 PR-5 of #82 / #225: etc_log_cleaner plugin migrates
+    to HTTP.
+
+    Write endpoint (DELETE), admin scope. Truncates a known log
+    file via the API and asserts the file shrinks to 0 bytes.
+
+    Coverage:
+    - Pre-seed log/error.log with known content.
+    - DELETE /v1/log/error -> 200, action:"log-cleared",
+      bytes_before > 0.
+    - Verify file on disk is now 0 bytes.
+    - DELETE /v1/log/unknown -> 400 E_BAD_INPUT.
+    - DELETE /v1/log/error AGAIN -> 200, bytes_before=0 (already
+      truncated, idempotent).
+    - Anonymous DELETE -> 401.
+    - /v1/endpoints catalog lists DELETE /v1/log/{name}.
+    """
+    import json as _json
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    log_path = staging_dir / "log" / "error.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write("log-cleaner-smoke marker line\n")
+    size_before = log_path.stat().st_size
+    if size_before == 0:
+        raise TestFailure(f"failed to seed {log_path}: still 0 bytes")
+
+    # 1. Anonymous -> 401.
+    r = _http_roundtrip(b"DELETE /v1/log/error HTTP/1.1\r\n\r\n")
+    if "401" not in status(r):
+        raise TestFailure(
+            f"anonymous DELETE /v1/log/error: expected 401, got {status(r)!r}"
+        )
+
+    # 2. DELETE /v1/log/error -> 200, action + bytes_before > 0.
+    r = _http_roundtrip(b"DELETE /v1/log/error HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"DELETE /v1/log/error: expected 200, got {status(r)!r}; "
+            f"body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    if not parsed.get("ok"):
+        raise TestFailure(f"DELETE /v1/log/error: ok=false; body={body_of(r)!r}")
+    data = parsed.get("data") or {}
+    if data.get("action") != "log-cleared":
+        raise TestFailure(
+            f"DELETE /v1/log/error: expected action=log-cleared; "
+            f"body={body_of(r)!r}"
+        )
+    if data.get("name") != "error":
+        raise TestFailure(
+            f"DELETE /v1/log/error: expected name=error; body={body_of(r)!r}"
+        )
+    if not isinstance(data.get("bytes_before"), int) or data["bytes_before"] <= 0:
+        raise TestFailure(
+            f"DELETE /v1/log/error: expected bytes_before > 0; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 3. File on disk is now 0 bytes.
+    size_after = log_path.stat().st_size if log_path.exists() else 0
+    if size_after != 0:
+        raise TestFailure(
+            f"DELETE /v1/log/error: file still has {size_after} bytes "
+            f"after truncate (path={log_path})"
+        )
+
+    # 4. Unknown name -> 400 E_BAD_INPUT.
+    r = _http_roundtrip(b"DELETE /v1/log/notalog HTTP/1.1\r\n" + auth + b"\r\n")
+    if "400" not in status(r):
+        raise TestFailure(
+            f"DELETE /v1/log/notalog: expected 400, got {status(r)!r}"
+        )
+    if '"E_BAD_INPUT"' not in body_of(r):
+        raise TestFailure(
+            f"DELETE /v1/log/notalog: expected E_BAD_INPUT; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 5. Idempotent re-clean -> 200, bytes_before=0.
+    r = _http_roundtrip(b"DELETE /v1/log/error HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"DELETE /v1/log/error (idempotent): expected 200, got {status(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    if data.get("bytes_before") != 0:
+        raise TestFailure(
+            f"DELETE /v1/log/error (idempotent): expected bytes_before=0; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 6. /v1/endpoints catalog lists DELETE /v1/log/{name}.
+    r = _http_roundtrip(b"GET /v1/endpoints HTTP/1.1\r\n" + auth + b"\r\n")
+    b = body_of(r)
+    if '"/v1/log/{name}"' not in b:
+        raise TestFailure(f"catalog missing /v1/log/{{name}}; body={b!r}")
+
+
 def test_inf_integer_clamps(staging_dir: Path, proc=None):
     """Phase 8a F-INF-2 (#219): per-field integer clamps on the user
     accessors `user:share()` / `user:files()` / `user:slots()` /
@@ -5259,6 +5378,17 @@ def main():
             failed.append("HTTP API Phase 3 etc_cmdlog (#82 / #225)")
         else:
             log("PASS  HTTP API Phase 3 etc_cmdlog (#82 / #225)")
+
+        # Phase 3 PR-5 of #82 / #225: etc_log_cleaner plugin migrated
+        # to DELETE /v1/log/{name}. Truncates a log file via the API
+        # and verifies the on-disk size. Shares the HTTP listener.
+        try:
+            test_http_phase3_etc_log_cleaner(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API Phase 3 etc_log_cleaner (#82 / #225): {e}")
+            failed.append("HTTP API Phase 3 etc_log_cleaner (#82 / #225)")
+        else:
+            log("PASS  HTTP API Phase 3 etc_log_cleaner (#82 / #225)")
 
         # Phase 8a F-INF-2 (#219): per-field integer clamps on user
         # accessors. Logs in with poison BINF (SS-1 / SF=10^18 / SL-1

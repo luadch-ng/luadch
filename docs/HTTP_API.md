@@ -979,9 +979,11 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 | GET | `/v1/log/cmd?lines=N` | admin | `etc_cmdlog` - **migrated (Phase 3 PR-4)** [^http-log-cmd-1] |
 
 [^http-log-error-1]: Query `?lines=N` (default 200, max 1000 per §6.4 tail-style cap). Non-numeric or out-of-range values are clamped to the default, not rejected. Returns 200 with `data: {lines:[...], returned, total_lines}`. `total_lines` is the file's full line count (operators can spot "the last 200 of 1500" at a glance). Missing log file returns 200 with `lines: []` and `total_lines: 0` (matches the ADC path's "No errors." semantic without surfacing a 404 for a file that has not been written yet). The ADC-side `cmd_errors_permission` level table does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
+| DELETE | `/v1/log/{name}` | admin | `etc_log_cleaner` - `{name}` ∈ `error`, `cmd` - **migrated (Phase 3 PR-5)** [^http-log-clean-1] |
 
 [^http-log-cmd-1]: Same query / response / clamping semantics as `GET /v1/log/error` (§10.2). Returns 200 with `data: {lines:[...], returned, total_lines}`. The ADC-side `+cmdlog show` path remains unchanged - it sends the whole file as a chat banner; the HTTP path is line-tail per the §6.4 convention. ADC-side `etc_cmdlog_minlevel` does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
-| DELETE | `/v1/log/{name}` | admin | `etc_log_cleaner` - `{name}` ∈ `error`, `cmd`, `event`, `script` |
+
+[^http-log-clean-1]: `{name}` is restricted to the values the bundled `etc_log_cleaner` plugin supports: `error` (truncates `log/error.log`) and `cmd` (truncates `log/cmd.log`). Unknown name returns **400 E_BAD_INPUT**. Returns 200 with `data: {action:"log-cleared", name, bytes_before}` per §7.1.1 (hub-control variant: no `sid`/`nick`); `bytes_before` is the file's pre-truncate size for the operator audit trail. The ADC-side `etc_log_cleaner_activate_error` / `_activate_cmd` cfg gates do NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate. (Spec was originally aspirational about `event` / `script` here; the plugin never supported those, and the spec is now corrected to match plugin reality.)
 | GET | `/v1/records` | read | `etc_records` |
 | DELETE | `/v1/records` | admin | `etc_records` |
 | GET | `/v1/runtime` | read | `hub_runtime` |
