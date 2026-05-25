@@ -6,6 +6,10 @@
 
         usage: [+!#]runtime show|reset
 
+        v0.9:
+            - HTTP API: GET /v1/runtime (read), PUT /v1/runtime (admin)
+              #82 Phase 4 PR-4
+
         v0.8: by pulsar
             - removed precaching of hci.lua on scriptstart
 
@@ -45,7 +49,7 @@
 --------------
 
 local scriptname = "hub_runtime"
-local scriptversion = "0.8"
+local scriptversion = "0.9"
 
 local cmd = "runtime"
 local cmd_p1 = "show"
@@ -161,6 +165,90 @@ reset_hubruntime = function()
     util.savetable( hci_tbl, "hci_tbl", hci_file )
 end
 
+-- Helpers for raw-seconds access to the persisted runtime counter.
+-- The ADC path's `get_hubuptime` / `get_hubruntime` return formatted
+-- strings (`X years, Y days, ...`); the HTTP path returns raw integer
+-- seconds and lets the client format. Matches /v1/version uptime-as-
+-- seconds and /v1/records raw-bytes conventions.
+--
+-- The two-line load-and-parse duplication with `get_hubruntime` /
+-- `get_hubuptime` above is deliberate: the format-vs-raw split is
+-- the API surface contract, not coincidence. Extracting a shared
+-- helper would force the ADC functions to take a "raw or
+-- formatted" mode flag, which adds a worse coupling than the
+-- 2-line duplication.
+local get_session_seconds = function()
+    local start_ts = signal.get( "start" ) or os.time()
+    return math.floor( os.difftime( os.time(), start_ts ) )
+end
+
+local get_total_seconds = function()
+    local hci_tbl = util.loadtable( hci_file ) or {}
+    return math.floor( tonumber( hci_tbl.hubruntime ) or 0 )
+end
+
+-- HTTP handler: GET /v1/runtime (#82 Phase 4 PR-4). Read scope.
+-- Returns raw integer seconds for both session (this process's
+-- uptime, from `signal.get("start")`) and total (the persisted
+-- accumulator written to `core/hci.lua` by the 60s onTimer).
+--
+-- The ADC `+runtime show` cmd formats both as human-readable
+-- strings via `util.formatseconds`; the HTTP path returns raw
+-- seconds (consistent with `/v1/version`'s `uptime` and the
+-- raw-bytes convention of `/v1/records`). Clients format.
+--
+-- The ADC-side `hub_runtime_minlevel` gate does NOT apply on the
+-- HTTP path: the bearer token's `read` scope IS the
+-- authorisation gate.
+local http_handler_get_runtime = function( req )
+    return { status = 200, data = {
+        session_seconds = get_session_seconds(),
+        total_seconds   = get_total_seconds(),
+    } }
+end
+
+-- HTTP handler: PUT /v1/runtime (#82 Phase 4 PR-4). Admin scope.
+-- Body `{hubruntime: integer (>= 0) required}`. Sets the
+-- persisted runtime accumulator and rewrites
+-- `hubruntime_last_check` to `util.date()` so the next 60s
+-- `set_hubruntime` tick computes the diff from now and adds
+-- ~60s to the supplied value (rather than racing the
+-- accumulator forward by whatever sat in the file pre-PUT).
+--
+-- Family-consistent with the #236 registered-users PUTs (all
+-- require a typed body). The only ADC operation in this plugin
+-- is "reset to zero"; PUT generalises to "set runtime to N"
+-- because the underlying `core/hci.lua` storage is a plain
+-- integer count - a future ops workflow that needs to seed
+-- runtime from a backup uses the same endpoint without a new
+-- verb.
+--
+-- Returns 200 with `data: {action: "runtime-set", hubruntime}`
+-- per §7.1.1 (hub-control variant: no sid/nick). Returns
+-- **400 E_BAD_INPUT** if `hubruntime` is missing, non-integer,
+-- or negative.
+--
+-- The ADC-side `hub_runtime_minlevel` gate does NOT apply on
+-- the HTTP path: the bearer token's `admin` scope IS the
+-- authorisation gate.
+local http_handler_put_runtime = function( req )
+    local body = req.body or {}
+    local hrt = body.hubruntime
+    if type( hrt ) ~= "number" or hrt < 0 or hrt ~= math.floor( hrt ) then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "hubruntime must be a non-negative integer" } }
+    end
+    local hrt_int = math.floor( hrt )
+    local hci_tbl = util.loadtable( hci_file ) or {}
+    hci_tbl.hubruntime = hrt_int
+    hci_tbl.hubruntime_last_check = util.date()
+    util.savetable( hci_tbl, "hci_tbl", hci_file )
+    return { status = 200, data = {
+        action     = "runtime-set",
+        hubruntime = hrt_int,
+    } }
+end
+
 hub.setlistener( "onTimer", {},
     function()
         if os.time() - start >= delay then
@@ -208,6 +296,28 @@ hub.setlistener( "onStart", {},
         local hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
         assert( hubcmd.add( cmd, onbmsg ) )
+        -- HTTP API endpoints (#82 Phase 4 PR-4).
+        if hub.http_register then
+            hub.http_register( "GET", "/v1/runtime", "read", http_handler_get_runtime, {
+                plugin = scriptname,
+                description = "hub runtime counters in raw seconds (= ADC `+runtime show`, raw-int format): session_seconds + total_seconds",
+                response_schema = {
+                    session_seconds = { type = "integer", required = true },
+                    total_seconds   = { type = "integer", required = true },
+                },
+            } )
+            hub.http_register( "PUT", "/v1/runtime", "admin", http_handler_put_runtime, {
+                plugin = scriptname,
+                description = "set persisted hub runtime accumulator (= ADC `+runtime reset` generalised; PUT { hubruntime: 0 } is the reset shape)",
+                request_schema = {
+                    hubruntime = { type = "integer", required = true, min = 0 },
+                },
+                response_schema = {
+                    action     = { type = "string",  required = true },
+                    hubruntime = { type = "integer", required = true },
+                },
+            } )
+        end
         return nil
     end
 )

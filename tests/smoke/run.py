@@ -4466,6 +4466,167 @@ def test_http_phase4_etc_blacklist(staging_dir: Path, proc=None):
         raise TestFailure(f"catalog missing /v1/blacklist/{{nick}}; body={b!r}")
 
 
+def test_http_phase4_hub_runtime(staging_dir: Path, proc=None):
+    """Phase 4 PR-4 of #82 / #249: hub_runtime plugin migrates to HTTP.
+
+    Two endpoints: GET /v1/runtime (read) returns raw integer
+    seconds for session + total, PUT /v1/runtime (admin) sets the
+    persisted counter to the supplied value.
+
+    Coverage:
+    - Anonymous GET -> 401.
+    - Authenticated GET -> 200 + envelope {session_seconds (int>=0),
+      total_seconds (int>=0)}.
+    - Anonymous PUT -> 401.
+    - PUT without body -> 400 (schema-required hubruntime).
+    - PUT with negative value -> 400.
+    - PUT with non-integer value -> 400.
+    - PUT {hubruntime: 12345} -> 200 + action envelope.
+    - Post-PUT GET -> total_seconds reflects the seeded value
+      (no exact equality because the 60s onTimer may fire between
+      requests; assert seeded <= ts <= seeded + 120 to allow a
+      single intervening tick while keeping the check tight).
+    - PUT {hubruntime: 0} -> 200 (the reset shape).
+    - /v1/endpoints catalog lists both routes.
+    """
+    import json as _json
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def put(body_bytes):
+        return _http_roundtrip(
+            b"PUT /v1/runtime HTTP/1.1\r\n" + auth +
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + str(len(body_bytes)).encode("ascii") + b"\r\n"
+            b"\r\n" + body_bytes
+        )
+
+    # 1. Anonymous GET -> 401.
+    r = _http_roundtrip(b"GET /v1/runtime HTTP/1.1\r\n\r\n")
+    if "401" not in status(r):
+        raise TestFailure(
+            f"anonymous GET /v1/runtime: expected 401, got {status(r)!r}"
+        )
+
+    # 2. Authenticated GET -> 200 + envelope shape.
+    r = _http_roundtrip(b"GET /v1/runtime HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"GET /v1/runtime: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    if not parsed.get("ok"):
+        raise TestFailure(f"GET /v1/runtime: ok=false; body={body_of(r)!r}")
+    data = parsed.get("data") or {}
+    ss = data.get("session_seconds")
+    ts = data.get("total_seconds")
+    if not isinstance(ss, int) or ss < 0:
+        raise TestFailure(
+            f"GET /v1/runtime: session_seconds not non-negative int; "
+            f"body={body_of(r)!r}"
+        )
+    if not isinstance(ts, int) or ts < 0:
+        raise TestFailure(
+            f"GET /v1/runtime: total_seconds not non-negative int; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 3. Anonymous PUT -> 401.
+    r = _http_roundtrip(b"PUT /v1/runtime HTTP/1.1\r\n\r\n")
+    if "401" not in status(r):
+        raise TestFailure(
+            f"anonymous PUT /v1/runtime: expected 401, got {status(r)!r}"
+        )
+
+    # 4. PUT empty body -> 400 (hubruntime required).
+    r = put(b"{}")
+    if "400" not in status(r):
+        raise TestFailure(
+            f"PUT /v1/runtime missing hubruntime: expected 400, "
+            f"got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 5. PUT negative value -> 400.
+    r = put(b'{"hubruntime":-1}')
+    if "400" not in status(r):
+        raise TestFailure(
+            f"PUT /v1/runtime negative: expected 400, got {status(r)!r}; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 6. PUT non-integer -> 400.
+    r = put(b'{"hubruntime":3.14}')
+    if "400" not in status(r):
+        raise TestFailure(
+            f"PUT /v1/runtime float: expected 400, got {status(r)!r}; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 6b. PUT string -> 400 (handler's type check rejects non-number).
+    r = put(b'{"hubruntime":"abc"}')
+    if "400" not in status(r):
+        raise TestFailure(
+            f"PUT /v1/runtime string: expected 400, got {status(r)!r}; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 7. PUT a specific value -> 200 + action envelope.
+    seeded = 12345
+    r = put(b'{"hubruntime":' + str(seeded).encode("ascii") + b"}")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"PUT /v1/runtime: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    if not parsed.get("ok"):
+        raise TestFailure(f"PUT /v1/runtime: ok=false; body={body_of(r)!r}")
+    data = parsed.get("data") or {}
+    if data.get("action") != "runtime-set" or data.get("hubruntime") != seeded:
+        raise TestFailure(
+            f"PUT /v1/runtime: unexpected envelope; body={body_of(r)!r}"
+        )
+
+    # 8. Post-PUT GET -> total_seconds >= seeded value (allowing
+    # for an intervening 60s onTimer tick to add up to ~60s).
+    r = _http_roundtrip(b"GET /v1/runtime HTTP/1.1\r\n" + auth + b"\r\n")
+    parsed = _json.loads(body_of(r))
+    ts = (parsed.get("data") or {}).get("total_seconds")
+    if not isinstance(ts, int) or ts < seeded or ts > seeded + 120:
+        raise TestFailure(
+            f"GET /v1/runtime (post-PUT): expected total_seconds in "
+            f"[{seeded}, {seeded + 120}], got {ts!r}; body={body_of(r)!r}"
+        )
+
+    # 9. PUT 0 (the reset shape) -> 200.
+    r = put(b'{"hubruntime":0}')
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"PUT /v1/runtime reset shape: expected 200, got {status(r)!r}; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 10. /v1/endpoints catalog lists both routes.
+    r = _http_roundtrip(b"GET /v1/endpoints HTTP/1.1\r\n" + auth + b"\r\n")
+    b = body_of(r)
+    if '"/v1/runtime"' not in b:
+        raise TestFailure(f"catalog missing /v1/runtime; body={b!r}")
+
+
 def test_http_announce(staging_dir: Path, proc=None):
     """#82 deferred Phase-2-spec item: cmd_mass plugin migrates to
     POST /v1/announce. Coexists with the three ADC chat-cmds
@@ -7619,6 +7780,18 @@ def main():
             failed.append("HTTP API Phase 4 etc_blacklist (#82 / #249)")
         else:
             log("PASS  HTTP API Phase 4 etc_blacklist (#82 / #249)")
+
+        # Phase 4 PR-4 of #82 / #249: hub_runtime plugin migrated to
+        # GET + PUT /v1/runtime. GET returns raw integer seconds for
+        # session + total; PUT generalises ADC's reset-only verb to
+        # "set runtime to N" via body {hubruntime: int >= 0}.
+        try:
+            test_http_phase4_hub_runtime(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API Phase 4 hub_runtime (#82 / #249): {e}")
+            failed.append("HTTP API Phase 4 hub_runtime (#82 / #249)")
+        else:
+            log("PASS  HTTP API Phase 4 hub_runtime (#82 / #249)")
 
         # #82 deferred Phase-2-spec: cmd_mass migrated to
         # POST /v1/announce. All three scope variants + schema /
