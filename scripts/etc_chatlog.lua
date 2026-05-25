@@ -2,6 +2,10 @@
 
     etc_chatlog.lua by Motnahp
 
+        v1.6:
+            - HTTP API: GET /v1/chatlog?lines=N (read scope)  #82 Phase 4 PR-1
+            - extract get_log_tail() helper shared by ADC + HTTP paths
+
         1.51: by Sopor
             - fix for: etc_chatlog.lua:299: bad argument #1 to 'byte' (string expected, got nil) (listener: onBroadcast; script: 'etc_chatlog.lua')
 
@@ -74,7 +78,16 @@
 --[[ Settings ]]--
 
 local scriptname = "etc_chatlog"
-local scriptversion = "1.5"
+local scriptversion = "1.6"
+
+-- HTTP API §6.4 tail-style ceiling. The §6.4 list-endpoint cap
+-- is 1000, but for chatlog the effective bound is also the
+-- in-memory buffer size which the onBroadcast trim loop keeps
+-- equal to `cfg etc_chatlog_max_lines` (default 200). The HTTP
+-- handler picks `min(cfg.etc_chatlog_max_lines, 1000)` so the
+-- §6.4 ceiling acts as an upper bound for operators who raised
+-- the cfg above 1000.
+local HTTP_MAX_LINES = 1000
 
 local cmd = "history"
 
@@ -251,6 +264,71 @@ local onbmsg = function( user, adccmd, parameters )
     return PROCESSED
 end
 
+-- Shared chatlog-tail reader used by BOTH the ADC `+history show`
+-- chat-cmd path (via buildlog() below) AND the HTTP `GET /v1/chatlog`
+-- path (#82 Phase 4 PR-1). Returns the last `n` entries from `t_log`
+-- as structured rows; `total` is the number of entries currently in
+-- the log buffer.
+--
+-- Invariant relied on by callers: `#t_log <= max_lines` (enforced
+-- by the onBroadcast trim loop below). The HTTP handler picks its
+-- own `hard_cap` against `max_lines`; this function only clamps
+-- against the live buffer size.
+local get_log_tail = function( n )
+    local total = #t_log
+    if n < 0 then n = 0 end
+    if n > total then n = total end
+    local out = { }
+    local start = total - n + 1
+    for i = start, total do
+        local entry = t_log[ i ]
+        if entry then
+            out[ #out + 1 ] = {
+                timestamp = entry[ 1 ] or "",
+                nick      = entry[ 2 ] or "",
+                message   = entry[ 3 ] or "",
+            }
+        end
+    end
+    return out, total
+end
+
+-- HTTP handler: GET /v1/chatlog?lines=N (#82 Phase 4 PR-1).
+-- Read scope. Returns the last N entries (default = cfg
+-- `etc_chatlog_default_lines`, capped at min(cfg
+-- `etc_chatlog_max_lines`, HTTP_MAX_LINES=1000) per §6.4 tail-style
+-- cap). Non-numeric or out-of-range `lines` values are clamped to
+-- the default rather than rejected, consistent with §6.4. Returns
+-- 200 + empty `lines` array if no chatlog entries have been
+-- recorded yet (matches the ADC path's empty-log semantic without
+-- surfacing a 404).
+--
+-- Each entry carries the raw stored timestamp string
+-- `YYYY-MM-DD / HH:MM:SS` (hub local time - matches `cmd_reg`'s
+-- persistence format, not ISO 8601; clients that need ISO can
+-- parse it). `message` is already `hub.escapefrom`-decoded by the
+-- onBroadcast listener so it is plain UTF-8 text, not ADC wire.
+--
+-- The ADC-side `etc_chatlog_permission` level table + the
+-- per-user exception opt-out do NOT apply on the HTTP path: the
+-- bearer token's `read` scope IS the authorisation gate. The
+-- exception-list mechanism is for chat-side users opting out of
+-- the join-time banner reroll; an operator with an API token is
+-- expected to see the full history.
+local http_handler_chatlog = function( req )
+    local hard_cap = max_lines
+    if hard_cap > HTTP_MAX_LINES then hard_cap = HTTP_MAX_LINES end
+    local n = tonumber( req.query and req.query.lines ) or default_lines
+    if n < 1 then n = default_lines end
+    if n > hard_cap then n = hard_cap end
+    local lines, total = get_log_tail( n )
+    return { status = 200, data = {
+        lines       = lines,
+        returned    = #lines,
+        total_lines = total,
+    } }
+end
+
 hub.setlistener( "onStart", { },
     function( )
         local help = hub.import "cmd_help"
@@ -269,6 +347,19 @@ hub.setlistener( "onStart", { },
         hubcmd = hub.import "etc_hubcommands"  -- add hubcommand
         assert( hubcmd )
         assert( hubcmd.add( cmd, onbmsg ) )
+        -- HTTP API endpoint (#82 Phase 4 PR-1). Read-only; `read`
+        -- scope per spec §10.2.
+        if hub.http_register then
+            hub.http_register( "GET", "/v1/chatlog", "read", http_handler_chatlog, {
+                plugin = scriptname,
+                description = "tail the main-chat history (= ADC `+history show`); query ?lines=N (default cfg etc_chatlog_default_lines, max 1000 / cfg etc_chatlog_max_lines)",
+                response_schema = {
+                    lines       = { type = "array", required = true },
+                    returned    = { type = "integer", required = true },
+                    total_lines = { type = "integer", required = true },
+                },
+            } )
+        end
         return nil
     end
 )

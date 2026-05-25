@@ -3998,6 +3998,131 @@ def test_http_phase3_etc_log_cleaner(staging_dir: Path, proc=None):
         raise TestFailure(f"catalog missing /v1/log/{{name}}; body={b!r}")
 
 
+def test_http_phase4_etc_chatlog(staging_dir: Path, proc=None):
+    """Phase 4 PR-1 of #82 / #249: etc_chatlog plugin migrates to HTTP.
+
+    Read scope. Mirror of Phase 3 PR-3 (cmd_errors) for the
+    tail-style shape, but read on the chat-history buffer instead
+    of an on-disk log file.
+
+    Coverage:
+    - Anonymous GET (no Authorization header) -> 401.
+    - Authenticated GET -> 200 with envelope { ok:true, data:{
+      lines:[{timestamp, nick, message}, ...], returned, total_lines } }.
+    - GET ?lines=2 -> returned <= 2 (the in-memory buffer may have
+      fewer entries on a fresh hub; clamp upward, not exact).
+    - GET ?lines=invalid -> 200, falls back to default per §6.4.
+    - GET ?lines=99999 -> 200, clamped to min(cfg max_lines, 1000).
+      On a fresh-staging hub cfg ships max_lines=200, so the
+      effective bound is 200 AND `returned <= total_lines` (clamp-
+      to-buffer-size invariant).
+    - /v1/endpoints catalog lists GET /v1/chatlog.
+    """
+    import json as _json
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    # 1. Anonymous GET -> 401.
+    r = _http_roundtrip(b"GET /v1/chatlog HTTP/1.1\r\n\r\n")
+    if "401" not in status(r):
+        raise TestFailure(
+            f"anonymous GET /v1/chatlog: expected 401, got {status(r)!r}"
+        )
+
+    # 2. Authenticated GET -> 200 + valid envelope shape.
+    r = _http_roundtrip(b"GET /v1/chatlog HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"GET /v1/chatlog: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    if not parsed.get("ok"):
+        raise TestFailure(f"GET /v1/chatlog: ok=false; body={body_of(r)!r}")
+    data = parsed.get("data") or {}
+    lines = data.get("lines")
+    total = data.get("total_lines")
+    returned = data.get("returned")
+    if not isinstance(lines, list) or not isinstance(total, int) or not isinstance(returned, int):
+        raise TestFailure(
+            f"GET /v1/chatlog: malformed data shape; body={body_of(r)!r}"
+        )
+    if returned != len(lines):
+        raise TestFailure(
+            f"GET /v1/chatlog: returned ({returned}) != len(lines) ({len(lines)})"
+        )
+    # Each entry (if any) must carry the structured shape.
+    for entry in lines:
+        if not isinstance(entry, dict):
+            raise TestFailure(
+                f"GET /v1/chatlog: entry not an object; got {entry!r}"
+            )
+        for key in ("timestamp", "nick", "message"):
+            if key not in entry:
+                raise TestFailure(
+                    f"GET /v1/chatlog: entry missing {key!r}; got {entry!r}"
+                )
+
+    # 3. ?lines=2 -> returned <= 2 (buffer may have fewer entries).
+    r = _http_roundtrip(b"GET /v1/chatlog?lines=2 HTTP/1.1\r\n" + auth + b"\r\n")
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    returned = data.get("returned")
+    if returned is None or returned > 2:
+        raise TestFailure(
+            f"GET /v1/chatlog?lines=2: expected returned<=2; body={body_of(r)!r}"
+        )
+
+    # 4. ?lines=invalid -> falls back to default, returns 200.
+    r = _http_roundtrip(b"GET /v1/chatlog?lines=notanumber HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"GET /v1/chatlog?lines=invalid: expected 200, got {status(r)!r}"
+        )
+
+    # 5. ?lines=99999 -> clamped to min(cfg etc_chatlog_max_lines,
+    # HTTP_MAX_LINES=1000). The default cfg ships max_lines=200,
+    # so on a fresh-staging hub `returned` must be <= 200 AND <=
+    # data['total_lines'] (clamp-to-buffer-size invariant). The
+    # weaker `<= 1000` assertion would pass trivially on a stock
+    # cfg and not exercise the cap, so anchor against both bounds.
+    r = _http_roundtrip(b"GET /v1/chatlog?lines=99999 HTTP/1.1\r\n" + auth + b"\r\n")
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    returned = data.get("returned")
+    total = data.get("total_lines")
+    if returned is None or returned > 200:
+        raise TestFailure(
+            f"GET /v1/chatlog?lines=99999: returned={returned} not clamped "
+            f"to cfg max_lines=200; body={body_of(r)!r}"
+        )
+    if total is not None and returned > total:
+        raise TestFailure(
+            f"GET /v1/chatlog?lines=99999: returned={returned} > "
+            f"total_lines={total}; body={body_of(r)!r}"
+        )
+
+    # 6. /v1/endpoints catalog lists GET /v1/chatlog.
+    r = _http_roundtrip(b"GET /v1/endpoints HTTP/1.1\r\n" + auth + b"\r\n")
+    b = body_of(r)
+    if '"/v1/chatlog"' not in b:
+        raise TestFailure(f"catalog missing /v1/chatlog; body={b!r}")
+
+
 def test_http_announce(staging_dir: Path, proc=None):
     """#82 deferred Phase-2-spec item: cmd_mass plugin migrates to
     POST /v1/announce. Coexists with the three ADC chat-cmds
@@ -7114,6 +7239,18 @@ def main():
             failed.append("HTTP API Phase 3 etc_log_cleaner (#82 / #225)")
         else:
             log("PASS  HTTP API Phase 3 etc_log_cleaner (#82 / #225)")
+
+        # Phase 4 PR-1 of #82 / #249: etc_chatlog plugin migrated to
+        # GET /v1/chatlog?lines=N. Read scope, tail-style mirror of
+        # Phase 3 PR-3 (cmd_errors) over the in-memory chat-history
+        # buffer.
+        try:
+            test_http_phase4_etc_chatlog(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API Phase 4 etc_chatlog (#82 / #249): {e}")
+            failed.append("HTTP API Phase 4 etc_chatlog (#82 / #249)")
+        else:
+            log("PASS  HTTP API Phase 4 etc_chatlog (#82 / #249)")
 
         # #82 deferred Phase-2-spec: cmd_mass migrated to
         # POST /v1/announce. All three scope variants + schema /

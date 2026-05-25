@@ -1032,7 +1032,9 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 | DELETE | `/v1/records` | admin | `etc_records` |
 | GET | `/v1/runtime` | read | `hub_runtime` |
 | PUT | `/v1/runtime` | admin | `hub_runtime` |
-| GET | `/v1/chatlog?lines=N` | read | `etc_chatlog` |
+| GET | `/v1/chatlog?lines=N` | read | `etc_chatlog` - **migrated (Phase 4 PR-1 #249)** [^http-chatlog-1] |
+
+[^http-chatlog-1]: Query `?lines=N` (default = cfg `etc_chatlog_default_lines`, hard cap = `min(cfg etc_chatlog_max_lines, 1000)` per §6.4 tail-style cap). Non-numeric or out-of-range `lines` values are clamped to the default, not rejected. Returns 200 with `data: {lines:[{timestamp, nick, message}, ...], returned, total_lines}`. Each entry carries the raw stored timestamp string `YYYY-MM-DD / HH:MM:SS` (hub local time - matches `cmd_reg`'s persistence format, not ISO 8601; clients that need ISO can parse it), the sender nick at post time, and the chat message body (already `hub.escapefrom`-decoded, plain UTF-8 text not ADC wire). `total_lines` is the in-memory log buffer size (capped at `etc_chatlog_max_lines`); operators can spot "the last 200 of 1500 ever written" is NOT possible because the script persists only the rolling window. Returns 200 + empty `lines` array if the log has not yet been written. The ADC-side `etc_chatlog_permission` level table + the per-user exception opt-out (chat-side `+history toggle`) do NOT apply on the HTTP path: the bearer token's `read` scope IS the authorisation gate. The exception list is for chat-side users opting out of the join-time banner reroll; an operator with an API token is expected to see the full history.
 
 #### Subsystem managers
 
