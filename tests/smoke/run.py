@@ -6681,6 +6681,166 @@ def test_243_prefix_table_nil_no_adc_crash(staging_dir: Path, proc=None):
             )
 
 
+def test_http_prometheus_metrics(staging_dir: Path, proc=None):
+    """#83: Prometheus /metrics endpoint (opt-in plugin etc_prometheus).
+
+    Default cfg ships with etc_prometheus_activate=false, so the
+    plugin loads but does not register the route - GET /metrics
+    returns 404 E_NOT_FOUND. After flipping the cfg key + +reload
+    via the HTTP API, the plugin re-evaluates its activate gate at
+    module load time, registers the route, and serves the
+    Prometheus 0.0.4 text exposition.
+
+    Coverage:
+    - Anonymous GET /metrics -> 401 (router auth gate fires).
+    - Authenticated GET /metrics pre-enable -> 404 (route not registered).
+    - Flip cfg.tbl etc_prometheus_activate to true.
+    - POST /v1/reload with X-Confirm -> plugin re-loads with new gate.
+    - Authenticated GET /metrics post-enable -> 200 + text/plain
+      Content-Type + Prometheus exposition body (HELP/TYPE/value
+      lines for each of the 14 metric names).
+    - /v1/endpoints catalog lists GET /metrics post-enable.
+    """
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    # 1. Anonymous GET -> 401.
+    r = _http_roundtrip(b"GET /metrics HTTP/1.1\r\n\r\n")
+    if "401" not in status(r):
+        raise TestFailure(
+            f"anonymous GET /metrics: expected 401, got {status(r)!r}"
+        )
+
+    # 2. Authenticated GET pre-enable -> 404 (plugin inactive,
+    # route not registered, router falls through to generic 404).
+    r = _http_roundtrip(b"GET /metrics HTTP/1.1\r\n" + auth + b"\r\n")
+    if "404" not in status(r):
+        raise TestFailure(
+            f"GET /metrics pre-enable: expected 404 (plugin off), "
+            f"got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 3. Flip cfg.tbl etc_prometheus_activate -> true.
+    cfg_path = staging_dir / "cfg" / "cfg.tbl"
+    text = cfg_path.read_text(encoding="utf-8")
+    new_text, n = re.subn(
+        r"etc_prometheus_activate\s*=\s*false",
+        "etc_prometheus_activate = true",
+        text,
+        count=1,
+    )
+    if n != 1:
+        raise TestFailure(
+            "could not flip etc_prometheus_activate in cfg.tbl "
+            "(regex did not match)"
+        )
+    cfg_path.write_text(new_text, encoding="utf-8")
+
+    # 4. POST /v1/reload (with X-Confirm) -> re-evaluates plugin
+    # activate gates. Lua is single-threaded; the reload completes
+    # before the next request lands.
+    r = _http_roundtrip(
+        b"POST /v1/reload HTTP/1.1\r\n" + auth +
+        b"X-Confirm: yes\r\n"
+        b"Content-Length: 0\r\n"
+        b"\r\n"
+    )
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"POST /v1/reload (to activate prometheus): expected 200, "
+            f"got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 5. Authenticated GET post-enable -> 200 + Prometheus text.
+    r = _http_roundtrip(b"GET /metrics HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"GET /metrics post-enable: expected 200, got {status(r)!r}; "
+            f"body={body_of(r)!r}"
+        )
+    if "text/plain" not in r.lower():
+        raise TestFailure(
+            f"GET /metrics post-enable: expected text/plain Content-Type; "
+            f"resp={r!r}"
+        )
+    body = body_of(r)
+    # Each metric carries HELP + TYPE + value lines.
+    expected_names = [
+        "luadch_users_online",
+        "luadch_users_online_bots",
+        "luadch_share_total_bytes",
+        "luadch_files_total",
+        "luadch_hub_uptime_seconds",
+        "luadch_lua_memory_kb",
+        "luadch_active_bans",
+        "luadch_logins_total",
+        "luadch_logouts_total",
+        "luadch_failed_auths_total",
+        "luadch_chat_msgs_total",
+        "luadch_pm_msgs_total",
+        "luadch_searches_total",
+        "luadch_script_errors_total",
+    ]
+    for name in expected_names:
+        if "# HELP " + name not in body:
+            raise TestFailure(
+                f"GET /metrics: missing `# HELP {name}` line; body={body!r}"
+            )
+        if "# TYPE " + name not in body:
+            raise TestFailure(
+                f"GET /metrics: missing `# TYPE {name}` line; body={body!r}"
+            )
+
+    # 5b. Lock in the wire-up by asserting two values: bots count
+    # (the hubbot is always present, must be >= 1 - exercises
+    # count_online's bot branch) and uptime (always > 0 -
+    # exercises signal.get + os.difftime). A future regression
+    # that pointed a listener / collector at the wrong upvalue
+    # would fail at one of these checks.
+    m_bots = re.search(r"^luadch_users_online_bots (\d+)$", body, re.MULTILINE)
+    if not m_bots:
+        raise TestFailure(
+            f"GET /metrics: could not parse luadch_users_online_bots; body={body!r}"
+        )
+    bots = int(m_bots.group(1))
+    if bots < 1:
+        raise TestFailure(
+            f"GET /metrics: expected luadch_users_online_bots >= 1 "
+            f"(hubbot is always present); got {bots}"
+        )
+    m_uptime = re.search(r"^luadch_hub_uptime_seconds (\d+)$", body, re.MULTILINE)
+    if not m_uptime:
+        raise TestFailure(
+            f"GET /metrics: could not parse luadch_hub_uptime_seconds; "
+            f"body={body!r}"
+        )
+    uptime = int(m_uptime.group(1))
+    if uptime < 1:
+        raise TestFailure(
+            f"GET /metrics: expected uptime >= 1s; got {uptime}"
+        )
+
+    # 6. /v1/endpoints catalog lists GET /metrics post-enable.
+    r = _http_roundtrip(b"GET /v1/endpoints HTTP/1.1\r\n" + auth + b"\r\n")
+    b = body_of(r)
+    if '"/metrics"' not in b:
+        raise TestFailure(f"catalog missing /metrics; body={b!r}")
+
+
 def test_http_reload(staging_dir: Path, proc=None):
     """#82 deferred Phase-2-spec item: cmd_reload plugin migrates to
     POST /v1/reload (X-Confirm). Coexists with the ADC `+reload`
@@ -8553,6 +8713,21 @@ def main():
             failed.append("cmd_ban stale bans ref (#239)")
         else:
             log("PASS  cmd_ban stale bans ref (#239)")
+
+        # #83: Prometheus /metrics opt-in plugin. Default-off in
+        # cfg, so first GET /metrics returns 404. Test flips
+        # etc_prometheus_activate=true in cfg.tbl and triggers
+        # +reload via the HTTP API to re-evaluate the plugin's
+        # activate gate. Placed BEFORE test_http_reload so the
+        # prometheus-side reload is its own self-contained
+        # exercise rather than mixed into the cmd_reload test.
+        try:
+            test_http_prometheus_metrics(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API Prometheus /metrics (#83): {e}")
+            failed.append("HTTP API Prometheus /metrics (#83)")
+        else:
+            log("PASS  HTTP API Prometheus /metrics (#83)")
 
         # #82 deferred Phase-2-spec: cmd_reload migrated to
         # POST /v1/reload (X-Confirm). Exercises both reject + success

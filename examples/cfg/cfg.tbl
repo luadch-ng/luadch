@@ -1111,6 +1111,11 @@ return { -- the settings are a lua table, do not tough this!
     cmd_gag_llevel = 60,  -- min level to get a report? (only for hubbot msg) (integer)
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_prometheus.lua settings | this script exposes a Prometheus /metrics endpoint via the HTTP API (#83)
+
+    etc_prometheus_activate = false,  -- opt-in. When false the plugin loads but does NOT register the /metrics route; GET /metrics returns 404 E_NOT_FOUND. Set to true to enable. The endpoint is scope=read; Prometheus must be configured with the bearer token. (boolean)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_records.lua settings | this script adds and shows statistics about hubshare/usershare records
 
     etc_records_min_level = 20,  -- minlevel to show record statistic? (integer)
@@ -1373,6 +1378,7 @@ return { -- the settings are a lua table, do not tough this!
         "etc_dhtblocker.lua",  -- using report import
         "etc_dummy_warning.lua",
         "etc_onfailedauth.lua",  -- using report import
+        "etc_prometheus.lua",  -- Prometheus /metrics endpoint; opt-in via etc_prometheus_activate. Placed AFTER all chat/search blocker plugins so the chat_msgs / pm_msgs / searches counters reflect DELIVERED messages, not attempts (listener-chain runs in cfg.scripts order; a blocker that returns PROCESSED short-circuits subsequent listeners).
         --------------------------------------
         --// add here your additional scripts
 
