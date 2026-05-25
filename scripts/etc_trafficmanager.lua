@@ -1070,19 +1070,44 @@ hub.setlistener( "onSearchResult", {},
 
 --// HTTP API handlers (#82 Phase 4 PR-7).
 --
--- Design note: the existing `add()` / `del()` functions defined
--- above carry a latent bug in their internal/external dispatch
--- check (`( not scriptname ) or ( not scriptname == 1 )` should
--- be `... or ( scriptname ~= 1 )`; the second clause is always
--- false because `not X` is a boolean). The bug is dead in
--- practice because the only existing external caller
--- (cmd_usercleaner) passes `scriptname = nil` which satisfies
--- the first clause. Rather than drive-by fix the existing
--- functions in this feature PR, the HTTP handlers below
--- implement the block / unblock cascade directly using the
--- shared file-locals (block_tbl, flag_blocked, format_description,
--- find_online_by_firstnick) - cleaner reuse than wrestling with
--- the buggy dispatch.
+-- Design note: the HTTP handlers deliberately re-implement the
+-- block / unblock cascade rather than calling the `add()` /
+-- `del()` exports above. The dispatch bug that originally drove
+-- this decision was fixed in #257 / #258 (v2.5) and the external
+-- path now works correctly - but the duplication remains
+-- intentional because the two surfaces have different semantics:
+--
+-- 1. add()'s external branch appends `"  |  blocked by
+--    scriptname: <label>"` to the stored reason (line 610). The
+--    HTTP API's spec contract stores the reason verbatim;
+--    routing through add() would silently change what API
+--    clients see in the `reason` field of GET responses.
+--
+-- 2. add() / del() return `PROCESSED` or `false, err` with
+--    localised err strings (msg_isbot / msg_autoblock /
+--    msg_stillblocked). The HTTP path needs clean HTTP status
+--    codes (400 / 404 / 409); pre-checking the conditions
+--    before calling add() means we still own all the validation
+--    logic. Routing through add() and then matching the
+--    localised err strings would be locale-fragile.
+--
+-- 3. The HTTP response envelope `{action, nick, by, reason,
+--    online_kicked, removed: {...}}` is built outside add() /
+--    del() either way - they only return PROCESSED. The shape
+--    construction stays here regardless of who runs the
+--    cascade.
+--
+-- 4. HTTP sanitises `req.token_label` with
+--    `util.strip_control_bytes` before any state touches the
+--    block_tbl or report frame. add() trusts its inputs - the
+--    HTTP path's pre-cascade sanitisation is the correct
+--    boundary.
+--
+-- Net: the ~40 lines of cascade duplication buy a stable
+-- spec contract + clean HTTP status mapping. Future external
+-- block.add callers (e.g. a hypothetical AbuseIPDB plugin from
+-- #79) can use add() directly via hub.import and get the
+-- ADC-side cascade semantics.
 
 -- Stringify a single block_tbl entry into the HTTP wire shape.
 -- Block-table values come in three legacy variants (boolean,
