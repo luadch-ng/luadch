@@ -4123,6 +4123,139 @@ def test_http_phase4_etc_chatlog(staging_dir: Path, proc=None):
         raise TestFailure(f"catalog missing /v1/chatlog; body={b!r}")
 
 
+def test_http_phase4_etc_records(staging_dir: Path, proc=None):
+    """Phase 4 PR-2 of #82 / #249: etc_records plugin migrates to HTTP.
+
+    Two endpoints: GET /v1/records (read) for the snapshot, DELETE
+    /v1/records (admin) for the reset. Reset re-samples live state
+    immediately so the post-reset GET returns non-zero `count` (the
+    dummy + smoke client connections push max_users up).
+
+    Coverage:
+    - Anonymous GET -> 401.
+    - Authenticated GET -> 200 + envelope { hub_share, max_users,
+      top_sharer } with the documented sub-object shapes.
+    - Anonymous DELETE -> 401.
+    - Authenticated DELETE -> 200 + envelope { action }.
+    - Post-DELETE GET -> 200 (route still serves; reset() rebind
+      did not orphan the closure - reference_lua_plugin_exports
+      rebind-safety check).
+    - /v1/endpoints catalog lists both routes.
+    """
+    import json as _json
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    # 1. Anonymous GET -> 401.
+    r = _http_roundtrip(b"GET /v1/records HTTP/1.1\r\n\r\n")
+    if "401" not in status(r):
+        raise TestFailure(
+            f"anonymous GET /v1/records: expected 401, got {status(r)!r}"
+        )
+
+    # 2. Authenticated GET -> 200 + valid envelope shape.
+    r = _http_roundtrip(b"GET /v1/records HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"GET /v1/records: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    if not parsed.get("ok"):
+        raise TestFailure(f"GET /v1/records: ok=false; body={body_of(r)!r}")
+    data = parsed.get("data") or {}
+    for top in ("hub_share", "max_users", "top_sharer"):
+        if not isinstance(data.get(top), dict):
+            raise TestFailure(
+                f"GET /v1/records: missing/non-object {top!r}; body={body_of(r)!r}"
+            )
+    if not isinstance(data["hub_share"].get("total_bytes"), int):
+        raise TestFailure(
+            f"GET /v1/records: hub_share.total_bytes not int; body={body_of(r)!r}"
+        )
+    if not isinstance(data["max_users"].get("count"), int):
+        raise TestFailure(
+            f"GET /v1/records: max_users.count not int; body={body_of(r)!r}"
+        )
+    if not isinstance(data["top_sharer"].get("nick"), str):
+        raise TestFailure(
+            f"GET /v1/records: top_sharer.nick not str; body={body_of(r)!r}"
+        )
+    if not isinstance(data["top_sharer"].get("share_bytes"), int):
+        raise TestFailure(
+            f"GET /v1/records: top_sharer.share_bytes not int; body={body_of(r)!r}"
+        )
+
+    # 3. Anonymous DELETE -> 401.
+    r = _http_roundtrip(b"DELETE /v1/records HTTP/1.1\r\n\r\n")
+    if "401" not in status(r):
+        raise TestFailure(
+            f"anonymous DELETE /v1/records: expected 401, got {status(r)!r}"
+        )
+
+    # 4. Authenticated DELETE -> 200 + action envelope.
+    r = _http_roundtrip(b"DELETE /v1/records HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"DELETE /v1/records: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    if not parsed.get("ok"):
+        raise TestFailure(f"DELETE /v1/records: ok=false; body={body_of(r)!r}")
+    if (parsed.get("data") or {}).get("action") != "records-reset":
+        raise TestFailure(
+            f"DELETE /v1/records: expected action=records-reset; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 5. Post-DELETE GET -> 200, valid envelope, AND must actually
+    # be reading from the rebound table. `reset()` reseeds
+    # records[3] = 1 (legacy quirk - the spec footnote documents
+    # it), then immediately calls hubshare() + onliners(). If the
+    # GET handler closed over the OLD records table by-reference
+    # rather than the upvalue, total_bytes would still reflect
+    # whatever pre-reset value was set. Asserting >= 1 hits the
+    # rebind-survival path concretely (the
+    # reference_lua_plugin_exports regression-guard).
+    r = _http_roundtrip(b"GET /v1/records HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"GET /v1/records (post-reset): expected 200, got {status(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    if not parsed.get("ok"):
+        raise TestFailure(
+            f"GET /v1/records (post-reset): ok=false; body={body_of(r)!r}"
+        )
+    post_total = (parsed.get("data") or {}).get("hub_share", {}).get("total_bytes")
+    if not isinstance(post_total, int) or post_total < 1:
+        raise TestFailure(
+            f"GET /v1/records (post-reset): expected hub_share.total_bytes "
+            f">= 1 (reset() seeds 1 then re-samples); got {post_total!r}; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 6. /v1/endpoints catalog lists both routes.
+    r = _http_roundtrip(b"GET /v1/endpoints HTTP/1.1\r\n" + auth + b"\r\n")
+    b = body_of(r)
+    if '"/v1/records"' not in b:
+        raise TestFailure(f"catalog missing /v1/records; body={b!r}")
+
+
 def test_http_announce(staging_dir: Path, proc=None):
     """#82 deferred Phase-2-spec item: cmd_mass plugin migrates to
     POST /v1/announce. Coexists with the three ADC chat-cmds
@@ -7251,6 +7384,18 @@ def main():
             failed.append("HTTP API Phase 4 etc_chatlog (#82 / #249)")
         else:
             log("PASS  HTTP API Phase 4 etc_chatlog (#82 / #249)")
+
+        # Phase 4 PR-2 of #82 / #249: etc_records plugin migrated to
+        # GET + DELETE /v1/records. GET snapshot + DELETE-reset that
+        # rebinds the file-local records upvalue (regression-guard
+        # for the reference_lua_plugin_exports rebind hazard).
+        try:
+            test_http_phase4_etc_records(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API Phase 4 etc_records (#82 / #249): {e}")
+            failed.append("HTTP API Phase 4 etc_records (#82 / #249)")
+        else:
+            log("PASS  HTTP API Phase 4 etc_records (#82 / #249)")
 
         # #82 deferred Phase-2-spec: cmd_mass migrated to
         # POST /v1/announce. All three scope variants + schema /

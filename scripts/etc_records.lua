@@ -2,6 +2,10 @@
 
     etc_records.lua by Motnahp
 
+        v0.8:
+            - HTTP API: GET /v1/records (read), DELETE /v1/records (admin)
+              #82 Phase 4 PR-2
+
         v0.7: by pulsar
             - change date style, old: DD.MM.YY  new: YYYY-MM-DD
         
@@ -38,7 +42,7 @@
 --------------
 
 local scriptname = "etc_records"
-local scriptversion = "0.7"
+local scriptversion = "0.8"
 
 local cmd = "records"
 local prm1 = "show"
@@ -169,6 +173,88 @@ local onbmsg = function( user, adccmd, parameters )
     return PROCESSED
 end
 
+-- Join `YYYY-MM-DD` + `HH:MM:SS` into the wire `recorded_at` form,
+-- collapsing to `""` when both halves are missing so a never-
+-- sampled hub does not surface a stray `" / "` separator.
+local format_recorded_at = function( date, time )
+    if ( date == nil or date == "" ) and ( time == nil or time == "" ) then
+        return ""
+    end
+    return ( date or "" ) .. " / " .. ( time or "" )
+end
+
+-- HTTP handler: GET /v1/records (#82 Phase 4 PR-2). Read scope.
+-- Returns the current hub records snapshot as structured rows.
+-- Raw byte counts are returned (no `shareoptimize` formatting)
+-- so the API caller decides display units.
+--
+-- `records` is an 8-key flat table persisted by the legacy ADC
+-- path. The fields are:
+--   [1] share_date  [2] share_time  [3] hub_share_bytes
+--   [4] users_date  [5] users_time  [6] users_count
+--   [7] top_nick    [8] top_share_bytes
+-- These are wrapped in named objects on the wire; clients should
+-- NOT rely on the array shape (which is a persistence-format
+-- detail, not the API contract).
+--
+-- `recorded_at` strings are `YYYY-MM-DD / HH:MM:SS` (hub local
+-- time, matches `cmd_reg`'s persistence format), collapsed to
+-- `""` when both halves are missing. On a fresh hub before any
+-- sample has been taken: `max_users.count` = 0,
+-- `top_sharer.share_bytes` = 0, `top_sharer.nick` = "none".
+-- `hub_share.total_bytes` = 1 (legacy `reset()` seed; kept stable
+-- so the `> records[3]` max-tracking comparison in `hubshare()`
+-- still increments correctly). Spec footnote documents this.
+--
+-- The ADC-side `etc_records_min_level` gate does NOT apply on
+-- the HTTP path: the bearer token's `read` scope IS the
+-- authorisation gate.
+local http_handler_get_records = function( req )
+    return { status = 200, data = {
+        hub_share = {
+            total_bytes = tonumber( records[ 3 ] ) or 0,
+            recorded_at = format_recorded_at( records[ 1 ], records[ 2 ] ),
+        },
+        max_users = {
+            count       = tonumber( records[ 6 ] ) or 0,
+            recorded_at = format_recorded_at( records[ 4 ], records[ 5 ] ),
+        },
+        top_sharer = {
+            nick        = records[ 7 ] or "none",
+            share_bytes = tonumber( records[ 8 ] ) or 0,
+        },
+    } }
+end
+
+-- HTTP handler: DELETE /v1/records (#82 Phase 4 PR-2). Admin scope.
+-- Resets the records to a fresh snapshot (zero counters + today's
+-- date/time) and immediately re-samples via `hubshare()` +
+-- `onliners()` so a follow-up GET returns the current live state
+-- rather than a transient zero. Same code path as ADC `+records
+-- reset`. The reset is intentionally not gated by X-Confirm:
+-- records are recomputed continuously from live hub state, so
+-- the lost data is bounded (just the historical max-share /
+-- max-users date stamps) - destructive but recoverable on a
+-- timescale of seconds.
+--
+-- Note on table identity: the legacy `reset()` rebinds the
+-- file-local `records = { ... }`. All closures over `records`
+-- in this file (helpers + listeners + the GET handler above)
+-- capture the SAME upvalue, so they transparently see the new
+-- table after reset. The plugin does not `return { records = ... }`
+-- so no importer holds a stale reference (mirrors the
+-- reference_lua_plugin_exports rebind-safety analysis).
+--
+-- The ADC-side `etc_records_min_level_reset` gate (typically
+-- owner-only) does NOT apply on the HTTP path: the bearer
+-- token's `admin` scope IS the authorisation gate.
+local http_handler_reset_records = function( req )
+    reset()
+    return { status = 200, data = {
+        action = "records-reset",
+    } }
+end
+
 hub.setlistener( "onStart", { },
     function( )
         help = hub_import( "cmd_help" )
@@ -184,6 +270,26 @@ hub.setlistener( "onStart", { },
         hubcmd = hub_import( "etc_hubcommands" )  -- add hubcommand
         assert( hubcmd )
         assert( hubcmd.add( cmd, onbmsg ) )
+        -- HTTP API endpoints (#82 Phase 4 PR-2). Read snapshot +
+        -- admin-scoped destructive reset.
+        if hub.http_register then
+            hub.http_register( "GET", "/v1/records", "read", http_handler_get_records, {
+                plugin = scriptname,
+                description = "hub records snapshot (= ADC `+records show`): hub_share, max_users, top_sharer",
+                response_schema = {
+                    hub_share  = { type = "object", required = true },
+                    max_users  = { type = "object", required = true },
+                    top_sharer = { type = "object", required = true },
+                },
+            } )
+            hub.http_register( "DELETE", "/v1/records", "admin", http_handler_reset_records, {
+                plugin = scriptname,
+                description = "reset hub records to zero (= ADC `+records reset`); re-samples live state on success",
+                response_schema = {
+                    action = { type = "string", required = true },
+                },
+            } )
+        end
         return nil
     end
 )
