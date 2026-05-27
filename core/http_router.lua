@@ -243,11 +243,23 @@ validate_schema = function( schema, body )
                     return false, "field '" .. field .. "': not in enum"
                 end
             end
-            if spec.min and type( v ) == "number" and v < spec.min then
-                return false, "field '" .. field .. "': below min"
-            end
-            if spec.max and type( v ) == "number" and v > spec.max then
-                return false, "field '" .. field .. "': above max"
+            -- min / max apply only to numeric values. Pre-#275 the
+            -- check was guarded by `type(v) == "number"` which silently
+            -- passed any non-numeric value the schema put through min/
+            -- max bounds - a schema-author footgun. Now: if min/max is
+            -- set on a field whose runtime value is non-numeric, fail
+            -- loudly so the misconfiguration surfaces in CI / first
+            -- smoke run instead of silently bypassing the bound.
+            if spec.min or spec.max then
+                if type( v ) ~= "number" then
+                    return false, "field '" .. field .. "': min/max only valid for numeric values"
+                end
+                if spec.min and v < spec.min then
+                    return false, "field '" .. field .. "': below min"
+                end
+                if spec.max and v > spec.max then
+                    return false, "field '" .. field .. "': above max"
+                end
             end
             if spec.min_length and type( v ) == "string" and string_len( v ) < spec.min_length then
                 return false, "field '" .. field .. "': too short"
@@ -958,7 +970,7 @@ bootstrap_first_token = function( cfg_path )
     f:write( "# The HTTP API is NOT active until you copy this value\n" )
     f:write( "# into cfg.tbl http_api_tokens and restart the hub (or\n" )
     f:write( "# +reload). Delete this file once you have done so.\n" )
-    f:write( "# See docs/HTTP_API.md s4.7.\n" )
+    f:write( "# See docs/HTTP_API.md section 4.7.\n" )
     f:write( "#\n" )
     f:write( token .. "\n" )
     f:close( )
@@ -1179,52 +1191,73 @@ local function users_detail_handler( req )
 end
 
 -- /v1/log/api: tail the api_audit log file. Admin-scoped.
--- ?lines=N (default 100, max 1000) follows the §6.4 tail
--- convention. Returns the last N lines as an array under
--- `data.lines`; an empty file or missing-file gives [].
+-- ?lines=N (default 200, max 1000) follows the §6.4 tail convention.
+-- Response shape `{ lines, returned, total_lines }` matches the
+-- sibling tail endpoints (/v1/log/error, /v1/log/cmd, /v1/chatlog)
+-- so generic admin / WebUI clients can render any tail endpoint
+-- with one shape (#275 CON-1). Missing-file returns 200 with an
+-- empty `lines` array.
+--
+-- The absolute on-disk path is NOT echoed (#275 CON-1: pre-fix
+-- the response leaked `cfg.log_path` to any admin token; the
+-- response now exposes counts only, never paths).
 local function log_api_handler( req )
-    local lines_q = tonumber( req.query.lines ) or 100
+    local lines_q = tonumber( req.query.lines ) or 200
     if lines_q < 1 then lines_q = 1 end
     if lines_q > 1000 then lines_q = 1000 end
     lines_q = math_floor( lines_q )
 
     local log_path = cfg_get "log_path" or "././log/"
     local path = log_path .. "api_audit.log"
-    local f, err = io.open( path, "rb" )
+    local f = io.open( path, "rb" )
     if not f then
         -- Missing-file is normal in a hub that never recorded an
         -- audit-worthy event (the createlog only creates the file
         -- on first write, which gates on log_api_audit cfg).
-        return { status = 200, data = { lines = { }, path = path } }
+        return { status = 200, data = { lines = { }, returned = 0, total_lines = 0 } }
     end
-    -- Tail-read: seek near the end, walk back in 4 KiB chunks until
-    -- we have at least `lines_q` newlines or hit BOF. Caps the read
-    -- at ~1 MiB to bound memory even with very long lines.
-    local MAX_TAIL = 1024 * 1024
-    local size = f:seek( "end" )
-    local read_size = size
-    if read_size > MAX_TAIL then read_size = MAX_TAIL end
-    f:seek( "end", -read_size )
-    local data = f:read( read_size ) or ""
+    -- Stream line-by-line, counting total and keeping a rolling
+    -- window of the last `lines_q + WINDOW_SLACK` lines. The window
+    -- bounds memory to O(lines_q) regardless of file size - critical
+    -- because audit_log.api has no rotation hook (#275 CON-1
+    -- post-review: a long-running unrotated hub had this handler
+    -- materialise the whole file into a Lua array).
+    local WINDOW_SLACK = 1024    -- trim only every N excess lines (amortise the copy)
+    local window_cap = lines_q + WINDOW_SLACK
+    local total = 0
+    local window = { }
+    for line in f:lines( ) do
+        total = total + 1
+        window[ #window + 1 ] = line
+        if #window > window_cap then
+            -- Shrink to last lines_q. Amortised O(1) per appended
+            -- line (one copy every WINDOW_SLACK lines).
+            local fresh = { }
+            local start_i = #window - lines_q + 1
+            for i = start_i, #window do
+                fresh[ #fresh + 1 ] = window[ i ]
+            end
+            window = fresh
+        end
+    end
     f:close( )
-    -- Split into lines; drop trailing empty line if file ends \n.
-    local all = { }
-    for line in string_gmatch( data, "([^\n]+)" ) do
-        table_insert( all, line )
+    -- Final trim to exactly lines_q (window may carry up to
+    -- WINDOW_SLACK extra at this point).
+    local out_lines
+    if #window <= lines_q then
+        out_lines = window
+    else
+        out_lines = { }
+        local start_i = #window - lines_q + 1
+        for i = start_i, #window do
+            table_insert( out_lines, window[ i ] )
+        end
     end
-    -- If we truncated the head of the file (read_size < size) the
-    -- first line may be partial. Drop it to avoid mid-line output.
-    if read_size < size and #all > 0 then
-        table_remove( all, 1 )
-    end
-    -- Tail to the requested line count.
-    local start_i = #all - lines_q + 1
-    if start_i < 1 then start_i = 1 end
-    local out_lines = { }
-    for i = start_i, #all do
-        table_insert( out_lines, all[ i ] )
-    end
-    return { status = 200, data = { lines = out_lines, path = path } }
+    return { status = 200, data = {
+        lines       = out_lines,
+        returned    = #out_lines,
+        total_lines = total,
+    } }
 end
 
 -- #261 GET /v1/plugins: read-scoped. Returns a snapshot of every
@@ -1548,7 +1581,7 @@ register_core_endpoints = function( )
     } )
     register( "GET", "/v1/log/api", "admin", log_api_handler, {
         plugin = "core",
-        description = "tail of api_audit.log (admin-scoped; ?lines=N default 100 max 1000)",
+        description = "tail of api_audit.log (admin-scoped; ?lines=N default 200 max 1000); response {lines, returned, total_lines} matches sibling tail endpoints",
     } )
     -- #261 plugin-management endpoints.
     register( "GET", "/v1/plugins", "read", plugins_list_handler, {

@@ -266,10 +266,16 @@ Endpoints with `X-Confirm: yes` required:
 - `POST /v1/restart`
 - `POST /v1/shutdown`
 - `DELETE /v1/registered/{nick}`
+- `DELETE /v1/usercleaner/expired`
+- `DELETE /v1/usercleaner/ghosts`
 
 Not required for `DELETE /v1/users/{sid}` (kick) or other write
 endpoints - those are common, low-impact, and the audit log is
 sufficient.
+
+The router enforces this list at `core/http_router.lua`
+`_xconfirm_required`; the §10 catalog footnotes also flag each
+endpoint individually.
 
 ### 4.7 First-boot token sample (no auto-activation, #231)
 
@@ -607,6 +613,15 @@ req = {
   intended trade-off (operator-initiated reloads are rare, retries
   spanning one are rarer, double-execution is recoverable while
   a stale cache hit is silent and confusing).
+- **Deferred-response endpoints are NOT idempotency-cached.** The
+  long-poll path (`GET /v1/events?wait=...`) uses the deferred-
+  dispatch sentinel mechanism described in §10.1; the router
+  returns from `dispatch()` before the response bytes exist, so
+  no `(status, body, headers)` tuple is available to store. Today
+  the only deferred endpoint is GET (idempotency doesn't apply to
+  GET anyway); a hypothetical future deferred write endpoint
+  would need its own at-rest dedup story. Spec note added per
+  #275 holistic review.
 
 ### 6.3 Rate-limit
 
@@ -627,9 +642,10 @@ req = {
   scope=none routes bypass auth and therefore have no token to
   attribute the bucket to).
 - **Scope=none routes (`/health`) bypass rate-limit** entirely as a
-  consequence of bypassing auth. **X-Confirm endpoints
-  (`/v1/reload`, `/v1/restart`, `/v1/shutdown`,
-  `DELETE /v1/registered/{nick}`) are exempt** from the per-token
+  consequence of bypassing auth. **X-Confirm endpoints (the full
+  §4.6 list - `/v1/reload`, `/v1/restart`, `/v1/shutdown`,
+  `DELETE /v1/registered/{nick}`, `DELETE /v1/usercleaner/expired`,
+  `DELETE /v1/usercleaner/ghosts`) are exempt** from the per-token
   bucket budget (§4.6): an operator's recovery action must succeed
   even if a runaway script just burned the admin token's budget.
   The X-Confirm header is the abuse-protection guard for these
@@ -691,6 +707,16 @@ the filtered count, NOT the unfiltered hub total.
 PR-A landed `/v1/users` and `/v1/registered`. PR-B landed
 `/v1/bans`, `/v1/blacklist`, `/v1/msgmanager`,
 `/v1/trafficmanager/blocks`, and `/v1/usercleaner/expired+ghosts`.
+
+**Query-string values are NOT URL-decoded by the router** (#275
+CON-3 note). `core/http_router.lua` `parse_query` strips the `?`
+prefix and splits on `&` / `=`, returning raw URL-encoded values
+to handlers. A filter like `?nick=ali%20ce` will look for the
+literal substring `ali%20ce` in the stored nick - NOT `ali ce`.
+Clients should send filter values in their unencoded form (i.e.
+let the HTTP library use the raw query string; do not pre-encode).
+A future router-side decode pass is an open follow-up; until then
+the contract is "raw bytes, no decode".
 `/v1/bans/history` is **not** in scope - its response is a
 dict-keyed-by-nick rather than a flat array, so the helper's
 filter/sort/paginate flow does not map cleanly; the pre-existing
@@ -988,7 +1014,7 @@ when the named plugin is loaded; 404 `E_NOT_CONFIGURED` otherwise).
 | GET | `/v1/users` | read | online users list - **paginated** + **filter/sort** [^http-users-filter] |
 | GET | `/v1/users/{sid}` | read | full INF + session metadata |
 | GET | `/v1/endpoints` | read | live route registry (scope-filtered) |
-| GET | `/v1/log/api` | admin | tail of this API's own audit log; query `?lines=N` (default 100, max 1000) |
+| GET | `/v1/log/api` | admin | tail of this API's own audit log; query `?lines=N` (default 200, max 1000); response `{lines, returned, total_lines}` matches sibling tail endpoints |
 | GET | `/v1/plugins` | read | list plugins in `cfg.scripts` + runtime state [^http-plugins-1] |
 | PUT | `/v1/plugins/{name}/enabled` | admin | toggle a manageable plugin's enabled flag [^http-plugins-2] |
 | GET | `/v1/config` | read | full cfg snapshot; sensitive keys masked as `<redacted>` [^http-config-1] |
@@ -1091,7 +1117,7 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 
 [^http-ban-4]: `{id}` is the 1-based index from GET /v1/bans. Returns 200 with `data: {action:"unban", id, removed:{nick, cid, ip, reason, by_nick}, by}` so the operator's audit / undo flow has the snapshot of what was lifted. The response `id` echoes the requested index (which no longer exists post-removal, and may even point to a different victim now if a concurrent mutation reindexed the array); for any audit or undo workflow the stable identifiers are the `removed.nick` / `removed.cid` / `removed.ip` fields, NOT the response `id`. Returns **404 E_NOT_FOUND** if there is no entry at that index, **400 E_BAD_INPUT** if `{id}` is not a positive integer. The index race window (between GET and DELETE another mutation reindexes the array) is documented but not papered over: the DELETE always operates on `bans[id]` as-of the request, so a concurrent removal can cause a misaligned delete. Operator tooling MUST refresh the list between deletes to be safe; for batch deletes, sort the targets by descending id (so earlier removals don't shift later indices). The `+unban` ADC cmd uses nick/cid/ip lookups instead and is unaffected.
 
-[^http-blacklist-1]: Returns 200 with `data: {entries: [{nick, blacklisted_at, by, reason}, ...]}`. `blacklisted_at` is the raw stored string `YYYY-MM-DD / HH:MM:SS` (hub local time - matches `cmd_reg`'s persistence format, not ISO 8601). `by` is the nick of the operator who issued the original `+delreg nick <NICK> <REASON>` (the chat-cmd that produces blacklist entries). `reason` is the verbatim reason text the original delreg supplied. Entries are returned in `pairs()` order (Lua hash-table order; clients should sort if a stable order is needed). The file is loaded on-demand per request (same pattern as the ADC `+blacklist show` cmd; `cmd_delreg` also writes on-demand without an in-memory cache). Lua is single-threaded and the handlers do not yield between load and save, so there is no cross-plugin write race despite both plugins doing independent load-modify-save against the same file. The ADC-side `etc_blacklist_oplevel` table does NOT apply on the HTTP path: the bearer token's `read` scope IS the authorisation gate.
+[^http-blacklist-1]: Returns 200 with `data: {entries: [{nick, blacklisted_at, by, reason}, ...]}`. `blacklisted_at` is the raw stored string `YYYY-MM-DD / HH:MM:SS` (hub local time - matches `cmd_reg`'s persistence format, not ISO 8601). `by` is the nick of the operator who issued the original `+delreg nick <NICK> <REASON>` (the chat-cmd that produces blacklist entries). `reason` is the verbatim reason text the original delreg supplied. Entries are returned sorted by `nick` ascending by default (per the `[^http-blacklist-filter]` filter/sort spec; `?sort=` can override). Prior to #264 PR-B the response was in `pairs()` hash-table order; #275 CON-N2 footnote update. The file is loaded on-demand per request (same pattern as the ADC `+blacklist show` cmd; `cmd_delreg` also writes on-demand without an in-memory cache). Lua is single-threaded and the handlers do not yield between load and save, so there is no cross-plugin write race despite both plugins doing independent load-modify-save against the same file. The ADC-side `etc_blacklist_oplevel` table does NOT apply on the HTTP path: the bearer token's `read` scope IS the authorisation gate.
 
 [^http-blacklist-2]: No request body. Returns 200 with `data: {action: "blacklist-removed", nick, removed: {blacklisted_at, by, reason}}` per §7.1.1 - the `removed` snapshot lets the operator's audit / undo flow record the deletion. Returns **404 E_NOT_FOUND** if `{nick}` is not on the blacklist (idempotent 200 would mask the typo case where an operator misspells the target nick). **No X-Confirm gate**: a single-nick removal is reversible by issuing ADC `+delreg <nick> <reason>` against the same nick (which re-adds the blacklist entry), so the cost of accidental removal is bounded. The ADC-side `etc_blacklist_masterlevel` gate (typically owner-only) does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
 
@@ -1185,15 +1211,28 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 
 [^http-trafficmgr-4]: No request body. Returns 200 with `data: {action: "unblocked", nick, by, removed: {by, reason, blocked_at}}` per §7.1.1; `removed` is the pre-DELETE entry snapshot for the operator's audit / undo flow. Returns **404 E_NOT_FOUND** if the nick is not manually-blocked (idempotent 200 would mask typos); the same error fires if the nick is only autoblocked by script permissions - the autoblock is a runtime classification, not a stored entry, and lifts only via cfg changes to `blocklevel_tbl` / share thresholds. Cascade on success: block_tbl -= entry, persist, opchat report.send, and if target online: target reply + description-flag removal via `cmd:setnp("DE", new_desc)` + sendtoall BINF. The ADC-side `etc_trafficmanager_masterlevel` gate does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
 
-#### Reserved for future (out of scope phase 1-4)
+#### Shipped post-Phase-4 (#82 arc closed 2026-05-27)
 
-- Plugin management: `GET /v1/plugins`, `POST /v1/plugins/{id}/reload`,
-  `PUT /v1/plugins/{id}/enabled`. Requires extending `core/scripts.lua`
-  to expose a per-plugin enable/disable + state API. Future phase.
-- Config view/edit: `GET /v1/config`, `PUT /v1/config/{key}`. Needs
-  field-level secret masking + validator wiring. Future phase.
-- Event stream: `GET /v1/events` (SSE) for live updates. Future phase
-  when WebUI demands it.
+The four "future-scope" items below were shipped in a single day on
+top of the Phase 1-4 endpoint migrations and are now in the catalog
+above:
+
+- **Plugin management** (#261, PR #269) - `GET /v1/plugins`,
+  `PUT /v1/plugins/{name}/enabled`. Listed in §10.1.
+- **Config view/edit** (#262, PR #272) - `GET /v1/config`,
+  `PUT /v1/config/{key}` with denylist masking on read +
+  apply-status classification. Listed in §10.1.
+- **Event polling** (#263 PR-A #273 + PR-B #274) -
+  `GET /v1/events?since=...&types=...&wait=...`. Polling +
+  long-poll via deferred-response dispatch (NOT SSE). Listed in
+  §10.1.
+- **Filter + sort** (#264 PR-A #270 + PR-B #271) - common helper
+  `core/http_filter.lua` wired into all 8 paginated list
+  endpoints. Per-endpoint allowlist documented in each footnote.
+
+True SSE (`text/event-stream`) is still deliberately deferred -
+the long-poll handshake covers the WebUI use cases without the
+multi-write iostream rewrite SSE would need.
 
 ---
 
@@ -1305,30 +1344,35 @@ audit log; the other log endpoints are plugin-owned.)
 - `etc_blacklist`, `etc_msgmanager`, `etc_trafficmanager`,
   `etc_records`, `etc_chatlog`, `hub_runtime`, `cmd_usercleaner`.
 
-### Future (post-v3.2.0)
+### Shipped on top of Phase 1-4 (#82 closed 2026-05-27)
 
-- **Plugin management endpoints** (`GET /v1/plugins`,
-  `POST /v1/plugins/{id}/reload`, `PUT /v1/plugins/{id}/enabled`).
-  Requires extending `core/scripts.lua` to expose a per-plugin
-  enable/disable + state API. Sized as its own phase.
-- **Config view/edit** (`GET /v1/config`, `PUT /v1/config/{key}`).
-  Needs field-level secret masking + validator wiring. Sized as
-  its own phase.
-- **Server-Sent Events `GET /v1/events`** for live updates the
-  WebUI subscribes to (user-joined / user-quit / ban-added /
-  topic-changed / etc.). Sized as its own phase; designed in this
-  spec only at the URL shape level so plugin authors can plan for
-  it. The current request/response model has no streaming surface
-  - SSE adds one explicitly.
-- **Filter + sort query params** (`?q=`, `?level=`, `?sort=`) on
-  list endpoints. Query-param convention reserved here; per-endpoint
-  validation lives in future phases.
+These four originally "future" items landed as discrete follow-up
+PRs after the Phase 1-4 endpoint migrations. The #82 arc is now
+closed; details in their respective PRs / docs.
+
+- **Plugin management** - #261 (PR #269): `GET /v1/plugins`,
+  `PUT /v1/plugins/{name}/enabled`. Catalog row in §10.1.
+- **Config view/edit** - #262 (PR #272): `GET /v1/config`,
+  `PUT /v1/config/{key}`. Denylist masking on read; apply-status
+  classification (`live` / `reload_required` / `restart_required`).
+- **Event polling** - #263 PR-A (#273) + PR-B (#274):
+  `GET /v1/events?since=&types=&wait=`. Polling + long-poll via
+  the deferred-response dispatch handshake; NOT SSE.
+- **Filter + sort** - #264 PR-A (#270) + PR-B (#271): shared
+  helper `core/http_filter.lua` wired into all 8 paginated list
+  endpoints. Per-endpoint allowlist documented in each footnote.
+
+### Still deferred
+
+- **Server-Sent Events** (`text/event-stream`). Long-poll covers
+  the current WebUI use cases without the multi-write iostream
+  rewrite SSE needs. Revisit only if hard-realtime emerges.
 - **Unix-domain-socket bind** as an alternative to TCP loopback
-  (`http_socket_path = "/var/run/luadch/api.sock"`). More secure
-  (filesystem perms gating, no localhost spoofing on weird network
-  stacks), Linux-only (Windows abstract socket support is messier).
-  Phase TBD, not phase 1.
-- **WebUI itself** (separate repo, consumes this API).
+  (`http_socket_path = "/var/run/luadch/api.sock"`). luasocket
+  3.1.0 has bundled AF_UNIX; feasibility confirmed. Deferred YAGNI
+  until a concrete operator request lands.
+- **WebUI itself** (separate repo, consumes this API). Was the
+  gating reason for shipping the four items above together.
 
 ---
 

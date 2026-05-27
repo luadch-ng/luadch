@@ -65,6 +65,13 @@ local http_disconnect
 _status = {
     [ 200 ] = "200 OK",
     [ 201 ] = "201 Created",
+    -- 202 only appears in audit-log lines today (deferred long-poll
+    -- handlers return status="deferred" and audit_log writes 202;
+    -- the real wire reply is emitted via the handler's defer callback
+    -- once the wait resolves). Keep the row here for completeness so
+    -- a future endpoint that emits 202 directly does not fall back to
+    -- the default "202 Status" reason line. (#275 CON-N4 / C4)
+    [ 202 ] = "202 Accepted",
     [ 204 ] = "204 No Content",
     [ 400 ] = "400 Bad Request",
     [ 401 ] = "401 Unauthorized",

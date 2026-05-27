@@ -2709,8 +2709,27 @@ def test_http_phase1c_endpoints(staging_dir: Path, proc=None):
     if "200 OK" not in status(r):
         raise TestFailure(f"GET /v1/log/api: expected 200, got {status(r)!r}")
     b = body_of(r)
+    # #275 CON-1 holistic review: response shape now matches the
+    # sibling tail endpoints (/v1/log/error, /v1/log/cmd,
+    # /v1/chatlog): {lines, returned, total_lines}. The pre-CON-1
+    # `path` field is gone (info leak: leaked cfg.log_path).
     if '"lines"' not in b:
         raise TestFailure(f"GET /v1/log/api: missing lines array; body={b!r}")
+    if '"returned"' not in b:
+        raise TestFailure(
+            f"CON-1: GET /v1/log/api missing `returned` field "
+            f"(sibling tail-endpoint shape); body={b!r}"
+        )
+    if '"total_lines"' not in b:
+        raise TestFailure(
+            f"CON-1: GET /v1/log/api missing `total_lines` field "
+            f"(sibling tail-endpoint shape); body={b!r}"
+        )
+    if '"path"' in b:
+        raise TestFailure(
+            f"CON-1: GET /v1/log/api still emits `path` field "
+            f"(info leak of cfg.log_path); body={b!r}"
+        )
 
     # 6. /v1/endpoints catalog now lists all Phase 1c endpoints.
     r = _http_roundtrip(b"GET /v1/endpoints HTTP/1.1\r\n" + auth + b"\r\n")
