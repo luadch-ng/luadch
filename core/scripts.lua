@@ -589,15 +589,13 @@ set_plugin_enabled = function( name, new_enabled )
     end
     -- mutate in place: keep table identity, just update enabled flag
     scripts[ found_index ].enabled = new_enabled
-    -- cfg.set returns `true` on full success, `nil, err` on validator
-    -- rejection, OR an error STRING on savetable failure (the cfg.lua
-    -- API is "return err or true"). The string-on-failure path leaves
-    -- _settings.scripts mutated in-memory but cfg.tbl on disk stale -
-    -- next +reload would silently revert the toggle. Tighten to
-    -- `ret == true` so any non-true return surfaces an error.
-    local ret = cfg.set( "scripts", scripts )
-    if ret ~= true then
-        return false, "E_INVALID", "cfg.set failed: " .. tostring( ret )
+    -- cfg.set returns (true) on full success, (false, err_msg) on any
+    -- failure path (validator reject / unknown key / savetable error) -
+    -- see core/cfg.lua. Surfaces the validator's err_msg through to
+    -- the API client for actionable 400s.
+    local ok, err = cfg.set( "scripts", scripts )
+    if not ok then
+        return false, "E_INVALID", "cfg.set failed: " .. tostring( err )
     end
     return true
 end

@@ -564,22 +564,55 @@ checkusers = function()
 end
 
 
+-- Returns:
+--   true              - success (validation + save both OK, or nosave=true)
+--   false, err_msg    - validator rejected the value OR target is unknown
+--                       OR savetable failed (err_msg distinguishes)
+-- The "always returns (true) on full success, (false, err) on any failure"
+-- shape was introduced by #262 to give the HTTP API a clean error-
+-- message channel for `PUT /v1/config/{key}` 400 responses. Existing
+-- single-return-value callers continue to work because `if not ok`
+-- correctly captures both `nil`-equivalent and `false` rejection paths.
 set = function( target, newvalue, nosave )
     local dst = _defaultsettings[ target ]
-    if dst and dst[ 2 ]( newvalue ) then
-        _settings[ target ] = newvalue
-        --local _, err = util_savetable( _settings, "settings", _cfgbackup .. "." .. os_date( "[%d.%m.%y.%H.%M.%S]" ) )
-        --_ = err and out_error( "cfg.lua: function 'set': error while backup hub settings: ", err )
-        if nosave then
-            return true
-        end
-        local _, err = util_savetable( _settings, "settings", _cfgfile )
-        _ = err and out_error( "cfg.lua: function 'set': error while saving hub settings: ", err )
-        return err or true
-    else
-        out_error( "cfg.lua: function 'set': invalid access to settings: invalid target/newvalue: ", target, "/", newvalue, "; using old value" )
-        return nil, "invalid target or newvalue"
+    if not dst then
+        out_error( "cfg.lua: function 'set': unknown target '", tostring( target ), "'" )
+        return false, "unknown target '" .. tostring( target ) .. "'"
     end
+    if not dst[ 2 ]( newvalue ) then
+        out_error( "cfg.lua: function 'set': validator rejected newvalue for '", target, "'" )
+        return false, "validator rejected value for '" .. tostring( target ) .. "'"
+    end
+    _settings[ target ] = newvalue
+    if nosave then
+        return true
+    end
+    local _, err = util_savetable( _settings, "settings", _cfgfile )
+    if err then
+        out_error( "cfg.lua: function 'set': error while saving hub settings: ", err )
+        return false, "save failed: " .. tostring( err )
+    end
+    return true
+end
+
+-- #262: introspection helper - is `target` a key registered in
+-- _defaultsettings? Lets callers distinguish "unknown key" from
+-- "validator rejected" without parsing the set() error message.
+local is_known = function( target )
+    return _defaultsettings[ target ] ~= nil
+end
+
+-- #262: enumerate every registered key (everything in
+-- _defaultsettings). The GET /v1/config endpoint uses this to
+-- emit a full snapshot; iterating _settings alone would skip keys
+-- that operators have not overridden in cfg.tbl, hiding the
+-- defaults.
+local list_keys = function( )
+    local out = { }
+    for key in pairs( _defaultsettings ) do
+        out[ #out + 1 ] = key
+    end
+    return out
 end
 
 get = function( target )
@@ -664,6 +697,8 @@ return {
     checkusers = checkusers,
     set = set,
     get = get,
+    is_known = is_known,
+    list_keys = list_keys,
     reload = reload,
     loadusers = loadusers,
     saveusers = saveusers,

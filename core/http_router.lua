@@ -1255,6 +1255,113 @@ local function plugins_toggle_handler( req )
     } }
 end
 
+-- #262: cfg keys whose value MUST NOT leak through the HTTP API,
+-- masked as the string "<redacted>" on GET and rejected with 403
+-- on PUT. Sensitive credentials (bearer tokens) and file paths
+-- that protect the at-rest encryption master key go here. Adding
+-- a new sensitive key in the future = one-line append.
+local _config_denylist = {
+    http_api_tokens = true,
+    master_key_path = true,
+}
+
+-- #262: apply-status classification - which keys take effect
+-- immediately on cfg.set vs need POST /v1/reload vs need a full
+-- hub restart. Anything not in either bucket defaults to "live".
+-- Listed sparingly: only keys whose runtime caching / module-load
+-- semantics make a hot cfg.set ineffective until the operator
+-- explicitly applies.
+local _config_reload_required = {
+    scripts            = true,    -- #261 plugin list; needs +reload to apply
+    language           = true,    -- language tables loaded at startup
+    -- Path keys consumed at module-load / reload time (file handles
+    -- + table caches refresh on the next +reload cycle).
+    user_path          = true,
+    script_path        = true,
+    scripts_cfg_path   = true,
+    scripts_lang_path  = true,
+    core_lang_path     = true,
+}
+local _config_restart_required = {
+    tcp_ports        = true,
+    ssl_ports        = true,
+    tcp_ports_ipv6   = true,
+    ssl_ports_ipv6   = true,
+    http_port        = true,
+    hub_listen       = true,
+    master_key_path  = true,    -- also in denylist; PUT 403 before this is reached
+    log_path         = true,    -- log file handles opened at startup
+    -- TLS context is constructed once when the SSL listener binds.
+    -- Changing ssl_params / use_ssl after startup has no effect
+    -- until the listener is re-created at process restart.
+    ssl_params       = true,
+    use_ssl          = true,
+}
+
+local _classify_apply_status = function( key )
+    if _config_restart_required[ key ] then return "restart_required" end
+    if _config_reload_required[ key ]  then return "reload_required"  end
+    return "live"
+end
+
+-- #262 GET /v1/config: read-scoped. Returns the full cfg snapshot
+-- (every key registered in cfg_defaults.lua) with denylisted keys
+-- masked as "<redacted>".
+local function config_get_handler( req )
+    local cfg_mod = use "cfg"
+    if type( cfg_mod.list_keys ) ~= "function" then
+        return { status = 500, error = { code = "E_INTERNAL",
+            message = "cfg.list_keys not available" } }
+    end
+    local snapshot = { }
+    for _, key in ipairs( cfg_mod.list_keys( ) ) do
+        if _config_denylist[ key ] then
+            snapshot[ key ] = "<redacted>"
+        else
+            snapshot[ key ] = cfg_mod.get( key )
+        end
+    end
+    return { status = 200, data = { config = snapshot } }
+end
+
+-- #262 PUT /v1/config/{key}: admin-scoped. Body `{ "value": <any
+-- JSON type> }`. Denylisted keys -> 403. Unknown keys -> 404.
+-- Validator-rejected values -> 400 with the validator's err_msg.
+-- Success -> 200 with apply_status (live / reload_required /
+-- restart_required) so the operator knows the next step.
+local function config_put_handler( req )
+    local key = req.path_vars and req.path_vars[ "key" ]
+    if not key or key == "" then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "missing {key} path variable" } }
+    end
+    if _config_denylist[ key ] then
+        return { status = 403, error = { code = "E_FORBIDDEN",
+            message = "cfg key '" .. key .. "' is sensitive (in API denylist); " ..
+                "rotate / relocate via direct cfg.tbl edit + hub restart" } }
+    end
+    local cfg_mod = use "cfg"
+    if not cfg_mod.is_known( key ) then
+        return { status = 404, error = { code = "E_NOT_FOUND",
+            message = "unknown cfg key '" .. key .. "' (not in cfg_defaults.lua)" } }
+    end
+    local body = req.body
+    if type( body ) ~= "table" or body.value == nil then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "missing required body field: value" } }
+    end
+    local ok, err = cfg_mod.set( key, body.value )
+    if not ok then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = err or "cfg.set rejected the value" } }
+    end
+    return { status = 200, data = {
+        action       = "config-set",
+        key          = key,
+        apply_status = _classify_apply_status( key ),
+    } }
+end
+
 -- /v1/endpoints + /health registration. Called from
 -- register_core_endpoints below at module-init time so the discovery
 -- surface is always available (no plugin owns it).
@@ -1300,6 +1407,15 @@ register_core_endpoints = function( )
         request_schema = {
             enabled = { type = "boolean", required = true },
         },
+    } )
+    -- #262 config management endpoints.
+    register( "GET", "/v1/config", "read", config_get_handler, {
+        plugin = "core",
+        description = "full cfg snapshot; sensitive keys (http_api_tokens, master_key_path) masked as <redacted>",
+    } )
+    register( "PUT", "/v1/config/{key}", "admin", config_put_handler, {
+        plugin = "core",
+        description = "update one cfg key; response carries apply_status (live / reload_required / restart_required)",
     } )
 end
 

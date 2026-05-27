@@ -7396,6 +7396,136 @@ def test_http_filter_sort_pr_a(staging_dir: Path, proc=None):
         expect_400("/v1/users?sort=made_up", expected_codeword="allowed")
 
 
+def test_http_config_api(staging_dir: Path, proc=None):
+    """#262 config-management endpoints: GET /v1/config (read) and
+    PUT /v1/config/{key} (admin).
+
+    Coverage:
+      1.  GET baseline - envelope, denylist masking on http_api_tokens
+          and master_key_path.
+      2.  PUT live key (max_users) -> 200 + apply_status=live.
+      3.  PUT reload-required key (language) -> 200 + apply_status=reload_required.
+      4.  PUT restart-required key (http_port - same value to avoid disturbance)
+          -> 200 + apply_status=restart_required.
+      5.  PUT denylisted key (http_api_tokens) -> 403 E_FORBIDDEN.
+      6.  PUT unknown key -> 404 E_NOT_FOUND.
+      7.  PUT missing body field -> 400 E_BAD_INPUT.
+      8.  PUT validator-rejected value (max_users = "notanumber")
+          -> 400 E_BAD_INPUT with validator hint.
+
+    Restores the bare-key cfg.tbl format at the end (matches the #261
+    plugins-api test pattern) so downstream regex-based cfg flips
+    (BLOM / ZLIF / hub_listen) keep working.
+    """
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    cfg_path = staging_dir / "cfg" / "cfg.tbl"
+    original_cfg_text = cfg_path.read_text(encoding="utf-8")
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def get_json(path):
+        r = _http_roundtrip(f"GET {path} HTTP/1.1\r\n".encode("ascii") + auth + b"\r\n")
+        if "200 OK" not in status(r):
+            raise TestFailure(f"GET {path}: expected 200, got {status(r)!r} / body={body_of(r)!r}")
+        return json.loads(body_of(r))
+
+    def put_value(key, raw_body):
+        body_bytes = raw_body.encode("utf-8")
+        req = (
+            f"PUT /v1/config/{key} HTTP/1.1\r\n".encode("ascii") +
+            auth +
+            b"Content-Type: application/json\r\n" +
+            f"Content-Length: {len(body_bytes)}\r\n".encode("ascii") +
+            b"\r\n" + body_bytes
+        )
+        return _http_roundtrip(req)
+
+    try:
+        # 1. baseline GET + masking
+        j = get_json("/v1/config")
+        cfg = j.get("data", {}).get("config")
+        if not isinstance(cfg, dict):
+            raise TestFailure(f"GET /v1/config: data.config missing or not dict; body={body_of(_http_roundtrip(b'GET /v1/config HTTP/1.1\\r\\n' + auth + b'\\r\\n'))!r}")
+        if cfg.get("http_api_tokens") != "<redacted>":
+            raise TestFailure(f"GET: http_api_tokens not masked; got {cfg.get('http_api_tokens')!r}")
+        if cfg.get("master_key_path") != "<redacted>":
+            raise TestFailure(f"GET: master_key_path not masked; got {cfg.get('master_key_path')!r}")
+        if not cfg.get("hub_name"):
+            raise TestFailure(f"GET: hub_name missing or empty; got {cfg.get('hub_name')!r}")
+
+        # 2. PUT live key
+        r = put_value("max_users", '{"value": 3000}')
+        if "200 OK" not in status(r):
+            raise TestFailure(f"PUT live: expected 200, got {status(r)!r} / body={body_of(r)!r}")
+        j = json.loads(body_of(r))
+        if j["data"].get("apply_status") != "live":
+            raise TestFailure(f"PUT live: apply_status != 'live'; got {j['data']!r}")
+        if j["data"].get("key") != "max_users":
+            raise TestFailure(f"PUT live: key echo wrong; got {j['data']!r}")
+
+        # 3. PUT reload-required key
+        r = put_value("language", '{"value": "en"}')
+        if "200 OK" not in status(r):
+            raise TestFailure(f"PUT reload: expected 200, got {status(r)!r}")
+        j = json.loads(body_of(r))
+        if j["data"].get("apply_status") != "reload_required":
+            raise TestFailure(f"PUT reload: apply_status != 'reload_required'; got {j['data']!r}")
+
+        # 4. PUT restart-required key - use the EXISTING test port to avoid disturbance
+        r = put_value("http_port", f'{{"value": {TEST_PORT_HTTP}}}')
+        if "200 OK" not in status(r):
+            raise TestFailure(f"PUT restart: expected 200, got {status(r)!r}")
+        j = json.loads(body_of(r))
+        if j["data"].get("apply_status") != "restart_required":
+            raise TestFailure(f"PUT restart: apply_status != 'restart_required'; got {j['data']!r}")
+
+        # 5. PUT denylist -> 403
+        r = put_value("http_api_tokens", '{"value": "newtoken"}')
+        if "403 Forbidden" not in status(r):
+            raise TestFailure(f"PUT denylist: expected 403, got {status(r)!r}")
+        if "E_FORBIDDEN" not in body_of(r):
+            raise TestFailure(f"PUT denylist: missing E_FORBIDDEN; body={body_of(r)!r}")
+
+        # 6. PUT unknown key -> 404
+        r = put_value("bogus_unknown_key_xyz", '{"value": 1}')
+        if "404 Not Found" not in status(r):
+            raise TestFailure(f"PUT unknown: expected 404, got {status(r)!r}")
+        if "E_NOT_FOUND" not in body_of(r):
+            raise TestFailure(f"PUT unknown: missing E_NOT_FOUND; body={body_of(r)!r}")
+
+        # 7. PUT missing body field -> 400
+        r = put_value("max_users", '{}')
+        if "400 Bad Request" not in status(r):
+            raise TestFailure(f"PUT empty body: expected 400, got {status(r)!r}")
+        if "E_BAD_INPUT" not in body_of(r):
+            raise TestFailure(f"PUT empty body: missing E_BAD_INPUT; body={body_of(r)!r}")
+
+        # 8. PUT validator-rejected -> 400
+        r = put_value("max_users", '{"value": "notanumber"}')
+        if "400 Bad Request" not in status(r):
+            raise TestFailure(f"PUT invalid: expected 400, got {status(r)!r}")
+        if "validator rejected" not in body_of(r):
+            raise TestFailure(f"PUT invalid: missing 'validator rejected' hint; body={body_of(r)!r}")
+    finally:
+        # Restore cfg.tbl to bare-key format so downstream
+        # BLOM/ZLIF/hub_listen regex flips keep working.
+        cfg_path.write_text(original_cfg_text, encoding="utf-8")
+
+
 def test_http_filter_sort_pr_b(staging_dir: Path, proc=None):
     """#264 PR-B: wire-up regression for the 5 list endpoints
     migrated to `core/http_filter.lua` in this PR.
@@ -9314,6 +9444,19 @@ def main():
             failed.append("HTTP API filter+sort PR-A (#264)")
         else:
             log("PASS  HTTP API filter+sort PR-A (#264)")
+
+        # #262 config-management endpoints: GET /v1/config (read)
+        # + PUT /v1/config/{key} (admin). Covers denylist masking,
+        # apply-status classification, and the four negative paths.
+        # Restores cfg.tbl bare-key format at the end (matches the
+        # #261 plugins-api test pattern).
+        try:
+            test_http_config_api(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API config (#262): {e}")
+            failed.append("HTTP API config (#262)")
+        else:
+            log("PASS  HTTP API config (#262)")
 
         # #264 PR-B: wire-up regression for the 5 list endpoints
         # newly migrated to core/http_filter.lua. PR-A already
