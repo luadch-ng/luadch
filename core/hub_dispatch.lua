@@ -542,8 +542,18 @@ _identify = {
         -- core/hbri.lua's eligible()/initiate() read user._hbri_claim.
         if hbri.active( ) then
             local sec_fam = ( userfam == "I4" ) and "I6" or "I4"
-            local sec_ip  = ( sec_fam == "I6" ) and inf_i6 or inf_i4
-            if sec_ip and sec_ip ~= "" then
+            -- NOT `(sec_fam=="I6") and inf_i6 or inf_i4`: the and/or
+            -- ternary returns inf_i4 when inf_i6 is nil (the classic Lua
+            -- trap), which would mint a bogus secondary claim for every
+            -- v4 client that sent only I4 -> spurious HBRI + 5s timeout
+            -- on every such login. Branch explicitly.
+            local sec_ip
+            if sec_fam == "I6" then sec_ip = inf_i6 else sec_ip = inf_i4 end
+            -- A spec placeholder (0.0.0.0 / ::) means "no real secondary
+            -- for this family" - treat it as absent so we do not solicit
+            -- a pointless side-channel (mirrors the primary-family
+            -- placeholder handling above).
+            if sec_ip and sec_ip ~= "" and sec_ip ~= "0.0.0.0" and sec_ip ~= "::" then
                 local su_flags = { }
                 local su = adccmd:getnp "SU"
                 if su then

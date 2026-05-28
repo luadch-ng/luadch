@@ -1411,6 +1411,64 @@ def test_hbri_disconnect_cleanup():
         _assert_adc_alive(sock)
 
 
+def test_hbri_no_secondary_no_solicit():
+    """#214 regression: a client that advertises ADHBRI but connects on
+    one family WITHOUT a secondary (the common case - e.g. a v4-only
+    AirDC++) must NOT be solicited for HBRI. It logs in immediately; no
+    ITCP, no timeout delay.
+
+    Guards the and/or-ternary trap (`(sec_fam=="I6") and inf_i6 or
+    inf_i4`) that minted a bogus '0.0.0.0' secondary claim for every v4
+    client sending only I4, making every such login eat the ~5s HBRI
+    timeout. Caught via a live AirDC++ 4.30 test, missed by the other
+    HBRI smoke tests because they all send a real I6.
+
+    Falsifiable: on the buggy code the hub sends an ITCP right after
+    HPAS (the assert below fires); on the fix the next frame is the
+    login BINF echo."""
+    main = socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    try:
+        reader = _ADCReader(main)
+        main.sendall(b"HSUP ADBASE ADTIGR ADHBRI\n")
+        reader.recv_until(lambda f: f.startswith("ISUP "))
+        isid = reader.recv_until(lambda f: f.startswith("ISID "))
+        sid = isid.split(" ", 1)[1].strip()
+        reader.recv_until(lambda f: f.startswith("IINF "))
+        pid_bytes = secrets.token_bytes(24)
+        cid_b32 = _b32_encode(_tiger.tiger(pid_bytes))
+        pid_b32 = _b32_encode(pid_bytes)
+        # v4 connection, ADHBRI advertised, NO I6 secondary - mirrors a
+        # real v4 AirDC++ login (passive I40.0.0.0, SU TCP4/UDP4 only).
+        binf = (
+            f"BINF {sid} ID{cid_b32} PD{pid_b32} NIdummy"
+            f" I40.0.0.0 SUTCP4,UDP4\n"
+        )
+        main.sendall(binf.encode("utf-8"))
+        gpa = reader.recv_until(lambda f: f.startswith("IGPA "))
+        salt_bytes = _b32_decode(gpa.split(" ", 1)[1].strip())
+        response = _tiger.tiger("test".encode("utf-8") + salt_bytes)
+        main.sendall(f"HPAS {_b32_encode(response)}\n".encode("utf-8"))
+        # Promptly (well under hbri_timeout=5s) the hub must complete the
+        # login with the BINF echo and must NEVER send an ITCP.
+        frame = reader.recv_until(
+            lambda f: f.startswith("ITCP ") or f.startswith(f"BINF {sid}"),
+            timeout=3,
+        )
+        if frame.startswith("ITCP "):
+            raise TestFailure(
+                f"hub solicited HBRI for a client with NO secondary: {frame!r}. "
+                f"A client advertising ADHBRI but no I6 must not be HBRI'd "
+                f"(the and/or-ternary bogus-claim regression)."
+            )
+    finally:
+        try:
+            main.close()
+        except OSError:
+            pass
+
+
 def test_post_login_i4_silent_stripped():
     """#222: post-login BINF carrying `I4 <new_ip>` MUST be silent-
     stripped, not killed. Pre-fix the `forbidden.flags_on_inf` check
@@ -10121,6 +10179,7 @@ TESTS = [
     ("HBRI timeout: unvalidated secondary stays stripped (#214)", test_hbri_timeout),
     ("HBRI unknown token rejected (#214)", test_hbri_unknown_token),
     ("HBRI disconnect mid-validation cleans up (#214)", test_hbri_disconnect_cleanup),
+    ("HBRI not solicited for client without secondary (#214)", test_hbri_no_secondary_no_solicit),
     ("post-login INF with I4 silent-stripped (#222)", test_post_login_i4_silent_stripped),
     ("CSPRNG salts are unique across connections", test_csprng_salt_uniqueness),
     ("per-IP connection cap refuses overflow", test_perip_connection_cap),
