@@ -109,7 +109,18 @@ def override_test_ports(staging_dir: Path):
         (r"tcp_ports\s*=\s*\{[^}]*\}", f"tcp_ports = {{ {TEST_PORT_PLAIN} }}"),
         (r"ssl_ports\s*=\s*\{[^}]*\}", f"ssl_ports = {{ {TEST_PORT_TLS} }}"),
         (r"tcp_ports_ipv6\s*=\s*\{[^}]*\}", f"tcp_ports_ipv6 = {{ {TEST_PORT_PLAIN_V6} }}"),
-        (r"ssl_ports_ipv6\s*=\s*\{[^}]*\}", f"ssl_ports_ipv6 = {{ {TEST_PORT_TLS_V6} }}"),
+        # Append the #214 HBRI knobs onto the ssl_ports_ipv6 line so the
+        # dual-stack validation smoke tests have an HBRI-active hub. HBRI
+        # is opt-in PER CLIENT (only clients advertising ADHBRI in HSUP
+        # ever trigger it), so every other smoke test is unaffected. The
+        # advertise addresses are the loopback addresses the test
+        # listeners already bind; the side-channel port the hub derives
+        # is the first plain port per family (TEST_PORT_PLAIN_V6 here).
+        (r"ssl_ports_ipv6\s*=\s*\{[^}]*\}",
+            f"ssl_ports_ipv6 = {{ {TEST_PORT_TLS_V6} }},\n"
+            f"\thbri_enabled = true,\n"
+            f"\thbri_advertise_v4 = \"{HUB_HOST}\",\n"
+            f"\thbri_advertise_v6 = \"::1\""),
         # Enable event-log writes so tests can assert on parser / dispatcher
         # log traces (e.g. #265 regression test scans event.log for the
         # 'invalid named parameter' line emitted on `nowhitespace` reject).
@@ -1209,6 +1220,195 @@ def test_binf_secondary_family_stripped():
             )
     finally:
         sock.close()
+
+
+def _hbri_param(frame, name):
+    """Extract a named ADC param value (e.g. 'TO', 'P6') from a frame."""
+    for tok in frame.strip().split(" "):
+        if tok.startswith(name):
+            return tok[len(name):]
+    return None
+
+
+def _hbri_main_login(sock):
+    """Drive a dual-stack v4 login that advertises ADHBRI and claims an
+    I6 secondary as the registered `dummy` account. The HBRI-active
+    smoke hub parks such a client in the 'hbri' state after HPAS and
+    sends an ITCP pointer instead of completing NORMAL entry. Returns
+    (reader, sid, itcp_frame)."""
+    reader = _ADCReader(sock)
+    sock.sendall(b"HSUP ADBASE ADTIGR ADHBRI\n")
+    isup = reader.recv_until(lambda f: f.startswith("ISUP "))
+    if "ADHBRI" not in isup:
+        raise TestFailure(f"HBRI-active hub did not advertise ADHBRI in ISUP: {isup!r}")
+    isid = reader.recv_until(lambda f: f.startswith("ISID "))
+    sid = isid.split(" ", 1)[1].strip()
+    reader.recv_until(lambda f: f.startswith("IINF "))
+    pid_bytes = secrets.token_bytes(24)
+    cid_b32 = _b32_encode(_tiger.tiger(pid_bytes))
+    pid_b32 = _b32_encode(pid_bytes)
+    binf = (
+        f"BINF {sid}"
+        f" ID{cid_b32}"
+        f" PD{pid_b32}"
+        f" NIdummy"
+        f" I4127.0.0.1"
+        f" I6::1"
+        f" SUTCP4,TCP6\n"
+    )
+    sock.sendall(binf.encode("utf-8"))
+    gpa = reader.recv_until(lambda f: f.startswith("IGPA "))
+    salt_bytes = _b32_decode(gpa.split(" ", 1)[1].strip())
+    response = _tiger.tiger("test".encode("utf-8") + salt_bytes)
+    sock.sendall(f"HPAS {_b32_encode(response)}\n".encode("utf-8"))
+    itcp = reader.recv_until(
+        lambda f: f.startswith("ITCP ") or f.startswith(f"BINF {sid}") or f.startswith("ISTA "),
+        timeout=PROTOCOL_TIMEOUT_SEC,
+    )
+    if not itcp.startswith("ITCP "):
+        raise TestFailure(
+            f"expected an ITCP HBRI pointer after HPAS (dual-stack + ADHBRI); got {itcp!r}. "
+            f"The hub should park the user in the 'hbri' state, not complete login."
+        )
+    return reader, sid, itcp
+
+
+def test_hbri_success():
+    """#214 HBRI happy path. A dual-stack client logs in over v4
+    advertising ADHBRI + a secondary I6, is parked in the 'hbri' state
+    and sent an ITCP pointer. It opens the v6 side-channel, sends HTCP
+    with the token; the hub validates the v6 TCP source matches the
+    claim and restores the verified I6 to the broadcast INF.
+
+    Falsifiable: without the HBRI mechanism the hub never sends ITCP
+    (login completes immediately) and never restores the stripped I6 -
+    each assert below (ITCP present, ISTA 000 on the side-channel, I6
+    in the broadcast echo) fails."""
+    main = socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    side = None
+    try:
+        reader, sid, itcp = _hbri_main_login(main)
+        token = _hbri_param(itcp, "TO")
+        port = _hbri_param(itcp, "P6")
+        if not token or not port:
+            raise TestFailure(f"ITCP missing TO / P6 params: {itcp!r}")
+        side = socket.create_connection(
+            ("::1", int(port)), timeout=PROTOCOL_TIMEOUT_SEC
+        )
+        sreader = _ADCReader(side)
+        side.sendall(f"HTCP I6::1 TO{token}\n".encode("utf-8"))
+        sta = sreader.recv_until(lambda f: f.startswith("ISTA "))
+        if not sta.startswith("ISTA 000"):
+            raise TestFailure(
+                f"expected ISTA 000 (validation success) on the side-channel, got {sta!r}"
+            )
+        # The main connection now completes NORMAL entry, broadcasting
+        # the validated secondary.
+        echo = reader.recv_until(
+            lambda f: f.startswith(f"BINF {sid}"), timeout=PROTOCOL_TIMEOUT_SEC
+        )
+        params = echo.strip().split(" ")
+        if not any(p == "I6::1" for p in params):
+            raise TestFailure(
+                f"validated secondary I6 was not restored to the broadcast INF: {echo!r}"
+            )
+    finally:
+        try:
+            main.close()
+        except OSError:
+            pass
+        if side:
+            try:
+                side.close()
+            except OSError:
+                pass
+
+
+def test_hbri_timeout():
+    """#214 HBRI timeout. If the client never opens the side-channel,
+    the hub's sweep fails the attempt after hbri_timeout seconds, sends
+    ISTA 155, and lets the client into the hub WITHOUT the unverified
+    secondary (it stays stripped, per Gap 1).
+
+    Falsifiable: a hub that committed the secondary without validation
+    leaks I6 into the echo; a hub that never released the parked user
+    never sends the BINF echo at all."""
+    main = socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=12)
+    try:
+        reader, sid, itcp = _hbri_main_login(main)
+        # Do NOT open the side-channel. The hub fails the attempt on the
+        # ~1s sweep once hbri_timeout (5s) elapses: ISTA 155 first, then
+        # the completed-login BINF echo (without I6).
+        sta = reader.recv_until(
+            lambda f: f.startswith("ISTA 155") or f.startswith(f"BINF {sid}"),
+            timeout=11,
+        )
+        if sta.startswith(f"BINF {sid}"):
+            raise TestFailure(
+                f"expected ISTA 155 (validation timed out) before login completed, got {sta!r}"
+            )
+        echo = reader.recv_until(
+            lambda f: f.startswith(f"BINF {sid}"), timeout=PROTOCOL_TIMEOUT_SEC
+        )
+        params = echo.strip().split(" ")
+        if any(p == "I6::1" for p in params):
+            raise TestFailure(
+                f"unverified secondary I6 leaked into the broadcast INF after timeout: {echo!r}"
+            )
+    finally:
+        try:
+            main.close()
+        except OSError:
+            pass
+
+
+def test_hbri_unknown_token():
+    """#214 HBRI: an HTCP on a fresh connection bearing a token the hub
+    never minted is rejected with ISTA 220 and the socket closed. Stops
+    a blind attacker from completing (or probing) someone else's HBRI
+    validation."""
+    side = socket.create_connection(
+        ("::1", TEST_PORT_PLAIN_V6), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    try:
+        sreader = _ADCReader(side)
+        side.sendall(b"HTCP I6::1 TOAAAAAAAAAAAAAAAA\n")
+        sta = sreader.recv_until(lambda f: f.startswith("ISTA "))
+        if not sta.startswith("ISTA 220"):
+            raise TestFailure(
+                f"expected ISTA 220 (unknown validation token), got {sta!r}"
+            )
+    finally:
+        try:
+            side.close()
+        except OSError:
+            pass
+
+
+def test_hbri_disconnect_cleanup():
+    """#214 HBRI: a client that is parked in the 'hbri' state and then
+    drops its main connection (never validating) must be cleaned up
+    without wedging the hub - the pending token is cancelled and the
+    transient parked user torn down. Exercises the disconnect-mid-HBRI
+    path (the cancel hook) and confirms the hub still serves a fresh
+    login afterwards. The end-of-run 'no script errors' canary catches
+    any crash in the teardown."""
+    main = socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    try:
+        reader, sid, itcp = _hbri_main_login(main)
+        # Parked in 'hbri'; drop the main connection without validating.
+    finally:
+        try:
+            main.close()
+        except OSError:
+            pass
+    # The hub must remain healthy: a fresh normal login still succeeds.
+    with _logged_in_user("dummy", "test") as (sock, sid2, reader2):
+        _assert_adc_alive(sock)
 
 
 def test_post_login_i4_silent_stripped():
@@ -9917,6 +10117,10 @@ TESTS = [
     ("BINF without I4/I6 accepted (#161)", test_binf_without_i4_or_i6_accepted),
     ("BINF with both I4 and I6 accepted (#147 T3.1 HBRI)", test_binf_with_both_i4_and_i6_accepted),
     ("BINF unverified secondary family stripped (#214 Gap 1)", test_binf_secondary_family_stripped),
+    ("HBRI success: side-channel validates secondary (#214)", test_hbri_success),
+    ("HBRI timeout: unvalidated secondary stays stripped (#214)", test_hbri_timeout),
+    ("HBRI unknown token rejected (#214)", test_hbri_unknown_token),
+    ("HBRI disconnect mid-validation cleans up (#214)", test_hbri_disconnect_cleanup),
     ("post-login INF with I4 silent-stripped (#222)", test_post_login_i4_silent_stripped),
     ("CSPRNG salts are unique across connections", test_csprng_salt_uniqueness),
     ("per-IP connection cap refuses overflow", test_perip_connection_cap),

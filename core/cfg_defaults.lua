@@ -179,6 +179,50 @@ local defaults = {
             return true
         end
     },
+    -- #214 HBRI (Hub-Bridged Reverse Initiation). Opt-in. When a
+    -- dual-stack client logs in, the hub can only authenticate the IP
+    -- family matching the TCP source; the secondary family is stripped
+    -- before broadcast (DDoS-amplification safety). With HBRI enabled
+    -- the hub asks such a client to validate its secondary address over
+    -- a second-family side-channel connection and, on success, restores
+    -- the verified secondary to the broadcast INF. Effective ONLY when
+    -- the hub has a plain listener on BOTH families AND both public
+    -- advertise addresses below are set (otherwise the hub does not
+    -- advertise ADHBRI / never initiates - the secondary just stays
+    -- stripped).
+    hbri_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    -- Seconds the hub waits for the side-channel validation before
+    -- giving up and letting the client into the hub without the
+    -- secondary (adchpp default is 5).
+    hbri_timeout = { 5,
+        function( value )
+            return types_number( value, nil, true )
+                and value >= 1 and value <= 60 and value % 1 == 0
+        end
+    },
+    -- The hub's PUBLIC IPv4 / IPv6 address that an HBRI client connects
+    -- to for the side-channel. Required when hbri_enabled (the hub
+    -- cannot reliably auto-detect its routable address behind NAT /
+    -- a "::" bind). Empty = do not advertise / initiate HBRI.
+    hbri_advertise_v4 = { "",
+        function( value )
+            if not types_utf8( value, nil, true ) then return false end
+            -- Reject whitespace / control bytes: this value is
+            -- concatenated raw into the ITCP frame sent to clients, so a
+            -- space or newline would inject extra params / frames.
+            return value == "" or not value:find( "[%s%c]" )
+        end
+    },
+    hbri_advertise_v6 = { "",
+        function( value )
+            if not types_utf8( value, nil, true ) then return false end
+            return value == "" or not value:find( "[%s%c]" )
+        end
+    },
     use_ssl = { true,
         function( value )
             return types_boolean( value, nil, true )

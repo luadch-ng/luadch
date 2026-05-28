@@ -465,6 +465,31 @@ _protocol = {
             nonpclones = false,
 
         },
+        -- #214 HBRI side-channel validation. The client opens a second
+        -- connection on the opposite IP family and sends HTCP carrying
+        -- the claimed secondary address (I4 / I6, plus optional U4 / U6)
+        -- and the token (TO) the hub minted in its ITCP. Hub-direction
+        -- (H) only on our side; the ITCP the hub sends is built by
+        -- string concat in core/hbri.lua and never parsed here. No
+        -- positional params; P4 / P6 are accepted for symmetry with the
+        -- hub-sent frame even though the client does not echo them.
+        TCP = {
+
+            pp = { len = 0, },
+            np = {
+
+                I4 = _regex.default,
+                I6 = _regex.default,
+                U4 = _regex.integer,
+                U6 = _regex.integer,
+                P4 = _regex.integer,
+                P6 = _regex.integer,
+                TO = _regex.default,
+
+            },
+            nonpclones = true,
+
+        },
         SCH = {
 
             pp = { len = 0, },
@@ -665,6 +690,7 @@ _protocol = {
         SND = _regex.context.hub,
         ZON = _regex.context.streamctl,    -- Phase 8 S4b ADC-EXT ZLIF stream-on
         ZOF = _regex.context.streamctl,    -- Phase 8 S4b ADC-EXT ZLIF stream-off
+        TCP = _regex.context.hub,          -- #214 HBRI HTCP (client -> hub)
 
     }
 

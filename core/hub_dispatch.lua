@@ -56,6 +56,7 @@ local signal = use "signal"
 local unicode = use "unicode"
 local util = use "util"
 local os = use "os"
+local hbri = use "hbri"    -- #214 HBRI secondary-family validation
 
 local out_put = out.put
 
@@ -345,6 +346,7 @@ _protocol = {
                 local extras = ""
                 if _cfg_zlif_enabled then extras = extras .. " ADZLIF" end
                 if _cfg_blom_enabled then extras = extras .. " ADBLOM" end
+                if hbri.active( ) then extras = extras .. " ADHBRI" end    -- #214
                 if extras ~= "" then
                     tpl = tpl:gsub( "ADUCMD\n", "ADUCMD" .. extras .. "\n", 1 )
                 end
@@ -360,6 +362,7 @@ _protocol = {
                 local extras = ""
                 if _cfg_zlif_enabled then extras = extras .. " ADZLIF" end
                 if _cfg_blom_enabled then extras = extras .. " ADBLOM" end
+                if hbri.active( ) then extras = extras .. " ADHBRI" end    -- #214
                 if extras ~= "" then
                     tpl = tpl:gsub( "ADUCMD\n", "ADUCMD" .. extras .. "\n", 1 )
                 end
@@ -414,6 +417,18 @@ _protocol = {
     -- others because state != "normal" (hub.lua:1325).
     HQUI = function( user, adccmd )
         user:client():close()
+        return true
+    end,
+    -- #214 HBRI: a fresh connection whose FIRST frame is HTCP (not the
+    -- usual HSUP) is an HBRI side-channel - a client validating its
+    -- secondary IP family for a session it already logged in on. This
+    -- transient connection is never a real hub user: hand it to the
+    -- validator, which checks the token + family + source IP, answers
+    -- ISTA, and closes the socket. No server.lua hook needed - the
+    -- validation socket rides the normal accept path and is identified
+    -- purely by this HTCP+token first frame.
+    HTCP = function( user, adccmd )
+        hbri.validate( user, adccmd )
         return true
     end,
 
@@ -521,6 +536,33 @@ _identify = {
             end
         end
         adccmd:deletenp "PD"
+        -- #214 HBRI: when the hub can validate secondaries, capture the
+        -- client's unverified secondary claim BEFORE Gap 1 strips it so
+        -- HBRI can re-add it after the side-channel proves the address.
+        -- core/hbri.lua's eligible()/initiate() read user._hbri_claim.
+        if hbri.active( ) then
+            local sec_fam = ( userfam == "I4" ) and "I6" or "I4"
+            local sec_ip  = ( sec_fam == "I6" ) and inf_i6 or inf_i4
+            if sec_ip and sec_ip ~= "" then
+                local su_flags = { }
+                local su = adccmd:getnp "SU"
+                if su then
+                    local tcp_flag = ( sec_fam == "I6" ) and "TCP6" or "TCP4"
+                    local udp_flag = ( sec_fam == "I6" ) and "UDP6" or "UDP4"
+                    for tok in su:gmatch( "[^,]+" ) do
+                        if tok == tcp_flag or tok == udp_flag then
+                            su_flags[ #su_flags + 1 ] = tok
+                        end
+                    end
+                end
+                user._hbri_claim = {
+                    family   = sec_fam,
+                    ip       = sec_ip,
+                    udp      = adccmd:getnp( ( sec_fam == "I6" ) and "U6" or "U4" ),
+                    su_flags = su_flags,
+                }
+            end
+        end
         strip_unverified_secondary( adccmd, userfam )
         user:inf( adccmd )
         if user:hasfeature "CCPM" then user:hasccpm( true ) end

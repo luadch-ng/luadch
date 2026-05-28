@@ -682,10 +682,22 @@ end
 
 debug = out_scriptmsg    -- public
 
-login = function( user, bot )
+login = function( user, bot, hbri_done )
     if bot then
         sendtoall( user:inf( ):adcstring( ) )
     elseif user then
+        -- #214 HBRI: a dual-stack client that advertised a secondary
+        -- IP family is parked in the "hbri" state while it validates
+        -- that address over a second-family side-channel connection.
+        -- login() is re-entered with hbri_done=true on validation
+        -- success or on the timeout sweep (core/hbri.lua). Non-HBRI
+        -- logins (single-stack, no ADHBRI, or HBRI not configured)
+        -- fall straight through to NORMAL entry.
+        local _hbri = use "hbri"
+        if ( not hbri_done ) and _hbri.eligible( user ) then
+            _hbri.initiate( user )
+            return true
+        end
         local sendonly = user:sup( ):hasparam( "ADOSNR" )
         if not sendonly then
             for sid, onlineuser in pairs( _normalstatesids ) do
@@ -1482,6 +1494,12 @@ disconnect = function( client, err, user, quitstring )
             sendtoall( quitstring or ( "IQUI " .. usersid .. "\n" ) )
             scripts_firelistener( "onLogout", user )
         end
+        -- #214 HBRI: drop any pending side-channel token so a user
+        -- disconnecting mid-validation cannot leave it dangling. The
+        -- sweeper also self-heals via the waskilled guard, but this
+        -- frees the token (and its reference to this user object)
+        -- immediately rather than at the timeout deadline.
+        if user._hbri_token then use( "hbri" ).cancel( user ) end
         user.destroy( )
         out_put( "hub.lua: function 'disconnect': remove user ", usersid, " ", ip, ":", port )
     end
@@ -1590,6 +1608,29 @@ loadsettings = function( )    -- caching table lookups...
         -- AFTER inflate and captures decompressed payload bytes
         -- rather than raw deflated wire bytes). Both flags may be
         -- enabled simultaneously.
+    end
+    -- #214 HBRI: (re)bind the secondary-family validator. enter_normal
+    -- re-enters login() with hbri_done=true so a validated (or timed-
+    -- out) HBRI session completes its NORMAL entry. The hub advertises
+    -- / initiates HBRI only when a listener exists on BOTH families AND
+    -- both public advertise addresses are set (see core/hbri.lua). The
+    -- side-channel port is the first plain port for the family, falling
+    -- back to the first TLS port.
+    do
+        local v4_plain, v4_ssl = cfg_get "tcp_ports", cfg_get "ssl_ports"
+        local v6_plain, v6_ssl = cfg_get "tcp_ports_ipv6", cfg_get "ssl_ports_ipv6"
+        local p4 = ( v4_plain and v4_plain[ 1 ] ) or ( v4_ssl and v4_ssl[ 1 ] )
+        local p6 = ( v6_plain and v6_plain[ 1 ] ) or ( v6_ssl and v6_ssl[ 1 ] )
+        use( "hbri" ).bind{
+            enter_normal      = function( u ) login( u, false, true ) end,
+            hbri_enabled      = cfg_get "hbri_enabled",
+            hbri_timeout      = cfg_get "hbri_timeout",
+            hbri_advertise_v4 = cfg_get "hbri_advertise_v4",
+            hbri_advertise_v6 = cfg_get "hbri_advertise_v6",
+            hbri_port_v4      = p4,
+            hbri_port_v6      = p6,
+            hbri_dual_stack   = ( p4 ~= nil ) and ( p6 ~= nil ),
+        }
     end
     _bind_dispatch_module()
 end
@@ -1775,6 +1816,15 @@ init = function( )
     server.addtimer(
         function( )
             scripts_firelistener "onTimer"
+        end
+    )
+    -- #214 HBRI: sweep timed-out secondary-family validation attempts
+    -- (~1s cadence). An attempt whose side-channel did not complete in
+    -- hbri_timeout seconds is failed: the user enters NORMAL with the
+    -- secondary left stripped. Cheap (iterates the small token table).
+    server.addtimer(
+        function( )
+            use( "hbri" ).sweep( )
         end
     )
     cfg.registerevent( "reload", loadlanguage )
