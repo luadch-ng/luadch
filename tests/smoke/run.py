@@ -1746,6 +1746,219 @@ def test_hbri_no_secondary_no_solicit():
             pass
 
 
+def test_hbri_wrong_family_rejected():
+    """#294 (audit Tier-2): a VALID token presented over the WRONG IP
+    family must be rejected. The side-channel family must be the opposite
+    of the main connection; if a client (or attacker holding a token)
+    connects the side-channel on the SAME family as the main connection,
+    validate() rejects it with ISTA 155 and the secondary stays stripped.
+    This is the anti-cross-family-spoof branch - previously only reasoned-
+    correct, now exercised.
+
+    The main login is v4 (secondary family I6). We open the side-channel
+    on v4 (the WRONG family - same as main) carrying the real token; the
+    hub sees vfam == main family != entry.family (I6) and rejects.
+
+    The HTCP carries the PLACEHOLDER I6:: (not a concrete address) on
+    purpose: a placeholder skips the address cross-check, so the ONLY
+    branch that can reject is the family check. That makes this test
+    falsifiable for the family check specifically - drop it and the hub
+    would commit the v4 getpeername into the I6 field and answer ISTA 000
+    (verified: the assert below then fires)."""
+    main = socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    side = None
+    try:
+        reader, sid, itcp = _hbri_main_login(main)
+        token = _hbri_param(itcp, "TO")
+        if not token:
+            raise TestFailure(f"ITCP missing TO: {itcp!r}")
+        # Connect the side-channel on v4 (same family as main) instead of
+        # the expected v6, carrying the valid token + a placeholder I6.
+        side = socket.create_connection(
+            (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+        )
+        sreader = _ADCReader(side)
+        side.sendall(f"HTCP I6:: TO{token}\n".encode("utf-8"))
+        sta = sreader.recv_until(lambda f: f.startswith("ISTA "))
+        if not sta.startswith("ISTA 155"):
+            raise TestFailure(
+                f"expected ISTA 155 (validation on wrong IP protocol), got {sta!r}"
+            )
+        # The main login then completes WITHOUT the secondary. A
+        # family-check regression would have committed the v4 getpeername
+        # into the I6 field (I6<v4addr>); assert it never appears.
+        echo = reader.recv_until(
+            lambda f: f.startswith(f"BINF {sid}"), timeout=PROTOCOL_TIMEOUT_SEC
+        )
+        if f"I6{HUB_HOST}" in echo:
+            raise TestFailure(
+                f"v4 source leaked into the I6 field after a wrong-family validation: {echo!r}"
+            )
+    finally:
+        try:
+            main.close()
+        except OSError:
+            pass
+        if side:
+            try:
+                side.close()
+            except OSError:
+                pass
+
+
+def test_hbri_v4_secondary_direction():
+    """#294 (audit Tier-2): the v6-main / v4-secondary direction. The CI
+    suite otherwise only exercises v4-main / v6-secondary; this connects
+    the main login over v6 advertising a v4 secondary, validates over a v4
+    side-channel, and confirms the verified I4 is broadcast - covering the
+    digit-'4' / advertise_v4 / I4-commit branch with no prior CI.
+
+    Falsifiable: without the v4-secondary path the hub never sends the
+    ITCP P4 pointer or never restores I4."""
+    main = socket.create_connection(
+        ("::1", TEST_PORT_PLAIN_V6), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    side = None
+    try:
+        reader = _ADCReader(main)
+        main.sendall(b"HSUP ADBASE ADTIGR ADHBRI\n")
+        reader.recv_until(lambda f: f.startswith("ISUP "))
+        isid = reader.recv_until(lambda f: f.startswith("ISID "))
+        sid = isid.split(" ", 1)[1].strip()
+        reader.recv_until(lambda f: f.startswith("IINF "))
+        pid_bytes = secrets.token_bytes(24)
+        cid_b32 = _b32_encode(_tiger.tiger(pid_bytes))
+        pid_b32 = _b32_encode(pid_bytes)
+        # Main connection on v6 (primary I6 = the v6 source); secondary is
+        # a concrete v4 address that the side-channel source must match.
+        binf = (
+            f"BINF {sid} ID{cid_b32} PD{pid_b32} NIdummy"
+            f" I6::1 I4{HUB_HOST} SUTCP4,TCP6\n"
+        )
+        main.sendall(binf.encode("utf-8"))
+        gpa = reader.recv_until(lambda f: f.startswith("IGPA "))
+        salt_bytes = _b32_decode(gpa.split(" ", 1)[1].strip())
+        response = _tiger.tiger("test".encode("utf-8") + salt_bytes)
+        main.sendall(f"HPAS {_b32_encode(response)}\n".encode("utf-8"))
+        itcp = reader.recv_until(
+            lambda f: f.startswith("ITCP ") or f.startswith(f"BINF {sid}"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not itcp.startswith("ITCP "):
+            raise TestFailure(
+                f"expected an ITCP P4 pointer (v4 secondary), got {itcp!r}"
+            )
+        token = _hbri_param(itcp, "TO")
+        port = _hbri_param(itcp, "P4")
+        if not token or not port:
+            raise TestFailure(f"ITCP missing TO / P4 (v4 direction): {itcp!r}")
+        side = socket.create_connection(
+            (HUB_HOST, int(port)), timeout=PROTOCOL_TIMEOUT_SEC
+        )
+        sreader = _ADCReader(side)
+        side.sendall(f"HTCP I4{HUB_HOST} TO{token}\n".encode("utf-8"))
+        sta = sreader.recv_until(lambda f: f.startswith("ISTA "))
+        if not sta.startswith("ISTA 000"):
+            raise TestFailure(
+                f"expected ISTA 000 on the v4 side-channel, got {sta!r}"
+            )
+        reader.recv_until(
+            lambda f: f.startswith(f"BINF {sid}") and f"I4{HUB_HOST}" in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+    finally:
+        try:
+            main.close()
+        except OSError:
+            pass
+        if side:
+            try:
+                side.close()
+            except OSError:
+                pass
+
+
+def test_hbri_postlogin_disconnect_cleanup():
+    """#294 (audit Tier-2): a NORMAL-state client that solicited a
+    post-login HBRI and then drops its main connection before validating
+    must have its pending token cancelled (the disconnect cancel hook
+    covers the post-login path too, not just the login-parked path). The
+    hub stays healthy; the end-of-run no-script-errors canary catches any
+    teardown crash."""
+    main = socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    try:
+        reader, sid = _hbri_normal_login_capable(main)
+        main.sendall(f"BINF {sid} I6:: SUTCP4,TCP6\n".encode("utf-8"))
+        reader.recv_until(lambda f: f.startswith("ITCP "), timeout=PROTOCOL_TIMEOUT_SEC)
+        # Drop the main connection mid-validation (no side-channel opened).
+    finally:
+        try:
+            main.close()
+        except OSError:
+            pass
+    # The hub must remain healthy: a fresh normal login still succeeds.
+    with _logged_in_user("dummy", "test") as (sock, sid2, reader2):
+        _assert_adc_alive(sock)
+
+
+def test_hbri_postlogin_concrete_mismatch_rejected():
+    """#294 (audit Tier-2): the post-login path must also reject a CONCRETE
+    secondary address that does not match the side-channel getpeername
+    (the login-path concrete mismatch is covered by
+    test_hbri_concrete_mismatch_rejected; this covers the post-login
+    branch). The bogus secondary must not be broadcast."""
+    main = socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    side = None
+    try:
+        reader, sid = _hbri_normal_login_capable(main)
+        # Post-login INF advertising a CONCRETE v6 secondary.
+        main.sendall(f"BINF {sid} I62001:db8::beef SUTCP4,TCP6\n".encode("utf-8"))
+        itcp = reader.recv_until(lambda f: f.startswith("ITCP "), timeout=PROTOCOL_TIMEOUT_SEC)
+        token = _hbri_param(itcp, "TO")
+        port = _hbri_param(itcp, "P6")
+        if not token or not port:
+            raise TestFailure(f"post-login ITCP missing TO / P6: {itcp!r}")
+        side = socket.create_connection(
+            ("::1", int(port)), timeout=PROTOCOL_TIMEOUT_SEC
+        )
+        sreader = _ADCReader(side)
+        # Side-channel states the concrete address, but the real source is
+        # ::1 - mismatch must be rejected.
+        side.sendall(f"HTCP I62001:db8::beef TO{token}\n".encode("utf-8"))
+        sta = sreader.recv_until(lambda f: f.startswith("ISTA "))
+        if not sta.startswith("ISTA 155"):
+            raise TestFailure(
+                f"expected ISTA 155 (post-login concrete mismatch), got {sta!r}"
+            )
+        # The bogus secondary must never reach a broadcast.
+        leaked = None
+        try:
+            leaked = reader.recv_until(lambda f: "2001:db8::beef" in f, timeout=2)
+        except TestFailure as e:
+            if "timed out" not in str(e):
+                raise
+        if leaked is not None:
+            raise TestFailure(
+                f"mismatched post-login secondary leaked into a broadcast: {leaked!r}"
+            )
+    finally:
+        try:
+            main.close()
+        except OSError:
+            pass
+        if side:
+            try:
+                side.close()
+            except OSError:
+                pass
+
+
 def test_post_login_i4_silent_stripped():
     """#222: post-login BINF carrying `I4 <new_ip>` MUST be silent-
     stripped, not killed. Pre-fix the `forbidden.flags_on_inf` check
@@ -10462,6 +10675,10 @@ TESTS = [
     ("HBRI unknown token rejected (#214)", test_hbri_unknown_token),
     ("HBRI disconnect mid-validation cleans up (#214)", test_hbri_disconnect_cleanup),
     ("HBRI not solicited for client without secondary (#214)", test_hbri_no_secondary_no_solicit),
+    ("HBRI wrong-family side-channel rejected (#294)", test_hbri_wrong_family_rejected),
+    ("HBRI v6-main / v4-secondary direction (#294)", test_hbri_v4_secondary_direction),
+    ("HBRI post-login disconnect mid-validation cleans up (#294)", test_hbri_postlogin_disconnect_cleanup),
+    ("HBRI post-login concrete mismatch rejected (#294)", test_hbri_postlogin_concrete_mismatch_rejected),
     ("post-login INF with I4 silent-stripped (#222)", test_post_login_i4_silent_stripped),
     ("CSPRNG salts are unique across connections", test_csprng_salt_uniqueness),
     ("per-IP connection cap refuses overflow", test_perip_connection_cap),
