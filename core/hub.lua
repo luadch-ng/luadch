@@ -1612,15 +1612,20 @@ loadsettings = function( )    -- caching table lookups...
     -- #214 HBRI: (re)bind the secondary-family validator. enter_normal
     -- re-enters login() with hbri_done=true so a validated (or timed-
     -- out) HBRI session completes its NORMAL entry. The hub advertises
-    -- / initiates HBRI only when a listener exists on BOTH families AND
-    -- both public advertise addresses are set (see core/hbri.lua). The
-    -- side-channel port is the first plain port for the family, falling
-    -- back to the first TLS port.
+    -- / initiates HBRI only when a PLAIN listener exists on BOTH families
+    -- AND both public advertise addresses are set (see core/hbri.lua).
+    -- #294: the side-channel port is the first PLAIN port for the family
+    -- only - NO TLS fallback. The ITCP pointer and the inbound HTCP are
+    -- unencrypted; advertising a TLS-only port would make the client open
+    -- a plain connection to a TLS listener, which never yields an HTCP and
+    -- always times out. A family without a plain listener disables HBRI
+    -- (p stays nil -> hbri_dual_stack false -> secondary stays stripped,
+    -- the secure default).
     do
-        local v4_plain, v4_ssl = cfg_get "tcp_ports", cfg_get "ssl_ports"
-        local v6_plain, v6_ssl = cfg_get "tcp_ports_ipv6", cfg_get "ssl_ports_ipv6"
-        local p4 = ( v4_plain and v4_plain[ 1 ] ) or ( v4_ssl and v4_ssl[ 1 ] )
-        local p6 = ( v6_plain and v6_plain[ 1 ] ) or ( v6_ssl and v6_ssl[ 1 ] )
+        local v4_plain = cfg_get "tcp_ports"
+        local v6_plain = cfg_get "tcp_ports_ipv6"
+        local p4 = v4_plain and v4_plain[ 1 ]
+        local p6 = v6_plain and v6_plain[ 1 ]
         use( "hbri" ).bind{
             enter_normal      = function( u ) login( u, false, true ) end,
             sendtoall         = sendtoall,    -- #286 post-login INF broadcast

@@ -84,6 +84,13 @@ jobs:
       - name: Run http_client unit test
         run: lua5.4 tests/unit/http_client_test.lua
 
+      # core/hbri.lua (#214 / #291 / #286): unit test for the pure
+      # activation gate (active()) and eligibility (eligible()); the
+      # side-channel paths are smoke-tested. #294 locks "no plain port
+      # on a family -> active() false".
+      - name: Run hbri unit test
+        run: lua5.4 tests/unit/hbri_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -150,6 +157,10 @@ jobs:
       - name: Run http_client unit test
         shell: msys2 {0}
         run: lua tests/unit/http_client_test.lua
+
+      - name: Run hbri unit test
+        shell: msys2 {0}
+        run: lua tests/unit/hbri_test.lua
 
       - name: Configure
         shell: msys2 {0}
