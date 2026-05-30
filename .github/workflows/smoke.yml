@@ -91,6 +91,14 @@ jobs:
       - name: Run hbri unit test
         run: lua5.4 tests/unit/hbri_test.lua
 
+      # #301 PR-1: lang-table coverage. Verifies every i18n key required
+      # by core/hub.lua exists in BOTH examples/lang/de.tbl and en.tbl
+      # (missing keys would silently fall through to the hardcoded
+      # English default), plus the de/en parity that future translation
+      # tooling depends on.
+      - name: Run lang unit test
+        run: lua5.4 tests/unit/lang_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -161,6 +169,10 @@ jobs:
       - name: Run hbri unit test
         shell: msys2 {0}
         run: lua tests/unit/hbri_test.lua
+
+      - name: Run lang unit test
+        shell: msys2 {0}
+        run: lua tests/unit/lang_test.lua
 
       - name: Configure
         shell: msys2 {0}

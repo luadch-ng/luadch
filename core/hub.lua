@@ -19,7 +19,7 @@
             - improve onFailedAuth listeners
 
         v0.37: by pulsar
-            - changes in _i18n_login_message
+            - changes in _i18n.login_message
 
         v0.36: by pulsar
             - added "updateusers" function
@@ -81,7 +81,7 @@
                 - disabled the hubbot to mainchat bridge
             - changes in loadlanguage() function
                 - added "hub_hubbot_response"
-            - removed "_i18n_hub_is_full" double entry
+            - removed "_i18n.hub_is_full" double entry
             - small fix in user.kill() function
                 - if the optional parameter is "TL-1" then the client don't try to reconnect
 
@@ -370,20 +370,13 @@ local _hubinf_regonly
 
 --// language //--
 
-local _i18n_hub_is_full
-local _i18n_no_base_support
-local _i18n_no_cid_nick_found
-local _i18n_cid_taken
-local _i18n_nick_taken
-local _i18n_invalid_pid
-local _i18n_invalid_ip
-local _i18n_reg_only
-local _i18n_invalid_pass
-local _i18n_nick_or_cid_taken
-local _i18n_login_message
-local _i18n_unknown
-local _i18n_max_bad_password
-local _i18n_hubbot_response
+-- #301: single file-scope table holding ALL i18n strings (was 14
+-- separate `local _i18n_*` slots before; the per-chunk 200-locals cap
+-- left no room to add the new HBRI / ZLIF / insertreguser keys without
+-- this consolidation). Populated by loadlanguage(); deps-passed as a
+-- single `_i18n` entry to hub_dispatch.lua / hub_bot_object.lua /
+-- hbri.lua (replaces 14/11/1 individual deps entries respectively).
+local _i18n = { }
 
 --// caching config //--
 
@@ -488,17 +481,8 @@ local function _bind_dispatch_module( )
         _cfg_blom_k          = _cfg_p8.blom.k,
         _cfg_blom_h          = _cfg_p8.blom.h,
         _cfg_blom_m          = _cfg_p8.blom.m,
-        _i18n_unknown            = _i18n_unknown,
-        _i18n_cid_taken          = _i18n_cid_taken,
-        _i18n_hub_is_full        = _i18n_hub_is_full,
-        _i18n_invalid_ip         = _i18n_invalid_ip,
-        _i18n_invalid_pass       = _i18n_invalid_pass,
-        _i18n_invalid_pid        = _i18n_invalid_pid,
-        _i18n_max_bad_password   = _i18n_max_bad_password,
-        _i18n_nick_taken         = _i18n_nick_taken,
-        _i18n_no_base_support    = _i18n_no_base_support,
-        _i18n_no_cid_nick_found  = _i18n_no_cid_nick_found,
-        _i18n_reg_only           = _i18n_reg_only,
+        -- #301: single deps entry (was 11 individual _i18n_X entries).
+        _i18n = _i18n,
     }
 end
 
@@ -666,7 +650,8 @@ updateusers = function( ) -- new
         _regusers        = _regusers,
         _cfg_bot_level   = _cfg_bot_level,
         _cfg_bot_rank    = _cfg_bot_rank,
-        _i18n_unknown    = _i18n_unknown,
+        -- #301: single deps entry (was the lone _i18n_unknown).
+        _i18n            = _i18n,
     }
     _bind_dispatch_module()
     mem_free( )
@@ -720,8 +705,8 @@ login = function( user, bot, hbri_done )
             end
             return "NO"
         end
-        local TLS = "[TLS: " .. get_tls_mode() .. "]"
-        local msg = utf_format( _i18n_login_message,
+        local TLS = utf_format( _i18n.login_tls_label, get_tls_mode() )
+        local msg = utf_format( _i18n.login_message,
             NAME,
             VERSION,
             TLS,
@@ -783,18 +768,18 @@ insertreguser = function( user, profile, user_cid, user_hash, user_nick  )
     if profile then
         for key, value in pairs( profile ) do
             if not utf_match( value, _matchreguser[ key ] ) then
-                return nil, "invalid profile" -----!
+                return nil, _i18n.reg_invalid_profile -----!
             end
         end
         local hash = profile.hash
         local cid = profile.cid
         local nick = profile.nick
         if not ( ( cid and hash ) or nick ) then
-            return nil, "no cid/hash/nick"-----!
+            return nil, _i18n.reg_no_cid_hash_nick-----!
         end
         if user and _usersids[ user:sid( ) ] then
             if user:isregged( ) then
-                return nil, "user already inserted in hub"-----!
+                return nil, _i18n.reg_already_inserted-----!
             end
             user:addregmethods( profile )
             user.addregmethods = nil
@@ -806,10 +791,10 @@ insertreguser = function( user, profile, user_cid, user_hash, user_nick  )
             end
             return user
         else
-            return nil, "invalid user object"-----!
+            return nil, _i18n.reg_invalid_user-----!
         end
     else
-        return nil, "no profile"-----!
+        return nil, _i18n.reg_no_profile-----!
     end
 end    -- private
 
@@ -893,7 +878,7 @@ reghubbot = function( name, desc )
                 if text:match( "^[+!#]" ) then
                     scripts_firelistener( "onBroadcast", user, adccmd, text )
                 else
-                    user:reply( _i18n_hubbot_response, _hubbot, _hubbot )
+                    user:reply( _i18n.hubbot_response, _hubbot, _hubbot )
                 end
             end
             return true
@@ -978,7 +963,7 @@ reguser = function( profile )
         end
         local onlineuser = _usercids[ hash ][ cid ]
         if onlineuser then
-            onlineuser:kill( "ISTA 224 " .. _i18n_nick_or_cid_taken .. "\n" )
+            onlineuser:kill( "ISTA 224 " .. _i18n.nick_or_cid_taken .. "\n" )
         end
     end
     if nick then
@@ -987,11 +972,11 @@ reguser = function( profile )
         end
         local onlineuser = _usernicks[ nick ]
         if onlineuser then
-            onlineuser:kill( "ISTA 222 " .. _i18n_nick_or_cid_taken .. "\n" )
+            onlineuser:kill( "ISTA 222 " .. _i18n.nick_or_cid_taken .. "\n" )
         end
     end
     profile.date = profile.date or os_date( "%Y-%m-%d / %H:%M:%S" )
-    profile.by = profile.by or _i18n_unknown
+    profile.by = profile.by or _i18n.unknown
     if nick then
         _regusernicks[ nick ] = profile
     end
@@ -1379,7 +1364,7 @@ incoming = function( client, data, err )
                 -- (no `forced` arg) defers the socket close until
                 -- _sendbuffer drains, so the ISTA reaches the wire
                 -- before the FIN.
-                user.write( "ISTA 240 FCZON ZLIF before HSUP\n" )
+                user.write( "ISTA 240 FCZON " .. _i18n.zlif_before_hsup .. "\n" )
                 user:client().close( )
                 return true
             end
@@ -1392,7 +1377,7 @@ incoming = function( client, data, err )
                 end
                 return true
             else
-                user:kill( "ISTA 200 ZLIF ZOF unsupported, closing connection\n", "TL-1" )
+                user:kill( "ISTA 200 " .. _i18n.zlif_zof_unsupported .. "\n", "TL-1" )
                 return true
             end
         end
@@ -1515,20 +1500,45 @@ loadlanguage = function( )
 
     i18n = i18n or { }
 
-    _i18n_unknown = adclib_escape( i18n.hub_unknown or "<UNKNOWN>" )
-    _i18n_reg_only = adclib_escape( i18n.hub_reg_only or "Registered users only." )
-    _i18n_cid_taken = adclib_escape( i18n.hub_cid_taken or "Your CID is taken." )
-    _i18n_nick_taken = adclib_escape( i18n.hub_nick_taken or "Your nick is taken." )
-    _i18n_invalid_ip = adclib_escape( i18n.hub_invalid_ip or "Your IP in INF does not match with your real IP. Real IP/Your IP: " )
-    _i18n_hub_is_full = adclib_escape( i18n.hub_hub_is_full or "Hub is full." )
-    _i18n_invalid_pid = adclib_escape( i18n.hub_invalid_pid or "Your PID is invalid." )
-    _i18n_invalid_pass = adclib_escape( i18n.hub_invalid_pass or "Invalid password." )
-    _i18n_login_message = i18n.hub_login_message or "This server is running %s %s %s (Uptime: %d days, %d hours, %d minutes, %d seconds)"
-    _i18n_no_base_support = adclib_escape( i18n.hub_no_base_support or "Your client does not support BASE." )
-    _i18n_max_bad_password = adclib_escape( i18n.hub_max_bad_password or "Max bad password exceeded. Timeout in seconds: " )
-    _i18n_nick_or_cid_taken = adclib_escape( i18n.hub_nick_or_cid_taken or "Nick/CID taken." )
-    _i18n_no_cid_nick_found = adclib_escape( i18n.hub_no_cid_nick_found or "No CID/PID/NICK/IP found in your INF." )
-    _i18n_hubbot_response = i18n.hub_hubbot_response or "I am the Hubbot, do you really want to talk to me?"
+    -- Pre-#301 keys (BASE protocol surface).
+    _i18n.unknown            = adclib_escape( i18n.hub_unknown            or "<UNKNOWN>" )
+    _i18n.reg_only           = adclib_escape( i18n.hub_reg_only           or "Registered users only." )
+    _i18n.cid_taken          = adclib_escape( i18n.hub_cid_taken          or "Your CID is taken." )
+    _i18n.nick_taken         = adclib_escape( i18n.hub_nick_taken         or "Your nick is taken." )
+    _i18n.invalid_ip         = adclib_escape( i18n.hub_invalid_ip         or "Your IP in INF does not match with your real IP. Real IP/Your IP: " )
+    _i18n.hub_is_full        = adclib_escape( i18n.hub_hub_is_full        or "Hub is full." )
+    _i18n.invalid_pid        = adclib_escape( i18n.hub_invalid_pid        or "Your PID is invalid." )
+    _i18n.invalid_pass       = adclib_escape( i18n.hub_invalid_pass       or "Invalid password." )
+    _i18n.no_base_support    = adclib_escape( i18n.hub_no_base_support    or "Your client does not support BASE." )
+    _i18n.max_bad_password   = adclib_escape( i18n.hub_max_bad_password   or "Max bad password exceeded. Timeout in seconds: " )
+    _i18n.nick_or_cid_taken  = adclib_escape( i18n.hub_nick_or_cid_taken  or "Nick/CID taken." )
+    _i18n.no_cid_nick_found  = adclib_escape( i18n.hub_no_cid_nick_found  or "No CID/PID/NICK/IP found in your INF." )
+    -- BMSG-bound strings: rendered through user:reply, escaped at emit
+    -- time by the ADC wire-encoder; do NOT pre-escape here.
+    _i18n.login_message      = i18n.hub_login_message      or "This server is running %s %s %s (Uptime: %d days, %d hours, %d minutes, %d seconds)"
+    _i18n.hubbot_response    = i18n.hub_hubbot_response    or "I am the Hubbot, do you really want to talk to me?"
+
+    -- #301 new: HBRI ISTA reasons (escaped, ride the ADC frame) +
+    -- ZLIF reject reasons (escaped, same) + the [TLS:] login label
+    -- (BMSG-bound, no escape) + the insertreguser failure strings
+    -- (returned to the caller which escapeto's before emit).
+    _i18n.hbri_unknown_token    = adclib_escape( i18n.hub_hbri_unknown_token    or "Unknown validation token" )
+    _i18n.hbri_wrong_protocol   = adclib_escape( i18n.hub_hbri_wrong_protocol   or "Validation request on wrong IP protocol" )
+    _i18n.hbri_address_mismatch = adclib_escape( i18n.hub_hbri_address_mismatch or "Validation address mismatch" )
+    _i18n.hbri_succeed          = adclib_escape( i18n.hub_hbri_succeed          or "Validation succeed" )
+    _i18n.hbri_timeout          = adclib_escape( i18n.hub_hbri_timeout          or "Secondary address validation timed out" )
+    _i18n.zlif_before_hsup      = adclib_escape( i18n.hub_zlif_before_hsup      or "ZLIF before HSUP" )
+    _i18n.zlif_zof_unsupported  = adclib_escape( i18n.hub_zlif_zof_unsupported  or "ZLIF ZOF unsupported, closing connection" )
+    _i18n.login_tls_label       = i18n.hub_login_tls_label or "[TLS: %s]"
+    _i18n.reg_invalid_profile   = i18n.hub_reg_invalid_profile   or "invalid profile"
+    _i18n.reg_no_cid_hash_nick  = i18n.hub_reg_no_cid_hash_nick  or "no cid/hash/nick"
+    _i18n.reg_already_inserted  = i18n.hub_reg_already_inserted  or "user already inserted in hub"
+    _i18n.reg_invalid_user      = i18n.hub_reg_invalid_user      or "invalid user object"
+    _i18n.reg_no_profile        = i18n.hub_reg_no_profile        or "no profile"
+
+    -- Forward the HBRI-side strings (validate()/sweep() emit them).
+    use( "hbri" ).set_i18n( _i18n )
+
     _bind_dispatch_module()
 end
 
@@ -1708,7 +1718,8 @@ init = function( )
         _regusers        = _regusers,
         _cfg_bot_level   = _cfg_bot_level,
         _cfg_bot_rank    = _cfg_bot_rank,
-        _i18n_unknown    = _i18n_unknown,
+        -- #301: single deps entry (was the lone _i18n_unknown).
+        _i18n            = _i18n,
     }
     _bind_dispatch_module()
     reghubbot( cfg_get "hub_bot", cfg_get "hub_bot_desc" )

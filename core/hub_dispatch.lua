@@ -160,18 +160,12 @@ local _cfg_blom_k
 local _cfg_blom_h
 local _cfg_blom_m
 
--- i18n strings (rebuilt on +reload via loadlanguage).
-local _i18n_unknown
-local _i18n_cid_taken
-local _i18n_hub_is_full
-local _i18n_invalid_ip
-local _i18n_invalid_pass
-local _i18n_invalid_pid
-local _i18n_max_bad_password
-local _i18n_nick_taken
-local _i18n_no_base_support
-local _i18n_no_cid_nick_found
-local _i18n_reg_only
+-- #301: single table holding all i18n strings (was 11 individual
+-- `local _i18n_*` slots before, threaded as 11 separate deps entries
+-- from hub.lua; consolidated to free locals slots in hub.lua's main
+-- chunk and shrink the deps surface). Rebuilt on +reload via
+-- loadlanguage in hub.lua, re-bound here on _bind_dispatch_module().
+local _i18n = { }
 
 local function bind( deps )
     -- helpers
@@ -219,18 +213,11 @@ local function bind( deps )
     _cfg_blom_k          = deps._cfg_blom_k
     _cfg_blom_h          = deps._cfg_blom_h
     _cfg_blom_m          = deps._cfg_blom_m
-    -- i18n
-    _i18n_unknown            = deps._i18n_unknown
-    _i18n_cid_taken          = deps._i18n_cid_taken
-    _i18n_hub_is_full        = deps._i18n_hub_is_full
-    _i18n_invalid_ip         = deps._i18n_invalid_ip
-    _i18n_invalid_pass       = deps._i18n_invalid_pass
-    _i18n_invalid_pid        = deps._i18n_invalid_pid
-    _i18n_max_bad_password   = deps._i18n_max_bad_password
-    _i18n_nick_taken         = deps._i18n_nick_taken
-    _i18n_no_base_support    = deps._i18n_no_base_support
-    _i18n_no_cid_nick_found  = deps._i18n_no_cid_nick_found
-    _i18n_reg_only           = deps._i18n_reg_only
+    -- #301: single i18n table (replaces 11 individual deps entries).
+    -- DO NOT reassign `_i18n = {}` anywhere - hub.lua's loadlanguage
+    -- mutates the table in place on +reload, and downstream readers
+    -- (this file, hub_bot_object.lua) hold the same reference.
+    _i18n = deps._i18n
 end
 
 -- #214 Gap 1: the hub can only authenticate the IP family matching the
@@ -400,14 +387,14 @@ _protocol = {
                 end
             end
             if _cfg_max_users <= _get_user_count() then
-                user:kill( "ISTA 211 " .. _i18n_hub_is_full .. "\n" )-----!
+                user:kill( "ISTA 211 " .. _i18n.hub_is_full .. "\n" )-----!
                 return true
             end
             user:sup( adccmd )
             user:state "identify"
             user:hash "TIGR"    -- assume TIGR support^^
         else
-            user:kill( "ISTA 220 " .. _i18n_no_base_support .. "\n", "TL-1" )-----!
+            user:kill( "ISTA 220 " .. _i18n.no_base_support .. "\n", "TL-1" )-----!
         end
         return true
     end,
@@ -457,8 +444,8 @@ _identify = {
         local inf_i6 = adccmd:getnp "I6"
         local hash = user.hash( )
         if not ( cid and pid and nick ) then
-            user:kill( "ISTA 220 " .. _i18n_no_cid_nick_found .. "\n", "TL-1" )
-            scripts_firelistener( "onFailedAuth", ( nick or _i18n_unknown ), ( inf_i4 or inf_i6 or _i18n_unknown ), ( cid or _i18n_unknown ), escapefrom( _i18n_no_cid_nick_found ) )
+            user:kill( "ISTA 220 " .. _i18n.no_cid_nick_found .. "\n", "TL-1" )
+            scripts_firelistener( "onFailedAuth", ( nick or _i18n.unknown ), ( inf_i4 or inf_i6 or _i18n.unknown ), ( cid or _i18n.unknown ), escapefrom( _i18n.no_cid_nick_found ) )
             return true
         end
         local userip = user.ip( ) or ""
@@ -479,8 +466,8 @@ _identify = {
             adccmd:setnp( userfam, userip )
         elseif infip_match ~= userip then
             if _cfg_kill_wrong_ips then
-                user:kill( "ISTA 246 " .. _i18n_invalid_ip .. userip .. "/" .. infip_match .. "\n", "TL10" )
-                scripts_firelistener( "onFailedAuth", nick, userip, cid,  escapefrom( _i18n_invalid_ip .. userip .. "/" .. infip_match ) )
+                user:kill( "ISTA 246 " .. _i18n.invalid_ip .. userip .. "/" .. infip_match .. "\n", "TL10" )
+                scripts_firelistener( "onFailedAuth", nick, userip, cid,  escapefrom( _i18n.invalid_ip .. userip .. "/" .. infip_match ) )
                 return true
             else
                 -- #214 Gap 2: kill_wrong_ips=false is the NAT-weird-
@@ -497,14 +484,14 @@ _identify = {
             end
         end
         if cid ~= adclib_hash( pid ) then
-            user:kill( "ISTA 227 " .. _i18n_invalid_pid .. "\n", "TL-1" )
-            scripts_firelistener( "onFailedAuth", nick, userip, cid,  escapefrom( _i18n_invalid_pid ) )
+            user:kill( "ISTA 227 " .. _i18n.invalid_pid .. "\n", "TL-1" )
+            scripts_firelistener( "onFailedAuth", nick, userip, cid,  escapefrom( _i18n.invalid_pid ) )
             return true
         end
         local onlineuser = isuserconnected( nil, nil, cid, hash ) -- isuserconnected( nick, sid, cid, hash )
         if onlineuser then
-            onlineuser:kill( "ISTA 224 " .. _i18n_cid_taken .. "\n", "TL-1" )
-            --scripts_firelistener( "onFailedAuth", nick, userip, cid, escapefrom( _i18n_cid_taken ) )
+            onlineuser:kill( "ISTA 224 " .. _i18n.cid_taken .. "\n", "TL-1" )
+            --scripts_firelistener( "onFailedAuth", nick, userip, cid, escapefrom( _i18n.cid_taken ) )
         end
         onlineuser = isuserconnected( nick )
         if onlineuser then
@@ -518,14 +505,14 @@ _identify = {
             if cfg_get "reg_only" then
                 user._takeover_target = onlineuser
             else
-                user:kill( "ISTA 222 " .. _i18n_nick_taken .. "\n", "TL-1" ) -- kill connecting client
+                user:kill( "ISTA 222 " .. _i18n.nick_taken .. "\n", "TL-1" ) -- kill connecting client
                 return true
             end
         end
         local profile = isuserregged( nick )
         if not profile and cfg_get "reg_only" then -- reg only hub; unregged user will be disconnected
-            user:kill( "ISTA 226 " .. _i18n_reg_only .. "\n", "TL-1" )
-            scripts_firelistener( "onFailedAuth", nick, userip, cid,  escapefrom( _i18n_reg_only ) )
+            user:kill( "ISTA 226 " .. _i18n.reg_only .. "\n", "TL-1" )
+            scripts_firelistener( "onFailedAuth", nick, userip, cid,  escapefrom( _i18n.reg_only ) )
             return true
         --else
         elseif profile then
@@ -599,14 +586,14 @@ _identify = {
             if #lc ~= 14 then profile.lastconnect = util_date() end -- util.date() has allways 14 chars: yyyymmddhhmmss
             local sec, y, d, h, m, s = util_difftime( util_date(), profile.lastconnect )
             if ( ( profile.badpassword or 0 ) >= _cfg_max_bad_password ) and ( sec < _cfg_bad_pass_timeout ) then
-                user:kill( "ISTA 223 " .. _i18n_max_bad_password .. sec .. "/" .. _cfg_bad_pass_timeout .. "\n" )
-                scripts_firelistener( "onFailedAuth", nick, userip, cid, escapefrom( _i18n_max_bad_password .. sec .. "/" .. _cfg_bad_pass_timeout ) )
+                user:kill( "ISTA 223 " .. _i18n.max_bad_password .. sec .. "/" .. _cfg_bad_pass_timeout .. "\n" )
+                scripts_firelistener( "onFailedAuth", nick, userip, cid, escapefrom( _i18n.max_bad_password .. sec .. "/" .. _cfg_bad_pass_timeout ) )
                 return true
             end
             --[[profile.lastconnect = profile.lastconnect or os_time( )
             local diff = os_difftime( os_time( ), profile.lastconnect )
             if ( ( profile.badpassword or 0 ) >= _cfg_max_bad_password ) and ( diff < _cfg_bad_pass_timeout ) then
-                user:kill( "ISTA 223 " .. _i18n_max_bad_password .. diff .. "/" .. _cfg_bad_pass_timeout .. "\n" )
+                user:kill( "ISTA 223 " .. _i18n.max_bad_password .. diff .. "/" .. _cfg_bad_pass_timeout .. "\n" )
                 return true
             end ]]
             user:salt( adclib_createsalt( ) )
@@ -633,7 +620,7 @@ _verify = {
         local pass
         local regged = user.isregged( )
         local usercid = user.cid( )
-        local userip = user.ip( ) or _i18n_unknown
+        local userip = user.ip( ) or _i18n.unknown
         local userhash = adccmd[ 4 ]
         if regged then
             pass = user.password( )
@@ -651,8 +638,8 @@ _verify = {
             profile.badpassword = ( profile.badpassword or 0 ) + 1
             ratelimit_record_authfail( userip )
             cfg_saveusers( _regusers )
-            user:kill( "ISTA 223 " .. _i18n_invalid_pass .. "\n", "TL-1" )
-            scripts_firelistener( "onFailedAuth", profile.nick, userip, usercid, escapefrom( _i18n_invalid_pass ) )
+            user:kill( "ISTA 223 " .. _i18n.invalid_pass .. "\n", "TL-1" )
+            scripts_firelistener( "onFailedAuth", profile.nick, userip, usercid, escapefrom( _i18n.invalid_pass ) )
             return true
         end
 
@@ -669,12 +656,12 @@ _verify = {
             -- is no longer the canonical owner; refuse this takeover.
             local current_owner = isuserconnected( nick )
             if current_owner and current_owner ~= target then
-                user:kill( "ISTA 222 " .. _i18n_nick_taken .. "\n", "TL-1" )
-                scripts_firelistener( "onFailedAuth", profile.nick, userip, usercid, escapefrom( _i18n_nick_taken ) )
+                user:kill( "ISTA 222 " .. _i18n.nick_taken .. "\n", "TL-1" )
+                scripts_firelistener( "onFailedAuth", profile.nick, userip, usercid, escapefrom( _i18n.nick_taken ) )
                 return true
             end
             if not target.waskilled then
-                target:kill( "ISTA 222 " .. _i18n_nick_taken .. "\n", "TL-1" )
+                target:kill( "ISTA 222 " .. _i18n.nick_taken .. "\n", "TL-1" )
             end
             insertuser( nick, usercid, user.hash( ), user )
             if scripts_firelistener( "onConnect", user ) or user.waskilled then

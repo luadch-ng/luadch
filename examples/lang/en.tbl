@@ -1,6 +1,7 @@
 ﻿local en = { }
 
 en.hub_login_message = "This server is running %s %s %s (Uptime: %d days, %d hours, %d minutes, %d seconds)"
+en.hub_login_tls_label = "[TLS: %s]"
 en.hub_nick_or_cid_taken = "Nick/CID taken."
 en.hub_hub_is_full = "Hub is full."
 en.hub_no_base_support = "Your client does not support BASE."
@@ -14,5 +15,23 @@ en.hub_invalid_pass = "Invalid password."
 en.hub_unknown = "<UNKNOWN>"
 en.hub_max_bad_password = "Max bad password exceeded. Timeout in seconds: "
 en.hub_hubbot_response = "I am the Hubbot, do you really want to talk to me?"
+
+-- #214 HBRI side-channel validation ISTA reasons (#301).
+en.hub_hbri_unknown_token = "Unknown validation token"
+en.hub_hbri_wrong_protocol = "Validation request on wrong IP protocol"
+en.hub_hbri_address_mismatch = "Validation address mismatch"
+en.hub_hbri_succeed = "Validation succeed"
+en.hub_hbri_timeout = "Secondary address validation timed out"
+
+-- ZLIF (Phase 8 inline-deflate) HSUP-order reject reasons (#301).
+en.hub_zlif_before_hsup = "ZLIF before HSUP"
+en.hub_zlif_zof_unsupported = "ZLIF ZOF unsupported, closing connection"
+
+-- insertreguser failure modes surfaced via ISTA 220 (#301).
+en.hub_reg_invalid_profile = "invalid profile"
+en.hub_reg_no_cid_hash_nick = "no cid/hash/nick"
+en.hub_reg_already_inserted = "user already inserted in hub"
+en.hub_reg_invalid_user = "invalid user object"
+en.hub_reg_no_profile = "no profile"
 
 return en

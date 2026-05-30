@@ -69,7 +69,10 @@ local _regusers
 
 local _cfg_bot_level
 local _cfg_bot_rank
-local _i18n_unknown
+-- #301: single i18n table (matches hub.lua / hub_dispatch.lua refactor).
+-- DO NOT reassign `_i18n = {}` anywhere - hub.lua's loadlanguage mutates
+-- the table in place on +reload, and we hold the same reference.
+local _i18n = { }
 
 local function bind( deps )
     disconnect       = deps.disconnect
@@ -80,7 +83,7 @@ local function bind( deps )
     _regusers        = deps._regusers
     _cfg_bot_level   = deps._cfg_bot_level
     _cfg_bot_rank    = deps._cfg_bot_rank
-    _i18n_unknown    = deps._i18n_unknown
+    _i18n            = deps._i18n
 end
 
 local function createbot( _sid, p )
@@ -258,22 +261,22 @@ local function createbot( _sid, p )
     end
 
     bot.ip = function( )
-        return _i18n_unknown
+        return _i18n.unknown
     end
     bot.clientport = function( )
-        return _i18n_unknown
+        return _i18n.unknown
     end
     bot.peer = function( _ )
-        return _i18n_unknown, _i18n_unknown
+        return _i18n.unknown, _i18n.unknown
     end
     bot.isregged = function( )
         return true
     end
     bot.serverport = function( _ )
-        return _i18n_unknown
+        return _i18n.unknown
     end
     bot.ssl = function( _ )
-        return _i18n_unknown
+        return _i18n.unknown
     end
     bot.password = function( _ )
             return _pid

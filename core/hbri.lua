@@ -83,6 +83,16 @@ local _advertise = { I4 = "", I6 = "" }   -- hub public address per family
 local _port      = { I4 = nil,  I6 = nil } -- plain listener port per family
 local _dual_stack = false    -- a plain listener exists on BOTH families
 
+-- // #301: i18n strings (ADC-escaped) for the validate()/sweep() ISTA
+-- // reasons. Populated via set_i18n() at hub.lua loadlanguage time so
+-- // a +reload picks up lang changes. Defaults preserve byte-identical
+-- // behaviour if set_i18n() was never called (defensive only).
+local _i18n_unknown_token    = "Unknown\\svalidation\\stoken"
+local _i18n_wrong_protocol   = "Validation\\srequest\\son\\swrong\\sIP\\sprotocol"
+local _i18n_address_mismatch = "Validation\\saddress\\smismatch"
+local _i18n_succeed          = "Validation\\ssucceed"
+local _i18n_timeout          = "Secondary\\saddress\\svalidation\\stimed\\sout"
+
 -- // #286 post-login HBRI re-solicit cooldown (seconds). A logged-in
 -- // client re-emits its full connectivity on every INF update (share
 -- // change, NAT rebind, ...); idempotence (an already-validated
@@ -123,6 +133,19 @@ local function bind( deps )
     _port.I4      = deps.hbri_port_v4
     _port.I6      = deps.hbri_port_v6
     _dual_stack   = deps.hbri_dual_stack and true or false
+end
+
+-- // #301: hub.lua's loadlanguage() forwards the relevant entries here so
+-- // ISTA reasons emitted from validate()/sweep() are localised. Strings
+-- // are already adclib_escape'd by the caller (they go straight onto the
+-- // ADC frame). Called separately from bind() because hub.lua's init()
+-- // does loadsettings()->bind() BEFORE loadlanguage().
+local function set_i18n( strs )
+    _i18n_unknown_token    = strs.hbri_unknown_token    or _i18n_unknown_token
+    _i18n_wrong_protocol   = strs.hbri_wrong_protocol   or _i18n_wrong_protocol
+    _i18n_address_mismatch = strs.hbri_address_mismatch or _i18n_address_mismatch
+    _i18n_succeed          = strs.hbri_succeed          or _i18n_succeed
+    _i18n_timeout          = strs.hbri_timeout          or _i18n_timeout
 end
 
 -- // Hub can drive HBRI at all: enabled, both families have a listener
@@ -292,7 +315,7 @@ local function validate( vuser, adccmd )
     local token = adccmd:getnp "TO"
     local entry = token and _tokens[ token ]
     if not entry then
-        vuser.write( "ISTA 220 " .. "Unknown\\svalidation\\stoken" .. "\n" )
+        vuser.write( "ISTA 220 " .. _i18n_unknown_token .. "\n" )
         vuser:client( ):close( )
         return
     end
@@ -305,7 +328,7 @@ local function validate( vuser, adccmd )
     -- The validation socket MUST arrive on the expected secondary
     -- family (which is necessarily != the main connection's family).
     if vfam ~= entry.family then
-        vuser.write( "ISTA 155 " .. "Validation\\srequest\\son\\swrong\\sIP\\sprotocol" .. "\n" )
+        vuser.write( "ISTA 155 " .. _i18n_wrong_protocol .. "\n" )
         vuser:client( ):close( )
         fail( entry )
         return
@@ -320,7 +343,7 @@ local function validate( vuser, adccmd )
     local claimed = adccmd:getnp( entry.family )
     if claimed and claimed ~= "" and claimed ~= "0.0.0.0" and claimed ~= "::"
             and claimed ~= vip then
-        vuser.write( "ISTA 155 " .. "Validation\\saddress\\smismatch" .. "\n" )
+        vuser.write( "ISTA 155 " .. _i18n_address_mismatch .. "\n" )
         vuser:client( ):close( )
         fail( entry )
         return
@@ -328,7 +351,7 @@ local function validate( vuser, adccmd )
 
     -- Success: commit the authenticated TCP-source IP (not the BINF
     -- claim - the side-channel source is ground truth).
-    vuser.write( "ISTA 000 " .. "Validation\\ssucceed" .. "\n" )
+    vuser.write( "ISTA 000 " .. _i18n_succeed .. "\n" )
     vuser:client( ):close( )
     commit_and_complete( entry, vip )
 end
@@ -352,7 +375,7 @@ local function sweep( )
                 _tokens[ token ] = nil
                 local user = entry.user
                 if user and not user.waskilled then
-                    user.write( "ISTA 155 " .. "Secondary\\saddress\\svalidation\\stimed\\sout" .. "\n" )
+                    user.write( "ISTA 155 " .. _i18n_timeout .. "\n" )
                     fail( entry )
                 end
             end
@@ -362,6 +385,7 @@ end
 
 return {
     bind          = bind,
+    set_i18n      = set_i18n,
     active        = active,
     eligible      = eligible,
     initiate      = initiate,
