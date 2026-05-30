@@ -20,7 +20,7 @@
     msg_usage = "Usage: [+!#]mass <MSG>",
     msg_usage_lvl = "Usage: [+!#]masslvl <LEVEL> <MSG>",
     msg_usage_hub = "Usage: [+!#]masshub <MSG>",
-    msg_lvl_exists = "Level  %s  does not exists.",
+    msg_lvl_exists = "Level  %s  does not exist.",
     msg_ok = "Mass was sent to all users with level: ",
     msg_allowed_levels = "  |  allowed levels: ",
     msg_out = [[

@@ -22,7 +22,7 @@
     msg_usage_hub = "Gebrauch: [+!#]masshub <MSG>",
     msg_lvl_exists = "Ein Level  %s  existiert nicht.",
     msg_ok = "Nachricht wurde gesendet an alle mit Level: ",
-    msg_allowed_levels = "  |  allowed levels: ",
+    msg_allowed_levels = "  |  erlaubte Level: ",
     msg_out = [[
 
 
@@ -42,7 +42,7 @@ Nachricht:  %s
 
 Absender:  %s   |   Datum:  %s   |   Zeit:  %s  |  Nachricht wurde gesendet an alle mit Level:  %s
 
-Message:  %s
+Nachricht:  %s
 
 =============================================================================================== MASS MESSAGE ==========
   ]],
@@ -54,7 +54,7 @@ Message:  %s
 
 Datum:  %s   |   Zeit:  %s
 
-Message:  %s
+Nachricht:  %s
 
 ====================================================================================================== MASS MESSAGE ===
   ]],

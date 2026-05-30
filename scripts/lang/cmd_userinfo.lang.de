@@ -50,7 +50,7 @@ Uptime: %s
 
     help_title = "cmd_userinfo.lua",
     help_usage = "[+!#]userinfo sid|nick <SID>|<NICK>",
-    help_desc = "Liefert Informationen über einen User oder dir selbst",
+    help_desc = "Liefert Informationen über einen User oder dich selbst",
 
     ucmd_menu_ct1 = { "Über Dich", "zeige Userinfo" },
     ucmd_menu_ct2 = { "Anzeigen", "Userinfo" },

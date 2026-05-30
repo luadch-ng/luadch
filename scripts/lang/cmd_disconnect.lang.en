@@ -5,7 +5,7 @@
     help_desc = "Disconnects a user",
 
     user_msg = "[ DISCONNECT ]--> You were disconnected by: %s  |  reason: %s",
-    report_msg = "[ DISCONNECT ]--> User  %s  were disconnected by  %s  |  reason: %s",
+    report_msg = "[ DISCONNECT ]--> User  %s  was disconnected by  %s  |  reason: %s",
 
     msg_usage = "Usage: [+!#]disconnect <NICK> <REASON>",
     msg_denied1 = "You are not allowed to use this command.",

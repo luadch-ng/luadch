@@ -90,7 +90,7 @@ local _dual_stack = false    -- a plain listener exists on BOTH families
 local _i18n_unknown_token    = "Unknown\\svalidation\\stoken"
 local _i18n_wrong_protocol   = "Validation\\srequest\\son\\swrong\\sIP\\sprotocol"
 local _i18n_address_mismatch = "Validation\\saddress\\smismatch"
-local _i18n_succeed          = "Validation\\ssucceed"
+local _i18n_succeed          = "Validation\\ssucceeded"
 local _i18n_timeout          = "Secondary\\saddress\\svalidation\\stimed\\sout"
 
 -- // #286 post-login HBRI re-solicit cooldown (seconds). A logged-in

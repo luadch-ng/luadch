@@ -128,7 +128,7 @@ local msg_denied = lang.msg_denied or "You are not allowed to use this command."
 local msg_usage = lang.msg_usage or "Usage: [+!#]mass <MSG>"
 local msg_usage_lvl = lang.msg_usage_lvl or "Usage: [+!#]masslvl <LEVEL> <MSG>"
 local msg_usage_hub = lang.msg_usage_hub or "Usage: [+!#]masshub <MSG>"
-local msg_lvl_exists = lang.msg_lvl_exists or "Level %s does not exists."
+local msg_lvl_exists = lang.msg_lvl_exists or "Level %s does not exist."
 local msg_ok = lang.msg_ok or "Mass was sent to all users with level: "
 local msg_out = lang.msg_out or [[
 

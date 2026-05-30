@@ -7,7 +7,7 @@
     user_msg = "[ DISCONNECT ]--> Du wurdest disconnected von: %s  |  Grund: %s",
     report_msg = "[ DISCONNECT ]--> User  %s  wurde disconnected von  %s  |  Grund: %s",
 
-    msg_usage = "Gebrauch: [+!#]disconnect <NICK> <REASON>",
+    msg_usage = "Gebrauch: [+!#]disconnect <NICK> <GRUND>",
     msg_denied1 = "Du bist nicht befugt diesen Befehl zu nutzen.",
     msg_denied2 = "Du kannst keinen disconnecten der ein höheres Level hat als du.",
     msg_denied3 = "Du kannst dich nicht selbst disconnecten.",

@@ -12,7 +12,7 @@
     msg_redirect = "[ REDIRECT ]--> User:  %s  wurde umgeleitet zu:  %s",
     msg_report_redirect = "[ REDIRECT ]--> User:  %s  hat folgenden User umgeleitet:  %s  |  zu:  %s",
 
-    ucmd_menu_ct2_1 = { "Redirect", "standart URL" },
+    ucmd_menu_ct2_1 = { "Redirect", "Standard URL" },
     ucmd_menu_ct2_2 = { "Redirect", "benutzerdefinierte URL" },
     ucmd_url = "Redirect Url:",
 

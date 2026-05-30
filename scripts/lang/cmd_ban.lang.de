@@ -15,7 +15,7 @@
     msg_ban = "[ BAN ]--> Du wurdest gebannt von:  %s  |  Grund: %s  |  Dauer: ",
     msg_ok = "[ BAN ]--> User:  %s  wurde gebannt von:  %s  |  Dauer: %s  |  Grund: %s",
     msg_ban_added = "[ BAN ]--> %s:  %s  wurde gebannt von:  %s",
-    msg_ban_attempt = "[ BAN ]--> User:  %s  mit einem niedrigerem Level als du hat versucht dich zu bannen mit der Grund: %s",
+    msg_ban_attempt = "[ BAN ]--> User:  %s  mit einem niedrigeren Level als du hat versucht dich zu bannen mit dem Grund: %s",
     msg_clean_bans = "[ BAN ]--> Die Ban DB wurde gelöscht von:  ",
     msg_clean_banhistory = "[ BAN ]--> Die Ban History wurde gelöscht von:  ",
 

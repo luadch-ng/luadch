@@ -15,7 +15,7 @@
 
     msg_exceptions_add = "[ Usercleaner ]--> Nick wurde zu den Ausnahmen hinzugefügt: ",
     msg_exceptions_add_taken = "[ Usercleaner ]--> Nick wurde bereits hinzugefügt: ",
-    msg_exceptions_level = "[ Usercleaner ]--> Der folgende User hat bereits ein geschütztes Level and kann nicht hinzugefügt werden: %s | geschütztes Level: %s",
+    msg_exceptions_level = "[ Usercleaner ]--> Der folgende User hat bereits ein geschütztes Level und kann nicht hinzugefügt werden: %s | geschütztes Level: %s",
     msg_exceptions_del = "[ Usercleaner ]--> Nick wurde von den Ausnahmen entfernt: ",
     msg_exceptions_del_notfound = "[ Usercleaner ]--> Nick wurde nicht gefunden: " ,
     msg_exceptions_delall = "[ Usercleaner ]--> Die Ausnahmenliste wurde gelöscht von: ",

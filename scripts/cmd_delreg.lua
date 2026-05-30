@@ -163,7 +163,7 @@ local lang, err = cfg.loadlanguage( scriptlang, scriptname ); lang = lang or {};
 local msg_denied = lang.msg_denied or "[ DELREG ]--> You are not allowed to use this command or to delreg targets with this level."
 local msg_reason = lang.msg_reason or "No reason."
 local msg_usage = lang.msg_usage or "Usage: [+!#]delreg nick <NICK>  /  or del with blacklist entry:  [+!#]delreg nick <NICK> <DESCRIPTION>"
-local msg_error = lang.msg_error or "[ DELREG ]--> An error occured: "
+local msg_error = lang.msg_error or "[ DELREG ]--> An error occurred: "
 local msg_del = lang.msg_del or "[ DELREG ]--> You were delregged."
 local msg_del_reason = lang.msg_del_reason or "[ DELREG ]--> You were delregged. Reason: %s"
 local msg_bot = lang.msg_bot or "[ DELREG ]--> User is a bot."

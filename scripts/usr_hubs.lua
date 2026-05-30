@@ -98,7 +98,7 @@ local msg_max = lang.msg_max or [[
 
 === USER HUBS CHECK ===================
 
-You was disconnected because:
+You were disconnected because:
 
 Max user hubs: %s  |  yours: %s
 Max reg hubs: %s  |  yours: %s

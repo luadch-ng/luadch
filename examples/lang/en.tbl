@@ -20,7 +20,7 @@ en.hub_hubbot_response = "I am the Hubbot, do you really want to talk to me?"
 en.hub_hbri_unknown_token = "Unknown validation token"
 en.hub_hbri_wrong_protocol = "Validation request on wrong IP protocol"
 en.hub_hbri_address_mismatch = "Validation address mismatch"
-en.hub_hbri_succeed = "Validation succeed"
+en.hub_hbri_succeed = "Validation succeeded"
 en.hub_hbri_timeout = "Secondary address validation timed out"
 
 -- ZLIF (Phase 8 inline-deflate) HSUP-order reject reasons (#301).

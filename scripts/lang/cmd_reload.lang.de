@@ -2,7 +2,7 @@
 
     help_title = "cmd_reload.lua",
     help_usage = "[+!#]reload",
-    help_desc = "Läd Konfiguration neu: cfg.tbl, user.tbl, alle Skripte",
+    help_desc = "Lädt Konfiguration neu: cfg.tbl, user.tbl, alle Skripte",
 
     ucmd_menu = { "Hub", "Core", "Hub reloaden" },
 
