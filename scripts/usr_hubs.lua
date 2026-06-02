@@ -4,6 +4,11 @@
 
         - this script checks the hub count of a user
 
+        v0.13: by Aybook (#308)
+            - include IP + CID in the [USER HUBS] report message so
+              operators can act on the IP / CID directly without
+              cross-referencing cmd_ban's internal table
+
         v0.12: by pulsar
             - show more detailed output msg
             - using permission table instead of godlevel
@@ -62,7 +67,7 @@
 --------------
 
 local scriptname = "usr_hubs"
-local scriptversion = "0.12"
+local scriptversion = "0.13"
 
 --// imports
 local scriptlang = cfg.get( "language" )
@@ -84,8 +89,8 @@ local usr_hubs_redirect = cfg.get( "usr_hubs_redirect" )
 
 --// msgs
 local msg_reason = lang.msg_reason or "Exceeded users hub limit"
-local report_msg = lang.report_msg or "[ USER HUBS ]--> User:  %s  |  was banned for:  %s  |  reason: exceeded users hub limit. Hubs:  %s  (total:  %s hubs)  |  allowed:  %s  (max.  %s  hubs total)"
-local report_msg_redirect = lang.report_msg_redirect or "[ USER HUBS ]--> User:  %s  |  was redirected  |  reason: exceeded users hub limit. Hubs:  %s  (total:  %s hubs)  |  allowed:  %s  (max.  %s  hubs total)"
+local report_msg = lang.report_msg or "[ USER HUBS ]--> User:  %s  |  IP:  %s  |  CID:  %s  |  was banned for:  %s  |  reason: exceeded users hub limit. Hubs:  %s  (total:  %s hubs)  |  allowed:  %s  (max.  %s  hubs total)"
+local report_msg_redirect = lang.report_msg_redirect or "[ USER HUBS ]--> User:  %s  |  IP:  %s  |  CID:  %s  |  was redirected  |  reason: exceeded users hub limit. Hubs:  %s  (total:  %s hubs)  |  allowed:  %s  (max.  %s  hubs total)"
 local msg_redirect = lang.msg_redirect or "[ USER HUBS ]--> You got redirected because: exceeded users hub limit. Hubs: "
 local msg_invalid = lang.msg_invalid or "Invalid hubcount"
 local msg_years = lang.msg_years or " years, "
@@ -116,6 +121,8 @@ Max hubs: %s  |  yours: %s
 
 local check = function( user )
     local user_nick = user:nick()
+    local user_ip = user:ip()
+    local user_cid = user:cid()
     local hn, hr, ho = user:hubs()
     -- Phase 8a F-INF-1b: a client BINF without the HN/HR/HO triplet
     -- returns nil from user:hubs(). Pre-fix, the arithmetic on the
@@ -137,7 +144,7 @@ local check = function( user )
             local redirect_msg = hub.escapeto( msg_redirect .. hubs )
             user:redirect( redirect_url, redirect_msg )
             --// report
-            local msg_out = utf.format( report_msg_redirect, user_nick, hubs, hm, hubs_allowed, hubs_max )
+            local msg_out = utf.format( report_msg_redirect, user_nick, user_ip, user_cid, hubs, hm, hubs_allowed, hubs_max )
             report.send( report_activate, report_hubbot, report_opchat, llevel, msg_out )
             return PROCESSED
         else
@@ -145,7 +152,7 @@ local check = function( user )
             user:reply( msg, hub.getbot() )
             ban.add( nil, user, bantime, msg_reason, "USER HUBS CHECK" )
             --// report
-            local msg_out = utf.format( report_msg, user_nick, msg_bantime, hubs, hm, hubs_allowed, hubs_max )
+            local msg_out = utf.format( report_msg, user_nick, user_ip, user_cid, msg_bantime, hubs, hm, hubs_allowed, hubs_max )
             report.send( report_activate, report_hubbot, report_opchat, llevel, msg_out )
             return PROCESSED
         end
