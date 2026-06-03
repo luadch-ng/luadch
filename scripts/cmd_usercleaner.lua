@@ -71,6 +71,7 @@ local cmd_p7 = "delexception"
 local cmd_p8 = "delexceptionall"
 local cmd_p9 = "showexceptions"
 local cmd_p10 = "setdays"
+local cmd_p11 = "cleandesc"
 
 --// imports
 local help, ucmd, hubcmd
@@ -101,17 +102,19 @@ local description_file = "scripts/data/cmd_reg_descriptions.tbl"
 
 --// msgs
 local msg_denied = lang.msg_denied or "You are not allowed to use this command."
-local msg_usage = lang.msg_usage or "Usage: [+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS>"
+local msg_usage = lang.msg_usage or "Usage: [+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS> | cleandesc"
 local msg_nousers = lang.msg_nousers or "[ No users found ]"
 
 local help_title = lang.help_title or "cmd_usercleaner.lua"
-local help_usage = lang.help_usage or "[+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS>"
+local help_usage = lang.help_usage or "[+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS> | cleandesc"
 local help_desc = lang.help_desc or "Shows and removes used and unused offline accounts"
 
 local msg_delreg_expired = lang.msg_delreg_expired or "[ Usercleaner ]--> User:  %s  was delregged because: expired offline time:  %s  days"
 local msg_delreg_unused = lang.msg_delreg_unused or "[ Usercleaner ]--> User:  %s  was delregged because: unused since  %s  days"
 local msg_delreg_exception = lang.msg_delreg_exception or "[ Usercleaner ]--> The following user is on the exception list and cannot be deleted: "
 local msg_delreg_exception_level = lang.msg_delreg_exception_level or "[ Usercleaner ]--> The following user has a protected level and cannot be deleted: %s | protected level: %s"
+local msg_orphan_descriptions_cleaned = lang.msg_orphan_descriptions_cleaned or "[ Usercleaner ]--> Removed %d orphaned description entries (nicks no longer registered)"
+local msg_orphan_descriptions_none = lang.msg_orphan_descriptions_none or "[ Usercleaner ]--> No orphaned description entries found"
 
 local msg_exceptions_add = lang.msg_exceptions_add or "[ Usercleaner ]--> Nick was added to exceptions: "
 local msg_exceptions_add_taken = lang.msg_exceptions_add_taken or "[ Usercleaner ]--> Nick has already been added: "
@@ -133,6 +136,7 @@ local ucmd_menu_ct1_7 = lang.ucmd_menu_ct1_7 or { "User", "Control", "Usercleane
 local ucmd_menu_ct1_8 = lang.ucmd_menu_ct1_8 or { "User", "Control", "Usercleaner", "Exceptions", "Del all users" }
 local ucmd_menu_ct1_9 = lang.ucmd_menu_ct1_9 or { "User", "Control", "Usercleaner", "Exceptions", "Show" }
 local ucmd_menu_ct1_10 = lang.ucmd_menu_ct1_10 or { "User", "Control", "Usercleaner", "Settings", "Change expiring time in days (default=365)" }
+local ucmd_menu_ct1_11 = lang.ucmd_menu_ct1_11 or { "User", "Control", "Usercleaner", "Clean orphaned description entries" }
 
 local ucmd_nick = lang.ucmd_nick or "Nickname:"
 local ucmd_days = lang.ucmd_days or "Days:"
@@ -278,6 +282,34 @@ local description_del = function( targetnick )
             break
         end
     end
+end
+
+--// #311: sweep cmd_reg_descriptions.tbl for entries whose nick is no
+--// longer in user.tbl. Historical leftovers from pre-Aug-2022
+--// usercleaner runs (before commit f87c861 added per-user
+--// description_del) accumulate forever otherwise; a fresh +reg with
+--// a recycled old nick then resurrects the stale comment. Called at
+--// the end of each delete-batch (delUsers, _classify_and_delete) so
+--// every usercleaner run self-heals, and exposed as a standalone
+--// +usercleaner cleandesc subcommand for explicit one-shot use.
+--// Returns the count removed; non-destructive (only removes entries
+--// with no matching reg-user, which by definition are unreachable).
+local sweep_orphan_descriptions = function()
+    local description_tbl = util.loadtable( description_file ) or {}
+    local user_tbl = hub.getregusers()
+    local valid_nicks = {}
+    for _, u in ipairs( user_tbl ) do
+        if u.nick then valid_nicks[ u.nick ] = true end
+    end
+    --// collect first, then mutate - safer than modifying during iterate.
+    local orphans = {}
+    for nick in pairs( description_tbl ) do
+        if not valid_nicks[ nick ] then orphans[ #orphans + 1 ] = nick end
+    end
+    if #orphans == 0 then return 0 end
+    for _, nick in ipairs( orphans ) do description_tbl[ nick ] = nil end
+    util.savetable( description_tbl, "description_tbl", description_file )
+    return #orphans
 end
 
 --// get time in days
@@ -466,6 +498,15 @@ local _classify_and_delete = function( mode )
             report.send( report_activate, report_hubbot, report_opchat,
                          report_level, utf.format( msg_template, nick, days ) )
         end
+    end
+    --// #311: same orphan sweep as the chat-cmd path; emit count
+    --// through opchat report so the HTTP-triggered run leaves the
+    --// same audit trail. Field added to `out` for the response body.
+    local removed = sweep_orphan_descriptions()
+    out.orphan_descriptions_removed = removed
+    if removed > 0 then
+        report.send( report_activate, report_hubbot, report_opchat,
+                     report_level, utf.format( msg_orphan_descriptions_cleaned, removed ) )
     end
     return out
 end
@@ -675,6 +716,15 @@ local delUsers = function( expired, ghosts, user )
             end
         end
     end
+    --// #311: after each delete-batch, sweep historical orphans whose
+    --// user.tbl entry was removed in a prior session before
+    --// description_del was wired up. Silent when nothing to clean.
+    local removed = sweep_orphan_descriptions()
+    if removed > 0 then
+        local msg = utf.format( msg_orphan_descriptions_cleaned, removed )
+        user:reply( msg, hub.getbot() )
+        report.send( report_activate, report_hubbot, report_opchat, report_level, msg )
+    end
 end
 
 local userExceptions = function( add, del, delall, show, user, nick )
@@ -782,6 +832,17 @@ local onbmsg = function( user, command, parameters )
         changeSettings( days, user )
         return PROCESSED
     end
+    if ( param == cmd_p11 ) then --> cleandesc (#311: explicit one-shot orphan sweep)
+        local removed = sweep_orphan_descriptions()
+        if removed > 0 then
+            local msg = utf.format( msg_orphan_descriptions_cleaned, removed )
+            user:reply( msg, hub.getbot() )
+            report.send( report_activate, report_hubbot, report_opchat, report_level, msg )
+        else
+            user:reply( msg_orphan_descriptions_none, hub.getbot() )
+        end
+        return PROCESSED
+    end
     user:reply( msg_usage, hub.getbot() )
     return PROCESSED
 end
@@ -804,6 +865,7 @@ hub.setlistener( "onStart", {},
             ucmd.add( ucmd_menu_ct1_8, cmd, { cmd_p8 }, { "CT1" }, minlevel )
             ucmd.add( ucmd_menu_ct1_9, cmd, { cmd_p9 }, { "CT1" }, minlevel )
             ucmd.add( ucmd_menu_ct1_10, cmd, { cmd_p10, "%[line:" .. ucmd_days .. "]" }, { "CT1" }, minlevel )
+            ucmd.add( ucmd_menu_ct1_11, cmd, { cmd_p11 }, { "CT1" }, minlevel )
         end
         hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
