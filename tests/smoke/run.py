@@ -5791,9 +5791,10 @@ def test_http_phase4_etc_msgmanager(staging_dir: Path, proc=None):
 def test_http_phase4_cmd_usercleaner(staging_dir: Path, proc=None):
     """Phase 4 PR-6 of #82 / #249: cmd_usercleaner plugin migrates to HTTP.
 
-    Four endpoints: GET + DELETE /v1/usercleaner/expired (read +
-    admin), GET + DELETE /v1/usercleaner/ghosts (read + admin).
-    Both DELETEs are router-enforced X-Confirm gated (§4.6).
+    Five endpoints: GET + DELETE /v1/usercleaner/expired (read +
+    admin), GET + DELETE /v1/usercleaner/ghosts (read + admin),
+    DELETE /v1/usercleaner/orphan-comments (admin, #311). All three
+    DELETEs are router-enforced X-Confirm gated (§4.6).
 
     Note on coverage: on a fresh hub no regged users qualify as
     expired (no `lastseen` older than cfg `expired_days=365`) or
@@ -5842,6 +5843,7 @@ def test_http_phase4_cmd_usercleaner(staging_dir: Path, proc=None):
         ("DELETE", "/v1/usercleaner/expired"),
         ("GET", "/v1/usercleaner/ghosts"),
         ("DELETE", "/v1/usercleaner/ghosts"),
+        ("DELETE", "/v1/usercleaner/orphan-comments"),
     ]
 
     # 1. Anonymous calls -> 401 on all 4 routes.
@@ -5935,6 +5937,12 @@ def test_http_phase4_cmd_usercleaner(staging_dir: Path, proc=None):
                 f"DELETE /v1/usercleaner/expired: {key!r} not list; "
                 f"body={body_of(r)!r}"
             )
+    # #311: orphan-comment sweep ran as side-effect, count is integer.
+    if not isinstance(data.get("orphan_comments_removed"), int):
+        raise TestFailure(
+            f"DELETE /v1/usercleaner/expired: orphan_comments_removed not int; "
+            f"body={body_of(r)!r}"
+        )
 
     # 7. DELETE ghosts WITH X-Confirm -> 200 + envelope.
     r = _http_roundtrip(
@@ -5953,11 +5961,58 @@ def test_http_phase4_cmd_usercleaner(staging_dir: Path, proc=None):
             f"DELETE /v1/usercleaner/ghosts: unexpected envelope; "
             f"body={body_of(r)!r}"
         )
+    if not isinstance(data.get("orphan_comments_removed"), int):
+        raise TestFailure(
+            f"DELETE /v1/usercleaner/ghosts: orphan_comments_removed not int; "
+            f"body={body_of(r)!r}"
+        )
 
-    # 8. Catalog lists all 4 routes.
+    # 8. DELETE orphan-comments without X-Confirm -> 400 (#311).
+    r = _http_roundtrip(
+        b"DELETE /v1/usercleaner/orphan-comments HTTP/1.1\r\n" + auth + b"\r\n"
+    )
+    if "400" not in status(r):
+        raise TestFailure(
+            f"DELETE /v1/usercleaner/orphan-comments without X-Confirm: "
+            f"expected 400, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    if "E_CONFIRMATION_REQUIRED" not in body_of(r):
+        raise TestFailure(
+            f"DELETE /v1/usercleaner/orphan-comments without X-Confirm: "
+            f"expected E_CONFIRMATION_REQUIRED in body; body={body_of(r)!r}"
+        )
+
+    # 9. DELETE orphan-comments WITH X-Confirm -> 200 + envelope (#311).
+    r = _http_roundtrip(
+        b"DELETE /v1/usercleaner/orphan-comments HTTP/1.1\r\n" + auth +
+        b"X-Confirm: yes\r\n\r\n"
+    )
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"DELETE /v1/usercleaner/orphan-comments with X-Confirm: "
+            f"expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    if data.get("action") != "orphan-comments-cleaned":
+        raise TestFailure(
+            f"DELETE /v1/usercleaner/orphan-comments: unexpected action; "
+            f"body={body_of(r)!r}"
+        )
+    if not isinstance(data.get("orphan_comments_removed"), int):
+        raise TestFailure(
+            f"DELETE /v1/usercleaner/orphan-comments: orphan_comments_removed not int; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 10. Catalog lists all 5 routes.
     r = _http_roundtrip(b"GET /v1/endpoints HTTP/1.1\r\n" + auth + b"\r\n")
     b = body_of(r)
-    for path in ("/v1/usercleaner/expired", "/v1/usercleaner/ghosts"):
+    for path in (
+        "/v1/usercleaner/expired",
+        "/v1/usercleaner/ghosts",
+        "/v1/usercleaner/orphan-comments",
+    ):
         if ('"' + path + '"') not in b:
             raise TestFailure(f"catalog missing {path}; body={b!r}")
 

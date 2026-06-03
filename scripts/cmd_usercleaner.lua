@@ -585,20 +585,23 @@ end
 --
 -- Returns `data: {action: "users-cleaned", mode: "expired",
 -- deleted, skipped_exception, skipped_protected_level,
--- expired_days}` per §7.1.1; the three arrays mirror the
--- categories from the ADC delUsers loop so the operator gets
--- the full audit trail in one response (vs the ADC chat-stream
--- variant that prints one banner per nick - the API folds those
--- into a structured response).
+-- expired_days, orphan_comments_removed}` per §7.1.1; the three
+-- arrays mirror the categories from the ADC delUsers loop so the
+-- operator gets the full audit trail in one response (vs the
+-- ADC chat-stream variant that prints one banner per nick - the
+-- API folds those into a structured response). #311 added
+-- `orphan_comments_removed` to surface the side-effect sweep
+-- count (always >= 0, often 0 on routine runs).
 local http_handler_delete_expired = function( req )
     local result = _classify_and_delete( "expired" )
     return { status = 200, data = {
-        action                  = "users-cleaned",
-        mode                    = "expired",
-        expired_days            = expired_days,
-        deleted                 = result.deleted,
-        skipped_exception       = result.skipped_exception,
-        skipped_protected_level = result.skipped_protected_level,
+        action                   = "users-cleaned",
+        mode                     = "expired",
+        expired_days             = expired_days,
+        deleted                  = result.deleted,
+        skipped_exception        = result.skipped_exception,
+        skipped_protected_level  = result.skipped_protected_level,
+        orphan_comments_removed  = result.orphan_comments_removed or 0,
     } }
 end
 
@@ -669,16 +672,34 @@ end
 -- Admin scope. Router-enforced X-Confirm: yes (§4.6). Same
 -- shape as the expired DELETE; `skipped_protected_level` is
 -- always empty because ghosts ignore the level guard - the
--- field is present for response-shape symmetry.
+-- field is present for response-shape symmetry. #311 added
+-- `orphan_comments_removed` for the same reason it's on the
+-- expired variant.
 local http_handler_delete_ghosts = function( req )
     local result = _classify_and_delete( "ghosts" )
     return { status = 200, data = {
-        action                  = "users-cleaned",
-        mode                    = "ghosts",
-        expired_days            = expired_days,
-        deleted                 = result.deleted,
-        skipped_exception       = result.skipped_exception,
-        skipped_protected_level = result.skipped_protected_level,
+        action                   = "users-cleaned",
+        mode                     = "ghosts",
+        expired_days             = expired_days,
+        deleted                  = result.deleted,
+        skipped_exception        = result.skipped_exception,
+        skipped_protected_level  = result.skipped_protected_level,
+        orphan_comments_removed  = result.orphan_comments_removed or 0,
+    } }
+end
+
+-- HTTP handler: DELETE /v1/usercleaner/orphan-comments (#311).
+-- Admin scope. Router-enforced X-Confirm: yes (§4.6). Sweeps
+-- `cmd_reg_descriptions.tbl` for entries whose nick is no longer
+-- in user.tbl - historical leftovers from pre-Aug-2022 hub
+-- versions whose usercleaner did not call description_del on
+-- delete. No-op when the file is clean. Same effect as the ADC
+-- chat command `+usercleaner cleancomment`.
+local http_handler_clean_orphan_comments = function( req )
+    local removed = sweep_orphan_descriptions()
+    return { status = 200, data = {
+        action                   = "orphan-comments-cleaned",
+        orphan_comments_removed  = removed,
     } }
 end
 
@@ -886,12 +907,13 @@ hub.setlistener( "onStart", {},
                 plugin = scriptname,
                 description = "delreg all expired offline regs (= ADC `+usercleaner delexpired`); requires X-Confirm",
                 response_schema = {
-                    action                  = { type = "string",  required = true },
-                    mode                    = { type = "string",  required = true },
-                    expired_days            = { type = "integer", required = true },
-                    deleted                 = { type = "array",   required = true },
-                    skipped_exception       = { type = "array",   required = true },
-                    skipped_protected_level = { type = "array",   required = true },
+                    action                   = { type = "string",  required = true },
+                    mode                     = { type = "string",  required = true },
+                    expired_days             = { type = "integer", required = true },
+                    deleted                  = { type = "array",   required = true },
+                    skipped_exception        = { type = "array",   required = true },
+                    skipped_protected_level  = { type = "array",   required = true },
+                    orphan_comments_removed  = { type = "integer", required = true },
                 },
             } )
             hub.http_register( "GET", "/v1/usercleaner/ghosts", "read", http_handler_list_ghosts, {
@@ -906,12 +928,21 @@ hub.setlistener( "onStart", {},
                 plugin = scriptname,
                 description = "delreg all ghost regs (= ADC `+usercleaner delghosts`); requires X-Confirm",
                 response_schema = {
-                    action                  = { type = "string",  required = true },
-                    mode                    = { type = "string",  required = true },
-                    expired_days            = { type = "integer", required = true },
-                    deleted                 = { type = "array",   required = true },
-                    skipped_exception       = { type = "array",   required = true },
-                    skipped_protected_level = { type = "array",   required = true },
+                    action                   = { type = "string",  required = true },
+                    mode                     = { type = "string",  required = true },
+                    expired_days             = { type = "integer", required = true },
+                    deleted                  = { type = "array",   required = true },
+                    skipped_exception        = { type = "array",   required = true },
+                    skipped_protected_level  = { type = "array",   required = true },
+                    orphan_comments_removed  = { type = "integer", required = true },
+                },
+            } )
+            hub.http_register( "DELETE", "/v1/usercleaner/orphan-comments", "admin", http_handler_clean_orphan_comments, {
+                plugin = scriptname,
+                description = "sweep orphan comments in cmd_reg_descriptions.tbl whose nick is no longer registered (= ADC `+usercleaner cleancomment`); requires X-Confirm",
+                response_schema = {
+                    action                   = { type = "string",  required = true },
+                    orphan_comments_removed  = { type = "integer", required = true },
                 },
             } )
         end

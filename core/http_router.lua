@@ -550,6 +550,7 @@ local _xconfirm_required = {
     [ "DELETE /v1/registered/{nick}" ] = true,
     [ "DELETE /v1/usercleaner/expired" ] = true,
     [ "DELETE /v1/usercleaner/ghosts" ]  = true,
+    [ "DELETE /v1/usercleaner/orphan-comments" ] = true,
 }
 
 parse_query = function( s )
