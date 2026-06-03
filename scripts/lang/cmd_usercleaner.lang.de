@@ -1,19 +1,19 @@
 ﻿return {
 
     msg_denied = "Du bist nicht befugt diesen Befehl zu nutzen.",
-    msg_usage = "Gebrauch: [+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS> | cleandesc",
+    msg_usage = "Gebrauch: [+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS> | cleancomment",
     msg_nousers = "[ Keine User gefunden ]",
 
     help_title = "cmd_usercleaner.lua",
-    help_usage = "[+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS> | cleandesc",
+    help_usage = "[+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS> | cleancomment",
     help_desc = "Zeigt und löscht benutzte und unbenutzte offline Useraccounts",
 
     msg_delreg_expired = "[ Usercleaner ]--> User:  %s  wurde gelöscht | Grund: Offline Zeit abgelaufen:  %s  Tage",
     msg_delreg_unused = "[ Usercleaner ]--> User:  %s  wurde gelöscht | Grund: Account unbenutzt seit:  %s  Tagen",
     msg_delreg_exception = "[ Usercleaner ]--> Der folgende User steht auf der Ausnahmenliste und kann nicht gelöscht werden: ",
     msg_delreg_exception_level = "[ Usercleaner ]--> Der folgende User hat ein geschütztes Level und kann nicht gelöscht werden: %s | geschütztes Level: %s",
-    msg_orphan_descriptions_cleaned = "[ Usercleaner ]--> %d verwaiste Beschreibungseinträge entfernt (Nicks nicht mehr registriert)",
-    msg_orphan_descriptions_none = "[ Usercleaner ]--> Keine verwaisten Beschreibungseinträge gefunden",
+    msg_orphan_comments_cleaned = "[ Usercleaner ]--> %d verwaiste Kommentare entfernt (Nicks nicht mehr registriert)",
+    msg_orphan_comments_none = "[ Usercleaner ]--> Keine verwaisten Kommentare gefunden",
 
     msg_exceptions_add = "[ Usercleaner ]--> Nick wurde zu den Ausnahmen hinzugefügt: ",
     msg_exceptions_add_taken = "[ Usercleaner ]--> Nick wurde bereits hinzugefügt: ",
@@ -38,7 +38,7 @@
     ucmd_menu_ct1_8 = { "User", "Control", "Usercleaner", "Ausnahmen", "Alle löschen" },
     ucmd_menu_ct1_9 = { "User", "Control", "Usercleaner", "Ausnahmen", "Anzeigen" },
     ucmd_menu_ct1_10 = { "User", "Control", "Usercleaner", "Einstellungen", "Ablaufzeit in Tagen ändern (default=365)" },
-    ucmd_menu_ct1_11 = { "User", "Control", "Usercleaner", "Verwaiste Beschreibungseinträge bereinigen" },
+    ucmd_menu_ct1_11 = { "User", "Control", "Usercleaner", "Verwaiste Kommentare bereinigen" },
 
     ucmd_nick = "Nickname:",
     ucmd_days = "Tage:",

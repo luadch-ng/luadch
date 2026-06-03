@@ -1,19 +1,19 @@
 ﻿return {
 
     msg_denied = "You are not allowed to use this command.",
-    msg_usage = "Usage: [+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS> | cleandesc",
+    msg_usage = "Usage: [+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS> | cleancomment",
     msg_nousers = "[ No users found ]",
 
     help_title = "cmd_usercleaner.lua",
-    help_usage = "[+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS> | cleandesc",
+    help_usage = "[+!#]usercleaner showall | showexpired | showghosts | delexpired | delghosts | addexception <NICK> | delexception <NICK> | delexceptionall | showexceptions | setdays <DAYS> | cleancomment",
     help_desc = "Shows and removes used and unused offline accounts",
 
     msg_delreg_expired = "[ Usercleaner ]--> User:  %s  was delregged because: expired offline time:  %s  days",
     msg_delreg_unused = "[ Usercleaner ]--> User:  %s  was delregged because: unused since  %s  days",
     msg_delreg_exception = "[ Usercleaner ]--> The following user is on the exception list and cannot be deleted: ",
     msg_delreg_exception_level = "[ Usercleaner ]--> The following user has a protected level and cannot be deleted: %s | protected level: %s",
-    msg_orphan_descriptions_cleaned = "[ Usercleaner ]--> Removed %d orphaned description entries (nicks no longer registered)",
-    msg_orphan_descriptions_none = "[ Usercleaner ]--> No orphaned description entries found",
+    msg_orphan_comments_cleaned = "[ Usercleaner ]--> Removed %d orphaned comments (nicks no longer registered)",
+    msg_orphan_comments_none = "[ Usercleaner ]--> No orphaned comments found",
 
     msg_exceptions_add = "[ Usercleaner ]--> Nick was added to exceptions: ",
     msg_exceptions_add_taken = "[ Usercleaner ]--> Nick has already been added: ",
@@ -38,7 +38,7 @@
     ucmd_menu_ct1_8 = { "User", "Control", "Usercleaner", "Exceptions", "Del all users" },
     ucmd_menu_ct1_9 = { "User", "Control", "Usercleaner", "Exceptions", "Show" },
     ucmd_menu_ct1_10 = { "User", "Control", "Usercleaner", "Settings", "Change expiring time in days (default=365)" },
-    ucmd_menu_ct1_11 = { "User", "Control", "Usercleaner", "Clean orphaned description entries" },
+    ucmd_menu_ct1_11 = { "User", "Control", "Usercleaner", "Clean orphaned comments" },
 
     ucmd_nick = "Nickname:",
     ucmd_days = "Days:",
