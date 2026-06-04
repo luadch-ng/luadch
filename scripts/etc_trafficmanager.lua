@@ -12,6 +12,27 @@
         [+!#]trafficmanager show blocks  -- shows all blocked users and their blockmodes
 
 
+        Operator note - CCPM side effect:
+
+        ADC overloads the CTM / RCM commands for BOTH file-transfer
+        connection setup AND CCPM (encrypted client-to-client PM)
+        channel setup. The onConnectToMe / onRevConnectToMe listeners
+        below block CTM / RCM for blocked levels to stop file
+        transfers, but the wire-level commands look identical for
+        CCPM - so blocking a level via `etc_trafficmanager_blockedlevels`
+        (or via individual `+trafficmanager block <nick>`) ALSO
+        disables CCPM for those users. They can still chat through
+        the hub via regular EMSG / DMSG; only the direct, end-to-end
+        encrypted channel is unreachable.
+
+        There is no clean wire-level differentiator (same protocol
+        token, same DCTM shape). A heuristic fix would be "exempt
+        CTM / RCM that closely follows a PM between the same SID
+        pair" - tracked but not implemented as of v2.5; operators who
+        want CCPM available for a level must remove that level from
+        the block list and accept the corresponding file-transfer
+        permission.
+
         v2.5:
             - fix latent dispatch bug in add() / del() exports
               (closes #257). `( not scriptname ) or ( not scriptname == 1 )`
