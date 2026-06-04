@@ -476,6 +476,18 @@ spam or abuse control.
 `etc_trafficmanager_report_hubbot`,
 `etc_trafficmanager_report_opchat`, `etc_trafficmanager_llevel`
 
+> **CCPM side effect:** ADC uses the same `CTM` / `RCM` commands for
+> file-transfer connection setup AND for CCPM (encrypted client-to-
+> client PM) channel setup. The plugin blocks both at the hub level
+> for blocked users, so adding a level to `etc_trafficmanager_blocked_levels`
+> ALSO disables CCPM for that level. Affected users can still chat
+> through the hub via regular `EMSG` / `DMSG`; only the direct
+> end-to-end encrypted channel is unreachable. There is no clean
+> wire-level differentiator between the two uses; operators who want
+> CCPM available for a level must remove that level from the block
+> list and accept the corresponding file-transfer permission. The
+> source-level rationale is in the [`etc_trafficmanager.lua` header](../scripts/etc_trafficmanager.lua).
+
 ### etc_unknown_command
 
 Reject mistyped or malformed commands in main chat with helpful error
