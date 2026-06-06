@@ -116,6 +116,16 @@ jobs:
       - name: Install into staging tree
         run: cmake --install build
 
+      # #315 adclib unescape regression test. Requires the built
+      # adclib.so and the dynamic linker resolving its OpenSSL deps
+      # AND the bundled liblua.so it links against (a fresh `lua5.4`
+      # has its own liblua, not ours). Set LD_LIBRARY_PATH=. so
+      # ld.so picks up the staging tree's liblua first.
+      - name: Run adclib_unescape unit test
+        run: |
+          cd build/install/luadch
+          LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/adclib_unescape_test.lua
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -197,6 +207,18 @@ jobs:
       - name: Install into staging tree
         shell: msys2 {0}
         run: cmake --install build
+
+      # #315 adclib unescape regression test runs on the Linux job
+      # only. On Windows, loading the bundled adclib.dll under the
+      # msys2 `lua` interpreter segfaults - msys2's lua brings its
+      # own liblua and our adclib.dll is linked against the bundled
+      # lua.dll, so two liblua instances end up in the same process
+      # and the Lua-state ABI collides. Fixing that would mean
+      # bundling a standalone lua.exe linked against our liblua, or
+      # using Luadch.exe as a script runner (which bootstraps the
+      # whole hub). Linux coverage is sufficient for the C-level
+      # behaviour; the Windows build is exercised by the smoke
+      # harness below.
 
       # Use the native Windows Python rather than msys2's: the smoke
       # harness uses sys.platform == "win32" to pick make_cert.bat over

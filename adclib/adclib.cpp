@@ -662,6 +662,15 @@ int constant_time_eq(lua_State* L)
     return 1;
 }
 
+// ADC §2.4 unescape: '\s' -> space, '\n' -> newline, '\\' -> '\'.
+// The spec leaves OTHER `\x` sequences UNDEFINED, and the legacy
+// implementation silently dropped both bytes - a data-corruption /
+// display-impersonation hazard (luadch-ng#315): an attacker could
+// register a nick like "admin\q" which rendered as "admin", and any
+// chat text with an unknown escape was silently mangled, breaking
+// plugin keyword filters. We pick the no-data-loss interpretation:
+// preserve unknown sequences as literal '\' + byte. Same shape for a
+// trailing backslash at end-of-string (also previously dropped).
 int unescape(lua_State* L)
 {
     std::string s = (std::string) luaL_optstring(L, 1, "");
@@ -678,10 +687,21 @@ int unescape(lua_State* L)
                     ++i;
                     if ('s' == *i)
                         out += ' ';
-                    if ('n' == *i)
+                    else if ('n' == *i)
                         out += '\n';
-                    if ('\\' == *i)
+                    else if ('\\' == *i)
                         out += '\\';
+                    else
+                    {
+                        // #315: unknown escape, preserve both bytes
+                        out += '\\';
+                        out += *i;
+                    }
+                }
+                else
+                {
+                    // #315: trailing backslash, preserve literal
+                    out += '\\';
                 }
                 break;
             default: out += *i;
