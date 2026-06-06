@@ -679,9 +679,9 @@ generatepass = function( len )
         if X < 4 then
             pwd = pwd .. tostring( b2 % 10 )
         elseif X < 6 then
-            pwd = pwd .. upper[ ( b2 % 25 ) + 1 ]
+            pwd = pwd .. upper[ ( b2 % 26 ) + 1 ]
         else
-            pwd = pwd .. lower[ ( b2 % 25 ) + 1 ]
+            pwd = pwd .. lower[ ( b2 % 26 ) + 1 ]
         end
     end
     return pwd
