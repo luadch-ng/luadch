@@ -117,13 +117,14 @@ jobs:
         run: cmake --install build
 
       # #315 adclib unescape regression test. Requires the built
-      # adclib.so and the dynamic linker resolving its OpenSSL deps,
-      # so it runs AFTER the cmake install step (unlike the pure-Lua
-      # unit tests above) and from inside the staging tree.
+      # adclib.so and the dynamic linker resolving its OpenSSL deps
+      # AND the bundled liblua.so it links against (a fresh `lua5.4`
+      # has its own liblua, not ours). Set LD_LIBRARY_PATH=. so
+      # ld.so picks up the staging tree's liblua first.
       - name: Run adclib_unescape unit test
         run: |
           cd build/install/luadch
-          lua5.4 ../../../tests/unit/adclib_unescape_test.lua
+          LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/adclib_unescape_test.lua
 
       - uses: actions/setup-python@v5
         with:
