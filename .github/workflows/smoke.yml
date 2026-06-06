@@ -116,6 +116,15 @@ jobs:
       - name: Install into staging tree
         run: cmake --install build
 
+      # #315 adclib unescape regression test. Requires the built
+      # adclib.so and the dynamic linker resolving its OpenSSL deps,
+      # so it runs AFTER the cmake install step (unlike the pure-Lua
+      # unit tests above) and from inside the staging tree.
+      - name: Run adclib_unescape unit test
+        run: |
+          cd build/install/luadch
+          lua5.4 ../../../tests/unit/adclib_unescape_test.lua
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -197,6 +206,16 @@ jobs:
       - name: Install into staging tree
         shell: msys2 {0}
         run: cmake --install build
+
+      # #315 adclib unescape regression test (Windows variant). Same
+      # rationale as the Linux job - requires the built adclib.dll
+      # and its OpenSSL deps to be loadable, so it runs after install
+      # and from inside the staging tree.
+      - name: Run adclib_unescape unit test
+        shell: msys2 {0}
+        run: |
+          cd build/install/luadch
+          lua ../../../tests/unit/adclib_unescape_test.lua
 
       # Use the native Windows Python rather than msys2's: the smoke
       # harness uses sys.platform == "win32" to pick make_cert.bat over
