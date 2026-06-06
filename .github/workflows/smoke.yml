@@ -208,15 +208,17 @@ jobs:
         shell: msys2 {0}
         run: cmake --install build
 
-      # #315 adclib unescape regression test (Windows variant). Same
-      # rationale as the Linux job - requires the built adclib.dll
-      # and its OpenSSL deps to be loadable, so it runs after install
-      # and from inside the staging tree.
-      - name: Run adclib_unescape unit test
-        shell: msys2 {0}
-        run: |
-          cd build/install/luadch
-          lua ../../../tests/unit/adclib_unescape_test.lua
+      # #315 adclib unescape regression test runs on the Linux job
+      # only. On Windows, loading the bundled adclib.dll under the
+      # msys2 `lua` interpreter segfaults - msys2's lua brings its
+      # own liblua and our adclib.dll is linked against the bundled
+      # lua.dll, so two liblua instances end up in the same process
+      # and the Lua-state ABI collides. Fixing that would mean
+      # bundling a standalone lua.exe linked against our liblua, or
+      # using Luadch.exe as a script runner (which bootstraps the
+      # whole hub). Linux coverage is sufficient for the C-level
+      # behaviour; the Windows build is exercised by the smoke
+      # harness below.
 
       # Use the native Windows Python rather than msys2's: the smoke
       # harness uses sys.platform == "win32" to pick make_cert.bat over
