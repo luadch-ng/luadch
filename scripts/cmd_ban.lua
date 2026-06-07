@@ -11,6 +11,18 @@
             - <time> and <reason> are optional
 
 
+        v0.42:
+            - fix #320: enforce hierarchy check on the offline-by-nick
+              ban path. Pre-fix, the `permission[level] < target:level()`
+              guard on the online path was silently bypassed when the
+              target was an offline registered user (the offline branch
+              resolved the target via regnicks[] - a profile TABLE with
+              a `.level` field, not an object with a `:level()` method -
+              and returned at addban() before the check could run). A
+              low-level op could ban a higher-level offline user incl.
+              the hubowner. cid / ip offline branches have no profile
+              lookup and stay unchecked by design.
+
         v0.39:
             - fix: strip control bytes from POST /v1/bans `target`
               field before it reaches addban() / disk / ops broadcast.
@@ -210,7 +222,7 @@
 --------------
 
 local scriptname = "cmd_ban"
-local scriptversion = "0.41"
+local scriptversion = "0.42"
 
 local cmd = "ban"
 local cmd2 = "unban"
@@ -950,6 +962,21 @@ local onbmsg = function( user, command, parameters )
             target = regnicks[ id ]
             if not target then
                 user:reply( msg_off, hub.getbot() )
+                return PROCESSED
+            end
+            -- #320: offline hierarchy check. `target` here is the
+            -- registered-user profile TABLE from regnicks (has a
+            -- `.level` field), not an online user OBJECT (which has
+            -- a `:level()` method). The online-target hierarchy
+            -- check further below only fires when `target` is the
+            -- user object - on this offline-by-nick branch the code
+            -- returns at the addban() line below before it can run.
+            -- Without this check a low-level op can ban a higher-
+            -- level offline registered user (incl. hubowner). The
+            -- cid / ip offline branches have no profile lookup and
+            -- no hierarchy info, so they remain unchecked by design.
+            if permission[ level ] < ( target.level or 0 ) then
+                user:reply( msg_god, hub.getbot() )
                 return PROCESSED
             end
         end
