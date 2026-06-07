@@ -259,8 +259,8 @@ local defaults = {
     },
     -- Phase 8 S3 (#82): local read-only HTTP API port. `false` (the
     -- default) = no HTTP listener bound at all. A number = bind the
-    -- hardened HTTP framer on 127.0.0.1:<n> only (loopback; #82
-    -- assumes a reverse proxy for any non-loopback exposure). S3
+    -- hardened HTTP framer on http_bind_addr:<n> (default 127.0.0.1;
+    -- #82 assumes a reverse proxy for any non-loopback exposure). S3
     -- serves only /health; auth + data endpoints land in a separate
     -- #82 follow-up PR.
     http_port = { false,
@@ -275,6 +275,28 @@ local defaults = {
             return types_number( value, nil, true )
                 and value % 1 == 0
                 and value >= 1 and value <= 65535
+        end
+    },
+    -- HTTP API bind address. Default "127.0.0.1" keeps the listener
+    -- on loopback - the security premise for shipping the API without
+    -- TLS/auth at the transport layer. Set to "0.0.0.0" (or "::") ONLY
+    -- in container setups where the API is reachable to sibling
+    -- containers via a private Docker network and the port is NOT
+    -- published to the host. Never bind to a public interface
+    -- directly - put a reverse proxy in front and bind to the address
+    -- the proxy lives on (typically still loopback, or a Docker-
+    -- network address). See docs/HTTP_API.md §2.
+    -- Init-time only: the listener binds once during boot. Changing
+    -- this value via cfg.tbl + `+reload` does NOT re-bind the
+    -- listener; a full hub restart is required (mirrors the
+    -- `http_port` behaviour). Validator rejects whitespace + control
+    -- bytes (mirrors hbri_advertise_v4 / v6) to prevent injection
+    -- into the addserver call.
+    http_bind_addr = { "127.0.0.1",
+        function( value )
+            return types_utf8( value, nil, true )
+                and #value > 0
+                and not value:find( "[%s%c]" )
         end
     },
     -- Phase 1b of #82 HTTP API: token table for bearer-auth, map-
