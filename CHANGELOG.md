@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The upstream project (`luadch/luadch`) is a separate codebase; its release
 history is at https://github.com/luadch/luadch/releases.
 
+## [v3.1.11] - 2026-06-07
+
+Maintenance patch release on the `release/3.1.x` line. One privilege-escalation bugfix cherry-picked from master. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.10.
+
+### Bugfixes
+
+- [#320](https://github.com/luadch-ng/luadch/issues/320) (Kcchouette) - **`cmd_ban` offline-by-nick path silently bypassed the operator-to-target hierarchy check** (`cmd_ban_permission[level] < target:level()`) that fires on the online path. A lower-level operator could ban a higher-level offline registered user - including hubowner-level accounts, which would lock them out on their next login attempt. Root cause: the online branch resolves `target` to a user OBJECT (has `:level()` method), the offline branch resolves it to a profile TABLE from `regnicks[]` (has `.level` field), and the existing check site at `cmd_ban.lua:594` was only reachable from the online branch - the offline branch returned at `addban()` two lines earlier. Fix: explicit hierarchy guard inside the offline-by-nick branch using `target.level`, mirroring the online check semantics with the table-shape accessor. cid / ip offline branches keep no profile lookup and stay unchecked by design (no hierarchy info available). cmd_ban plugin bumped to v0.37. Cherry-picked from master ([PR #322](https://github.com/luadch-ng/luadch/pull/322), commit `30c8809`); the new HTTP-API-based regression smoke test stays master-only because the HTTP API ships on 3.2.x only - the fix logic is identical and reviewer-verified.
+
+### Notes
+
+- **No breaking changes, no cfg / lang-file edits required.** Drop-in upgrade from v3.1.10.
+- **All operators are urged to upgrade.** The bug is exploitable by anyone with `+ban` permission (typically operator-level and above), and the impact (offline ban of a hubowner-level account) can be a denial-of-administration on a single-hubowner deployment.
+
+[v3.1.11]: https://github.com/luadch-ng/luadch/releases/tag/v3.1.11
+
+
 ## [v3.1.10] - 2026-05-23
 
 Maintenance patch release on the `release/3.1.x` line. Two security / UX bugfixes cherry-picked from master. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.9.
