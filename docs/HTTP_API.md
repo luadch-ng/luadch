@@ -44,7 +44,7 @@ with the implementation PRs.
 | Property | Value |
 |---|---|
 | Protocol | HTTP/1.1 (HTTP/1.0 accepted, downgraded to no-keep-alive) |
-| Bind | `127.0.0.1` only - **hard-coded**, no cfg knob |
+| Bind | cfg `http_bind_addr` (default `127.0.0.1`). Loopback IS the security premise; only set to `0.0.0.0` / `::` in container deployments where the API reaches sibling containers via a private Docker network whose port is NOT published to the host |
 | Port | cfg `http_port` (default `false` = off). Distinct from ADC ports |
 | TLS | Never. Use a reverse proxy if remote access is needed |
 | Connection | One request per connection (`Connection: close`) - rationale in `core/iostream.lua` framer comment |

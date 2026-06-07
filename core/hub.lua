@@ -1767,19 +1767,25 @@ init = function( )
         end
     end
     -- Phase 8 S3 (#82): optional local HTTP listener. Bound to
-    -- 127.0.0.1 ONLY and only when cfg http_port is a number; unset
-    -- (the default) means no HTTP socket exists at all, so existing
-    -- hubs are byte-unaffected. The connection runs the hardened
-    -- HTTP framer pipeline (http.listeners().pipeline), never the ADC
-    -- one, and no hub user object is created for it. No TLS here:
-    -- #82 assumes a reverse proxy for any non-loopback exposure.
+    -- cfg.http_bind_addr (default 127.0.0.1) and only when cfg
+    -- http_port is a number; unset (the default) means no HTTP socket
+    -- exists at all, so existing hubs are byte-unaffected. The
+    -- connection runs the hardened HTTP framer pipeline
+    -- (http.listeners().pipeline), never the ADC one, and no hub user
+    -- object is created for it. No TLS here: #82 assumes a reverse
+    -- proxy for any non-loopback exposure.
     --
     -- server.addserver binds p.addr (NOT p.ip - p.ip is dead; the ADC
     -- listeners' `ip = ip` has always been silently ignored, tracked
-    -- as a separate pre-existing bug). Loopback-only is the entire
-    -- security premise for shipping this without TLS/auth, so it MUST
-    -- be `addr`. A non-loopback bind here is a network-exposed
-    -- unauthenticated socket.
+    -- as a separate pre-existing bug). Loopback-only IS the entire
+    -- security premise for shipping this without TLS/auth at the
+    -- transport layer. http_bind_addr exists so container deployments
+    -- can bind on a Docker-private interface (sibling containers
+    -- reach it, host does not) without un-hardcoding loopback for
+    -- everyone; bare-metal operators MUST leave it at the default. A
+    -- non-loopback bind on a public interface here is a network-
+    -- exposed unauthenticated-at-transport socket (token auth still
+    -- applies at the API layer).
     local http_port = cfg_get "http_port"
     if type( http_port ) == "number" then
         -- Refuse to share a port with an ADC listener: addserver would
@@ -1830,7 +1836,7 @@ init = function( )
                     -- scripts.start) so /health + /v1/endpoints
                     -- and plugin-registered routes are all live by
                     -- the time the listener binds. No re-init here.
-                    add_server_handler{ listeners = http.listeners( ), port = http_port, addr = "127.0.0.1" }
+                    add_server_handler{ listeners = http.listeners( ), port = http_port, addr = cfg_get "http_bind_addr" }
                 end    -- bootstrap ok / err
             end    -- dkjson present / absent
         end    -- port-clash
