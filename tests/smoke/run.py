@@ -7578,6 +7578,135 @@ def test_239_cmd_ban_stale_bans_ref(staging_dir: Path, proc=None):
         )
 
 
+def test_320_offline_ban_hierarchy(staging_dir: Path, proc=None):
+    """#320 regression: cmd_ban offline-by-nick path silently bypassed
+    the `permission[level] < target:level()` hierarchy check that fires
+    on the online path. A low-level op could ban an offline registered
+    user of ARBITRARILY HIGHER LEVEL - including the hubowner, which
+    would lock them out on the next login attempt.
+
+    Repro:
+      1. Register `smoke_320_op` at level 60 (operator) with a known
+         password via POST /v1/registered.
+      2. Register `smoke_320_target` at level 100 (hubowner-equivalent)
+         offline (no login).
+      3. Log in as `smoke_320_op` and broadcast `+ban nick
+         smoke_320_target 60 #320`.
+      4. GET /v1/bans and assert NO ban entry for `smoke_320_target`
+         exists.
+
+    Pre-fix: step 4 finds the ban entry (offline branch skipped the
+    permission check, addban ran).
+    Post-fix: step 4 finds no entry (offline branch now enforces the
+    same hierarchy guard; cfg default `cmd_ban_permission[60] = 50`,
+    target.level = 100, 50 < 100 -> msg_god, no addban).
+
+    Cleanup: DELETE both registered users so the suite stays
+    self-contained.
+    """
+    import json as _json
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def http_post(path, body):
+        return _http_roundtrip(
+            b"POST " + path + b" HTTP/1.1\r\n" + auth +
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"\r\n" + body
+        )
+
+    def http_delete(path):
+        return _http_roundtrip(
+            b"DELETE " + path + b" HTTP/1.1\r\n" + auth +
+            b"X-Confirm: yes\r\n\r\n"
+        )
+
+    # Pre-emptive cleanup so a re-run after a crashed previous run does
+    # not collide on POST (409 already-exists). DELETE on a non-existent
+    # nick returns 404, harmless.
+    http_delete(b"/v1/registered/smoke_320_op")
+    http_delete(b"/v1/registered/smoke_320_target")
+
+    try:
+        # Step 1: register the operator with a known password.
+        op_body = (
+            b'{"nick":"smoke_320_op","level":60,"password":"pwop320"}'
+        )
+        r = http_post(b"/v1/registered", op_body)
+        if "200 OK" not in status(r) and "201" not in status(r):
+            raise TestFailure(
+                f"#320 setup: POST /v1/registered (op) expected 200/201, "
+                f"got {status(r)!r}; body={body_of(r)!r}"
+            )
+
+        # Step 2: register an offline hubowner-level target.
+        target_body = (
+            b'{"nick":"smoke_320_target","level":100,'
+            b'"password":"pwtarget320"}'
+        )
+        r = http_post(b"/v1/registered", target_body)
+        if "200 OK" not in status(r) and "201" not in status(r):
+            raise TestFailure(
+                f"#320 setup: POST /v1/registered (target) expected 200/201, "
+                f"got {status(r)!r}; body={body_of(r)!r}"
+            )
+
+        # Step 3: log in as the op and send the +ban command. The
+        # 3s sleep matches the test_239 pattern - +ban dispatch is
+        # immediate, the hub-bot reply may queue back as a BMSG.
+        with _logged_in_user("smoke_320_op", "pwop320") as (sock, sid, _reader):
+            sock.sendall(
+                f"BMSG {sid} +ban\\snick\\ssmoke_320_target\\s60\\s#320test\n"
+                .encode("utf-8")
+            )
+            time.sleep(3.0)
+
+        # Step 4: verify no ban entry was added for the target. Pre-fix,
+        # the offline-branch addban() at cmd_ban.lua line 960 would have
+        # persisted an entry with by="nick" id="smoke_320_target".
+        r = _http_roundtrip(
+            b"GET /v1/bans HTTP/1.1\r\n" + auth + b"\r\n"
+        )
+        if "200 OK" not in status(r):
+            raise TestFailure(
+                f"#320 verify: GET /v1/bans expected 200, "
+                f"got {status(r)!r}; body={body_of(r)!r}"
+            )
+        parsed = _json.loads(body_of(r))
+        bans = parsed.get("data", {}).get("bans", [])
+        for ban in bans:
+            if ban.get("nick") == "smoke_320_target":
+                raise TestFailure(
+                    f"#320 regression: offline-ban hierarchy check "
+                    f"bypassed - operator at level 60 was able to ban "
+                    f"level-100 offline user; ban entry persisted: "
+                    f"{ban!r}"
+                )
+
+    finally:
+        # Cleanup: remove the two test users so the rest of the suite
+        # sees no residue. Errors here are swallowed - the assertion
+        # above already captures the verdict.
+        http_delete(b"/v1/registered/smoke_320_op")
+        http_delete(b"/v1/registered/smoke_320_target")
+
+
 def _switch_to_partial_prefix_table_mode(staging_dir: Path, current_proc, current_log_file):
     """#243 setup: remove ONE entry from cfg.tbl
     `usr_nick_prefix_prefix_table` while leaving the rest intact -
@@ -11323,6 +11452,20 @@ def main():
             failed.append("cmd_ban stale bans ref (#239)")
         else:
             log("PASS  cmd_ban stale bans ref (#239)")
+
+        # #320: cmd_ban offline-by-nick path silently bypassed the
+        # hierarchy check that fires on the online path; a low-level
+        # op could ban a higher-level offline user (incl. hubowner).
+        # Repros via two POST /v1/registered + an ADC `+ban` from the
+        # low-level op + GET /v1/bans to verify no entry was added.
+        # Self-cleaning so it can run anywhere in the HTTP family.
+        try:
+            test_320_offline_ban_hierarchy(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  cmd_ban offline hierarchy bypass (#320): {e}")
+            failed.append("cmd_ban offline hierarchy bypass (#320)")
+        else:
+            log("PASS  cmd_ban offline hierarchy bypass (#320)")
 
         # #83: Prometheus /metrics opt-in plugin. Default-off in
         # cfg, so first GET /metrics returns 404. Test flips
