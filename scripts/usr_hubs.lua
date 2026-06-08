@@ -4,6 +4,14 @@
 
         - this script checks the hub count of a user
 
+        v0.14: by Aybo
+            - kill TL on the hub-count-limit / invalid-tag path changed
+              from TL300 to TL-1 (don't auto-reconnect). The user cannot
+              satisfy the hub-count rule by waiting 5 minutes - they
+              need to disconnect from other hubs or fix their tag,
+              both client-side changes. Matches the user-side argument
+              from ptx_tagcheck.
+
         v0.13: by Aybook (#308)
             - include IP + CID in the [USER HUBS] report message so
               operators can act on the IP / CID directly without
@@ -67,7 +75,7 @@
 --------------
 
 local scriptname = "usr_hubs"
-local scriptversion = "0.13"
+local scriptversion = "0.14"
 
 --// imports
 local scriptlang = cfg.get( "language" )
@@ -130,7 +138,7 @@ local check = function( user )
     -- value" before the nil-check below could fire. Reorder so the
     -- nil-check rejects first.
     if not ( hn and hr and ho ) then
-        user:kill( "ISTA 120 " .. msg_invalid .. "\n", "TL300" )
+        user:kill( "ISTA 120 " .. msg_invalid .. "\n", "TL-1" )
         return PROCESSED
     end
     local hm = hn + hr + ho

@@ -4,6 +4,12 @@
 
         - this script checks for proper nicknames onConnect and onInf
 
+        v0.03: by Aybo
+            - kill TL on invalid-nick-length changed from TL300 to TL-1
+              (don't auto-reconnect). The user cannot satisfy the min /
+              max nick length by waiting 5 minutes - they need a
+              different nick, which is a client-side config change.
+
         v0.02: by Aybo
             - i18n the onFailedAuth reason (operator-facing, lands in
               cmd.log / blacklist scripts) and the ISTA 221 kill message
@@ -14,7 +20,7 @@
 
 
 local scriptname = "usr_nick_length"
-local scriptversion = "0.02"
+local scriptversion = "0.03"
 local scriptlang = cfg.get "language"
 
 local lang, err = cfg.loadlanguage( scriptlang, scriptname ); lang = lang or { }; err = err and hub.debug( err )
@@ -32,7 +38,7 @@ local check = function( user, nick )
     end
     --remember: never fire listenter X inside listener X; will cause infinite loop
     scripts.firelistener( "onFailedAuth", nick, user:ip( ), user:cid( ), msg_failedauth_reason .. len )
-    user:kill( "ISTA 221 " .. msg_invalid_length .. "\n", "TL300" )
+    user:kill( "ISTA 221 " .. msg_invalid_length .. "\n", "TL-1" )
     return PROCESSED
 end
 

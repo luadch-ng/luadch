@@ -4,6 +4,12 @@
 
         - this script checks the slots of a user
 
+        v0.09: by Aybo
+            - kill TL on the slot-count-limit path changed from TL300
+              to TL-1 (don't auto-reconnect). The user cannot satisfy
+              the slot rule by waiting 5 minutes - they need to change
+              their upload-slot setting, a client-side config change.
+
         v0.08: by pulsar
             - changed visuals
             - removed table lookups
@@ -37,7 +43,7 @@
 --------------
 
 local scriptname = "usr_slots"
-local scriptversion = "0.08"
+local scriptversion = "0.09"
 
 --// imports
 local scriptlang = cfg.get( "language" )
@@ -73,7 +79,7 @@ local check = function( user )
             return PROCESSED
         else
             local msg_out = hub.escapeto( utf.format( msg_slotlimits, min, max, user_slots ) )
-            user:kill( "ISTA 120 " .. msg_out .. "\n", "TL300" )
+            user:kill( "ISTA 120 " .. msg_out .. "\n", "TL-1" )
             return PROCESSED
         end
     end

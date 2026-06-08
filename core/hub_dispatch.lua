@@ -466,7 +466,7 @@ _identify = {
             adccmd:setnp( userfam, userip )
         elseif infip_match ~= userip then
             if _cfg_kill_wrong_ips then
-                user:kill( "ISTA 246 " .. _i18n.invalid_ip .. userip .. "/" .. infip_match .. "\n", "TL10" )
+                user:kill( "ISTA 246 " .. _i18n.invalid_ip .. userip .. "/" .. infip_match .. "\n", "TL-1" )
                 scripts_firelistener( "onFailedAuth", nick, userip, cid,  escapefrom( _i18n.invalid_ip .. userip .. "/" .. infip_match ) )
                 return true
             else
