@@ -5,6 +5,17 @@
         - this script kills users with forbidden inf flags
         - do not change anything here when you dont know what you are doing
 
+        v0.08: by Aybo
+            - kill TL on forbidden-INF-flag kicks changed from TL300
+              to TL-1 (don't auto-reconnect). The user can't fix the
+              violation by waiting 5 minutes - they need to change
+              their client config or restart. TL300 produced a
+              kick-loop with the OpChat-spam side effect that hub
+              operators report. TL-1 tells the client to NOT auto-
+              reconnect, collapsing the per-session report count
+              from N attempts to exactly one. Security signal (the
+              opchat report itself) stays intact.
+
         v0.07: by Aybo
             - #222: split flags_on_inf into _kill (PD/ID, identity
               spoofing) and _strip (I4/I6, IP mutation). Post-login
@@ -34,7 +45,7 @@
 ]]--
 
 local scriptname = "hub_inf_manager"
-local scriptversion = "0.07"
+local scriptversion = "0.08"
 local scriptlang = cfg.get "language"
 
 local lang, err = cfg.loadlanguage( scriptlang, scriptname ); lang = lang or { }; err = err and hub.debug( err )
@@ -118,7 +129,7 @@ hub.setlistener( "onConnect", { },
         local valid, offending_flag = check( cmd, forbidden.flags )
         if not valid then
             fire_onfailedauth( user, offending_flag )
-            user:kill( "ISTA 240 " .. msg_invalid .. offending_flag .. "\n", "TL300" )
+            user:kill( "ISTA 240 " .. msg_invalid .. offending_flag .. "\n", "TL-1" )
             return PROCESSED
         end
         return nil
@@ -130,13 +141,13 @@ hub.setlistener( "onInf", { },
         local valid, offending_flag = check( cmd, forbidden.flags )
         if not valid then
             fire_onfailedauth( user, offending_flag )
-            user:kill( "ISTA 240 " .. msg_invalid .. offending_flag .. "\n", "TL300" )
+            user:kill( "ISTA 240 " .. msg_invalid .. offending_flag .. "\n", "TL-1" )
             return PROCESSED
         end
         valid, offending_flag = check( cmd, forbidden.flags_on_inf_kill )
         if not valid then
             fire_onfailedauth( user, offending_flag )
-            user:kill( "ISTA 240 " .. msg_invalid .. offending_flag .. "\n", "TL300" )
+            user:kill( "ISTA 240 " .. msg_invalid .. offending_flag .. "\n", "TL-1" )
             return PROCESSED
         end
         -- #222: silent-strip I4 / I6 from post-login INF updates.

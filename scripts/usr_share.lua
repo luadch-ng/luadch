@@ -4,6 +4,13 @@
 
         - this script checks the share size of a user
 
+        v0.13: by Aybo
+            - kill TL on the share-size-limit path (both min and max
+              branches) changed from TL300 to TL-1 (don't auto-
+              reconnect). The user cannot satisfy a min-share / max-
+              share rule by waiting 5 minutes - they need to add or
+              remove files from their share, a client-side change.
+
         v0.12:
             - fix dead German translation: lookup was `lang.msg_minmax`
               but the .lang.{de,en} files define the key as
@@ -56,7 +63,7 @@
 --------------
 
 local scriptname = "usr_share"
-local scriptversion = "0.12"
+local scriptversion = "0.13"
 
 --// imports
 local scriptlang = cfg.get( "language" )
@@ -96,7 +103,7 @@ local check = function( user )
             return PROCESSED
         else
             local msg_out = hub.escapeto( utf.format( msg_sharelimits, util.formatbytes( min ), util.formatbytes( max ), util.formatbytes( user_share ) ) )
-            user:kill( "ISTA 120 " .. msg_out .. "\n", "TL300" )
+            user:kill( "ISTA 120 " .. msg_out .. "\n", "TL-1" )
             return PROCESSED
         end
     end
@@ -109,7 +116,7 @@ local check = function( user )
         else
             if not ( trafficmanager_activate and minsharecheck ) then
                 local msg_out = hub.escapeto( utf.format( msg_sharelimits, util.formatbytes( min ), util.formatbytes( max ), util.formatbytes( user_share ) ) )
-                user:kill( "ISTA 120 " .. msg_out .. "\n", "TL300" )
+                user:kill( "ISTA 120 " .. msg_out .. "\n", "TL-1" )
                 return PROCESSED
             end
         end
