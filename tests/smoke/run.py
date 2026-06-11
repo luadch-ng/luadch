@@ -10792,6 +10792,38 @@ def test_canonical_socket_layout(staging_dir: Path):
         )
 
 
+def test_sandbox_os_clock_whitelisted(staging_dir: Path):
+    """Closes #325: the curated `_os_safe` shim in core/scripts.lua
+    must expose `clock` alongside the existing time / date / difftime
+    triad. The companion `luadch-ng/scripts` plugin ptx_freshstuff (and
+    any future 3rd-party plugin using `os.clock()` for stopwatch-style
+    output) hits `attempt to call a nil value (field 'clock')` at
+    onStart otherwise.
+
+    Falsifiable: pre-fix the shim definition lists only time / date /
+    difftime; this static-source check asserts the literal
+    `clock = os.clock` entry is present in the shim block. Pre-fix
+    fails, post-fix passes.
+    """
+    scripts_lua = staging_dir / "core" / "scripts.lua"
+    if not scripts_lua.exists():
+        raise TestFailure(f"core/scripts.lua not found at {scripts_lua}")
+    text = scripts_lua.read_text(encoding="utf-8")
+    # Match _os_safe = { ... clock = os.clock ... } as a single block.
+    # The pattern is tolerant of order / whitespace inside the block
+    # but anchored on the shim's variable name so an unrelated
+    # `clock = os.clock` elsewhere can't satisfy it.
+    pattern = re.compile(
+        r"local\s+_os_safe\s*=\s*\{[^}]*\bclock\s*=\s*os\.clock\b[^}]*\}",
+        re.DOTALL,
+    )
+    if not pattern.search(text):
+        raise TestFailure(
+            "core/scripts.lua: curated `_os_safe` shim is missing "
+            "the `clock = os.clock` entry (#325)"
+        )
+
+
 def test_no_script_errors(log_path: Path, error_log_path: Path = None):
     """
     Plugin-load smoke: scan the hub's stdout AND the on-disk error.log
@@ -10917,6 +10949,14 @@ def run_tests(staging_dir: Path):
         failed.append("canonical LuaSocket / LuaSec layout")
     else:
         log("PASS  canonical LuaSocket / LuaSec layout")
+
+    try:
+        test_sandbox_os_clock_whitelisted(staging_dir)
+    except Exception as e:
+        log(f"FAIL  sandbox _os_safe.clock whitelisted (#325): {e}")
+        failed.append("sandbox _os_safe.clock whitelisted (#325)")
+    else:
+        log("PASS  sandbox _os_safe.clock whitelisted (#325)")
 
     try:
         test_cert_autogen_first_boot(staging_dir)
