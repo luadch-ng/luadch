@@ -140,11 +140,11 @@ _code = {    -- mhh...
 --              is replaced by `util.path_sep()` so the whole
 --              `package` library no longer leaks into the sandbox
 --   os         Sub-PR-2: replaced by a curated `_os_safe` shim
---              exposing ONLY os.time / os.date / os.difftime
---              (the only os methods the 66-plugin audit found in
---              use). Blocks os.execute / os.remove / os.rename /
---              os.exit / os.setlocale / os.tmpname / os.tmpfile /
---              os.getenv reachability from plugin code.
+--              exposing ONLY os.time / os.date / os.difftime /
+--              os.clock (read-only time-accessor family). Blocks
+--              os.execute / os.remove / os.rename / os.exit /
+--              os.setlocale / os.tmpname / os.tmpfile / os.getenv
+--              reachability from plugin code.
 --   io         Sub-PR-3: replaced by a curated `_io_safe` shim
 --              exposing ONLY io.open with path-restriction (no
 --              absolute paths, no parent-dir traversal). Blocks
@@ -168,6 +168,7 @@ local _os_safe = {
     time     = os.time,
     date     = os.date,
     difftime = os.difftime,
+    clock    = os.clock,
 }
 
 -- Curated `io` shim for the plugin sandbox (#206 Tier-2 Sub-PR-3).
