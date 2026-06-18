@@ -12,7 +12,6 @@
     msg_usage = "[+!#]useruptime CT1 <FIRSTNICK> | CT2 <NICK>",
     msg_notfound = "User nicht gefunden.",
 
-    msg_years = " Jahre, ",
     msg_days = " Tage, ",
     msg_hours = " Stunden, ",
     msg_minutes = " Minuten, ",
