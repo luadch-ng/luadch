@@ -4,6 +4,18 @@
 
         usage: [+!#]useruptime [CT1 <FIRSTNICK> | CT2 <NICK>]
 
+        v0.11: by Aybo
+            - drop always-zero "years" from per-month display
+              (fix #328, reported by Sopor). A calendar month
+              holds <= 31 days = ~2.7M s, while formatseconds
+              only rolls a year at 365 days = ~31.5M s, so the
+              year column was pure noise. Switched to the
+              4-value (hubstart=true) form of formatseconds and
+              removed `y .. msg_years` from the rendered line.
+              The `msg_years` key is also dropped from this
+              plugin's lang files; 14 other plugins keep their
+              own `msg_years` for legitimate year-scale spans.
+
         v0.10: by Aybo
             - rewrite the per-month accounting (fix #127, original
               report upstream luadch/luadch#193 by Sopor).
@@ -77,7 +89,7 @@
 --------------
 
 local scriptname = "usr_uptime"
-local scriptversion = "0.10"
+local scriptversion = "0.11"
 
 local cmd = { "useruptime", "uu" }
 
@@ -105,7 +117,6 @@ local msg_denied = lang.msg_denied or "You are not allowed to use this command."
 local msg_usage = lang.msg_usage or "[+!#]useruptime CT1 <FIRSTNICK> | CT2 <NICK>"
 local msg_notfound = lang. msg_notfound or "User not found."
 
-local msg_years = lang.msg_years or " years, "
 local msg_days = lang.msg_days or " days, "
 local msg_hours = lang.msg_hours or " hours, "
 local msg_minutes = lang.msg_minutes or " minutes, "
@@ -240,8 +251,11 @@ local get_useruptime = function( firstnick )
                             -- weirdness for sessions crossing a month
                             -- boundary.
                             local complete = v.complete or 0
-                            local y, d, h, m, s = util.formatseconds( complete )
-                            local uptime = y .. msg_years .. d .. msg_days .. h .. msg_hours .. m .. msg_minutes .. s .. msg_seconds
+                            -- v0.11 fix #328: drop years (always 0 for a per-month
+                            -- counter, max 31 days < 365). hubstart=true gives the
+                            -- 4-value (d, h, m, s) form.
+                            local d, h, m, s = util.formatseconds( complete, true )
+                            local uptime = d .. msg_days .. h .. msg_hours .. m .. msg_minutes .. s .. msg_seconds
                             msg = msg .. "\t" .. year .. "\t" .. month_name[ month ] .. "\t" .. uptime .. "\n"
                         end
                     end
