@@ -6,14 +6,17 @@
             - alias-resolver fallback for #327. On a missed direct
               lookup the dispatcher consults etc_aliases via
               hub.import, resolves the typed token to a real
-              command, and dispatches the real command with its
-              own name in the echo line. Both miss-hints (the
-              forgot-the-prefix "Did you mean +X?" and the
-              literal-bracket "Try +X" hint) also resolve through
-              the alias map so the suggestion is the real target,
-              not the alias. The resolver is re-imported on every
-              miss (no caching) so a +reload of etc_aliases never
-              leaves a stale closure here.
+              command, and dispatches the real command's handler
+              with the resolved name as the `command` argument
+              (the chat-echo `[command] %s` line still shows the
+              user's raw input - that's an acknowledgement, not a
+              routing trace). Both miss-hints (the forgot-the-
+              prefix "Did you mean +X?" and the literal-bracket
+              "Try +X" hint) DO resolve through the alias map
+              because those messages exist to teach the operator
+              the correct command name. The resolver is re-imported
+              on every miss (no caching) so a +reload of etc_aliases
+              never leaves a stale closure here.
             - public surface gets two additive helpers: has(cmd)
               for callers (etc_aliases at +addalias time) that
               want to validate a command name without reaching
@@ -121,8 +124,9 @@ hub.setlistener( "onBroadcast", { },
         local effective_cmd = cmd
         -- v0.07 (#327): direct miss -> try the alias map. If the
         -- alias resolves to a real command, dispatch the real
-        -- command and echo its name (not the alias) so the
-        -- operator sees what actually ran.
+        -- command's handler with the resolved name as the
+        -- `command` arg (the echo line still shows the raw input,
+        -- which is the chat acknowledgement).
         if cmd and not func then
             local target = resolve_alias( cmd )
             if target and commands[ target ] then

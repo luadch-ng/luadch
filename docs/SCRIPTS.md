@@ -436,11 +436,14 @@ The plugin inverts to a flat `{ [alias] = target }` map in memory.
 - target command does not exist
 
 **Resolver fallback** runs in `etc_hubcommands` on direct-lookup miss:
-the typed token is resolved to its target through
-`etc_aliases.resolve(name)` and the real command dispatches with its
-own name echoed in `[command] +<target>`. Both fall-through hints
-("Did you mean +X?" and the literal-bracket hint) also pass through
-the resolver so the suggestion is the real target.
+the typed token is resolved through `etc_aliases.resolve(name)` and
+the real command's handler dispatches, receiving the resolved command
+name as its `command` argument (so help-text generation matches). The
+`[command] +<typed>` echo line shows the user's original input
+verbatim - it's a chat acknowledgement, not a routing trace. Both
+fall-through hints ("Did you mean +X?" and the literal-bracket hint)
+DO surface the resolved target, since those messages exist to teach
+the operator the correct command name.
 
 **HTTP API:** `GET /v1/aliases`, `POST /v1/aliases` (admin),
 `DELETE /v1/aliases/{alias}` (admin). See [HTTP_API.md](HTTP_API.md).
