@@ -253,7 +253,13 @@ local function format_list( )
 
     local hubcmd = hub_import( "etc_hubcommands" )
     if hubcmd and hubcmd.list then
-        -- Group commands by function identity.
+        -- Group commands by function identity. tostring(fn) yields
+        -- "function: 0x..." which is stable per process; two
+        -- distinct functions can never collide on the same string.
+        -- The visible row order is then determined by the sort
+        -- on `g.first` (the alphabetically smallest name in each
+        -- group) so the output is fully stable across hub
+        -- restarts even though `pairs(commands)` order is not.
         local groups = { }
         local order = { }
         for _, entry in ipairs( hubcmd.list( ) ) do
