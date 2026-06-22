@@ -225,7 +225,7 @@ end
 ----------------------------------------------------------------------
 
 do
-    local r = DELETE{ path = { alias = "us" }, token_label = "test" }
+    local r = DELETE{ path_vars = { alias = "us" }, token_label = "test" }
     eq( "DELETE happy: status 200",     r.status,         200 )
     eq( "DELETE happy: action",         r.data.action,    "deleted" )
     eq( "DELETE happy: previous",       r.data.previous,  "usersearch" )
@@ -237,7 +237,7 @@ end
 ----------------------------------------------------------------------
 
 do
-    local r = DELETE{ path = { alias = "doesnotexist" }, token_label = "test" }
+    local r = DELETE{ path_vars = { alias = "doesnotexist" }, token_label = "test" }
     eq( "not_found: status 404", r.status,     404 )
     eq( "not_found: code",       r.error.code, "not_found" )
 end
@@ -247,7 +247,7 @@ end
 ----------------------------------------------------------------------
 
 do
-    local r = DELETE{ path = { alias = "u1" }, token_label = "test" }
+    local r = DELETE{ path_vars = { alias = "u1" }, token_label = "test" }
     eq( "DELETE bad_alias: status 400", r.status,     400 )
     eq( "DELETE bad_alias: code",       r.error.code, "bad_alias" )
 end

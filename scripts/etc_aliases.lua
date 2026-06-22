@@ -377,7 +377,7 @@ local http_create_alias = function( req )
 end
 
 local http_delete_alias = function( req )
-    local alias = req.path.alias
+    local alias = req.path_vars and req.path_vars.alias
     local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
     local previous = aliases_tbl[ alias ]
     local ok, err_code, msg = do_del_alias( alias, actor_label )
