@@ -6540,41 +6540,54 @@ def test_aliases_adc_dispatch():
     Cleans up after itself with `+delalias h` so the alias does
     not persist across test runs (cfg/aliases.tbl is saved in
     the staging dir but the same dir is reused on rerun).
+
+    Each step uses a content-specific predicate so the post-login
+    etc_dummy_warning DMSG and the etc_hubcommands `[command] %s`
+    echo line (both arrive interleaved with the actual handler
+    reply) are scanned past, not mistaken for the response.
     """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
     with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
         sid, reader = _adc_login(sock, "dummy", "test")
 
         # 1. Create the alias. etc_aliases replies "<nick> added alias 'h' -> 'help'."
+        # The predicate filters past the post-login dummy warning DMSG
+        # (no "added") and the [command] echo (also no "added"; note
+        # "+addalias h help" itself contains "alias" but not "added").
         sock.sendall(f"BMSG {sid} +addalias h help\n".encode("utf-8"))
         reply = reader.recv_until(
-            lambda f: f.startswith("EMSG ") or f.startswith("DMSG "),
+            lambda f: _is_chat_frame(f) and "added" in f and "alias" in f,
             timeout=PROTOCOL_TIMEOUT_SEC,
         )
-        if "added\\salias" not in reply and "added alias" not in reply.replace("\\s", " "):
+        if not reply:
             raise TestFailure(f"+addalias did not confirm add: {reply!r}")
 
-        # 2. The alias should now dispatch to cmd_help. cmd_help replies
-        # via user:reply, so we expect an EMSG/DMSG with the help body.
+        # 2. The alias should now dispatch to cmd_help. cmd_help's
+        # output is a multi-line listing that always contains the
+        # word "help" (its own +help row, plus help titles of other
+        # plugins). The `[command] +h` echo doesn't contain "help"
+        # (only "+h"), and the dummy warning doesn't either, so a
+        # content-aware predicate disambiguates regardless of
+        # the order frames arrived.
         sock.sendall(f"BMSG {sid} +h\n".encode("utf-8"))
         reply = reader.recv_until(
-            lambda f: f.startswith("EMSG ") or f.startswith("DMSG "),
+            lambda f: _is_chat_frame(f) and "help" in f and len(f) > 50,
             timeout=PROTOCOL_TIMEOUT_SEC,
         )
-        # cmd_help's body is large and listing format-dependent. The
-        # invariant we check is "got SOMETHING back" - the existing
-        # test_command_routing uses the same heuristic.
-        if len(reply) < 20:
+        if not reply:
             raise TestFailure(
-                f"+h (alias for help) did not dispatch: reply too short: {reply!r}"
+                f"+h (alias for help) did not dispatch: {reply!r}"
             )
 
         # 3. Clean up so a re-run of the smoke harness sees a clean state.
         sock.sendall(f"BMSG {sid} +delalias h\n".encode("utf-8"))
         reply = reader.recv_until(
-            lambda f: f.startswith("EMSG ") or f.startswith("DMSG "),
+            lambda f: _is_chat_frame(f) and "removed" in f and "alias" in f,
             timeout=PROTOCOL_TIMEOUT_SEC,
         )
-        if "removed" not in reply.replace("\\s", " ") and "removed\\salias" not in reply:
+        if not reply:
             raise TestFailure(f"+delalias did not confirm removal: {reply!r}")
 
 
