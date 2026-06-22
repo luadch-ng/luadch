@@ -6552,11 +6552,18 @@ def test_aliases_adc_dispatch():
     with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
         sid, reader = _adc_login(sock, "dummy", "test")
 
+        # Multi-word BMSG bodies must ADC-escape spaces as `\s`
+        # (raw spaces would terminate the body at the first space
+        # and the trailing tokens would be parsed as ADC flags,
+        # which is what bit the pre-v3 of this test - the handler
+        # saw `+addalias` with empty params and replied with usage).
+
         # 1. Create the alias. etc_aliases replies "<nick> added alias 'h' -> 'help'."
-        # The predicate filters past the post-login dummy warning DMSG
-        # (no "added") and the [command] echo (also no "added"; note
-        # "+addalias h help" itself contains "alias" but not "added").
-        sock.sendall(f"BMSG {sid} +addalias h help\n".encode("utf-8"))
+        # The predicate filters past the long post-login frame storm
+        # (ICMDs from etc_usercommands, motd, login info, hubowner
+        # warning) and the [command] echo (which contains "alias" but
+        # not "added").
+        sock.sendall(f"BMSG {sid} +addalias\\sh\\shelp\n".encode("utf-8"))
         reply = reader.recv_until(
             lambda f: _is_chat_frame(f) and "added" in f and "alias" in f,
             timeout=PROTOCOL_TIMEOUT_SEC,
@@ -6582,7 +6589,7 @@ def test_aliases_adc_dispatch():
             )
 
         # 3. Clean up so a re-run of the smoke harness sees a clean state.
-        sock.sendall(f"BMSG {sid} +delalias h\n".encode("utf-8"))
+        sock.sendall(f"BMSG {sid} +delalias\\sh\n".encode("utf-8"))
         reply = reader.recv_until(
             lambda f: _is_chat_frame(f) and "removed" in f and "alias" in f,
             timeout=PROTOCOL_TIMEOUT_SEC,
