@@ -175,6 +175,26 @@ def wait_for_port(host: str, port: int, timeout: float):
     raise TimeoutError(f"port {host}:{port} did not open within {timeout}s; last error: {last_err}")
 
 
+def wait_for_file(path: Path, timeout: float):
+    """Poll filesystem until `path` exists, or timeout.
+
+    Used by mode-switch helpers that flip the hub into a state where
+    the hub itself emits a sentinel file as part of boot (e.g.
+    `cfg/api_token.first` when `http_port` is set + `http_api_tokens`
+    is empty - the #231 first-boot bootstrap). On Windows MinGW the
+    ADC port can bind before the HTTP-side bootstrap finishes
+    writing the sample-token file, so a setup that only does
+    `wait_for_port(ADC)` and then asserts the file is present races
+    on a slow runner. Symmetric with wait_for_port: setup ensures
+    the precondition; the test asserts behaviour."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        time.sleep(0.1)
+    raise TimeoutError(f"file {path} did not appear within {timeout}s")
+
+
 def stop_hub(proc, log_file):
     if proc.poll() is None:
         log("stopping hub")
@@ -3116,6 +3136,14 @@ def _switch_to_http_no_tokens_mode(staging_dir: Path, current_proc, current_log_
     # the boot sequence (incl. the bootstrap_first_token write).
     # Without this, the test below might race the hub's startup.
     wait_for_port(HUB_HOST, TEST_PORT_PLAIN, 5.0)
+    # Also wait for the sample-token file. On Windows MinGW the
+    # ADC port can bind a tick BEFORE bootstrap_first_token has
+    # finished writing api_token.first; the original wait_for_port
+    # alone left a race that caused intermittent post-merge CI
+    # failures (every downstream HTTP test then failed with
+    # "[Errno 2] No such file or directory: cfg\\api_token.first").
+    sample_path = staging_dir / "cfg" / "api_token.first"
+    wait_for_file(sample_path, 5.0)
     return proc, log_file
 
 
