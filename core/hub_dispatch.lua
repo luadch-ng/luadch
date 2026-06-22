@@ -466,8 +466,12 @@ _identify = {
             adccmd:setnp( userfam, userip )
         elseif infip_match ~= userip then
             if _cfg_kill_wrong_ips then
-                user:kill( "ISTA 246 " .. _i18n.invalid_ip .. userip .. "/" .. infip_match .. "\n", "TL-1" )
-                scripts_firelistener( "onFailedAuth", nick, userip, cid,  escapefrom( _i18n.invalid_ip .. userip .. "/" .. infip_match ) )
+                -- Two %s args ordered (claim, actual) - the user-facing
+                -- message reads more naturally as "you advertise X but
+                -- are connecting from Y". Lang strings updated accordingly.
+                local msg = utf_format( _i18n.invalid_ip, infip_match, userip )
+                user:kill( "ISTA 246 " .. msg .. "\n", "TL-1" )
+                scripts_firelistener( "onFailedAuth", nick, userip, cid, escapefrom( msg ) )
                 return true
             else
                 -- #214 Gap 2: kill_wrong_ips=false is the NAT-weird-
