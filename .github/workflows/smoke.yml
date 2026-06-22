@@ -107,6 +107,13 @@ jobs:
       - name: Run usr_share lang unit test
         run: lua5.4 tests/unit/usr_share_lang_test.lua
 
+      # #327 etc_aliases: HTTP API surface + reload-safety. Exercises
+      # all four +addalias reject branches (bad_alias / conflict_command
+      # / exists / no_target), GET sorting, DELETE happy + not_found,
+      # and the +reload semantic (re-running onStart re-loads from disk).
+      - name: Run etc_aliases unit test
+        run: lua5.4 tests/unit/etc_aliases_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -195,6 +202,10 @@ jobs:
       - name: Run usr_share lang unit test
         shell: msys2 {0}
         run: lua tests/unit/usr_share_lang_test.lua
+
+      - name: Run etc_aliases unit test
+        shell: msys2 {0}
+        run: lua tests/unit/etc_aliases_test.lua
 
       - name: Configure
         shell: msys2 {0}

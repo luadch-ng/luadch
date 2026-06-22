@@ -2519,6 +2519,39 @@ local defaults = {
     },
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_aliases.lua settings (#327)
+
+    etc_aliases_minlevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    etc_aliases_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    etc_aliases_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    etc_aliases_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    etc_aliases_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_trafficmanager.lua settings
 
     etc_trafficmanager_activate = { true,
@@ -3484,6 +3517,7 @@ local defaults = {
         "cmd_gag.lua",
         "cmd_sslinfo.lua",
         "etc_hubcommands.lua",
+        "etc_aliases.lua",
         "etc_usercommands.lua",
         "etc_blacklist.lua",
         "etc_log_cleaner.lua",

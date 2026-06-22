@@ -6526,6 +6526,208 @@ def test_http_topic(staging_dir: Path, proc=None):
         raise TestFailure(f"catalog missing /v1/topic; body={b!r}")
 
 
+def test_aliases_adc_dispatch():
+    """#327: alias resolver fallback in etc_hubcommands.lua.
+
+    Logs in as dummy (level 100, passes the etc_aliases_minlevel=80
+    gate), creates an alias `h -> help` via `+addalias h help`,
+    then sends `+h` and asserts the bot replies (proving that the
+    resolver fallback re-dispatched to cmd_help). Without the
+    resolver hop the hub would either ignore `+h` (no such
+    command) or broadcast it as chat - both observable as the
+    absence of an EMSG/DMSG reply from the hubbot.
+
+    Cleans up after itself with `+delalias h` so the alias does
+    not persist across test runs (cfg/aliases.tbl is saved in
+    the staging dir but the same dir is reused on rerun).
+
+    Each step uses a content-specific predicate so the post-login
+    etc_dummy_warning DMSG and the etc_hubcommands `[command] %s`
+    echo line (both arrive interleaved with the actual handler
+    reply) are scanned past, not mistaken for the response.
+    """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
+    with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+
+        # Multi-word BMSG bodies must ADC-escape spaces as `\s`
+        # (raw spaces would terminate the body at the first space
+        # and the trailing tokens would be parsed as ADC flags,
+        # which is what bit the pre-v3 of this test - the handler
+        # saw `+addalias` with empty params and replied with usage).
+
+        # 1. Create the alias. etc_aliases replies "<nick> added alias 'h' -> 'help'."
+        # The predicate filters past the long post-login frame storm
+        # (ICMDs from etc_usercommands, motd, login info, hubowner
+        # warning) and the [command] echo (which contains "alias" but
+        # not "added").
+        sock.sendall(f"BMSG {sid} +addalias\\sh\\shelp\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and "added" in f and "alias" in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+addalias did not confirm add: {reply!r}")
+
+        # 2. The alias should now dispatch to cmd_help. cmd_help's
+        # output is a multi-line listing that always contains the
+        # word "help" (its own +help row, plus help titles of other
+        # plugins). The `[command] +h` echo doesn't contain "help"
+        # (only "+h"), and the dummy warning doesn't either, so a
+        # content-aware predicate disambiguates regardless of
+        # the order frames arrived.
+        sock.sendall(f"BMSG {sid} +h\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and "help" in f and len(f) > 50,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(
+                f"+h (alias for help) did not dispatch: {reply!r}"
+            )
+
+        # 3. Clean up so a re-run of the smoke harness sees a clean state.
+        sock.sendall(f"BMSG {sid} +delalias\\sh\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and "removed" in f and "alias" in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+delalias did not confirm removal: {reply!r}")
+
+
+def test_http_aliases(staging_dir: Path, proc=None):
+    """#327: HTTP API CRUD for etc_aliases.
+
+    Coverage:
+    - Anonymous POST + DELETE -> 401.
+    - GET /v1/aliases on a clean hub -> 200 + empty array.
+    - POST {alias:"us",target:"usersearch"} -> 201 + envelope.
+    - GET shows the new alias.
+    - POST again with same alias -> 409 E_BAD_INPUT family
+      (mapped from our `exists` err_code).
+    - POST {alias:"xx",target:"doesnotexist"} -> 404 (no_target).
+    - POST {alias:"us2",target:"usersearch"} -> 400 (bad_alias,
+      digit rejected by `^%a+$` regex).
+    - DELETE /v1/aliases/us -> 200 + envelope.
+    - DELETE /v1/aliases/ghost -> 404 (not_found).
+    - /v1/endpoints catalog lists all three routes.
+    """
+    import json as _json
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def post(body: bytes, with_auth: bool = True):
+        h = auth if with_auth else b""
+        return _http_roundtrip(
+            b"POST /v1/aliases HTTP/1.1\r\n" + h +
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"\r\n" + body
+        )
+
+    def delete(alias: str, with_auth: bool = True):
+        h = auth if with_auth else b""
+        return _http_roundtrip(
+            ("DELETE /v1/aliases/" + alias + " HTTP/1.1\r\n").encode("ascii") + h + b"\r\n"
+        )
+
+    # 1. Anonymous gate.
+    r = post(b'{"alias":"x","target":"help"}', with_auth=False)
+    if "401" not in status(r):
+        raise TestFailure(f"anonymous POST /v1/aliases: expected 401, got {status(r)!r}")
+    r = delete("x", with_auth=False)
+    if "401" not in status(r):
+        raise TestFailure(f"anonymous DELETE /v1/aliases/x: expected 401, got {status(r)!r}")
+
+    # 2. POST happy path.
+    r = post(b'{"alias":"us","target":"usersearch"}')
+    if "201" not in status(r):
+        raise TestFailure(
+            f"POST /v1/aliases create: expected 201, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    if data.get("action") != "added" or data.get("alias") != "us" or data.get("target") != "usersearch":
+        raise TestFailure(
+            f"POST /v1/aliases create: unexpected envelope; body={body_of(r)!r}"
+        )
+
+    # 3. GET lists it.
+    r = _http_roundtrip(b"GET /v1/aliases HTTP/1.1\r\n" + auth + b"\r\n")
+    if "200" not in status(r):
+        raise TestFailure(
+            f"GET /v1/aliases: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    parsed = _json.loads(body_of(r))
+    data = parsed.get("data") or {}
+    aliases = data.get("aliases") or []
+    if not any(a.get("alias") == "us" and a.get("target") == "usersearch" for a in aliases):
+        raise TestFailure(
+            f"GET /v1/aliases: did not include {{us->usersearch}}; body={body_of(r)!r}"
+        )
+
+    # 4. POST duplicate -> 409.
+    r = post(b'{"alias":"us","target":"help"}')
+    if "409" not in status(r):
+        raise TestFailure(
+            f"POST /v1/aliases duplicate: expected 409, got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 5. POST unknown target -> 404.
+    r = post(b'{"alias":"xx","target":"doesnotexist"}')
+    if "404" not in status(r):
+        raise TestFailure(
+            f"POST /v1/aliases unknown target: expected 404, got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 6. POST bad alias (digit) -> 400.
+    r = post(b'{"alias":"us2","target":"usersearch"}')
+    if "400" not in status(r):
+        raise TestFailure(
+            f"POST /v1/aliases bad alias: expected 400, got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 7. DELETE happy + cleanup.
+    r = delete("us")
+    if "200" not in status(r):
+        raise TestFailure(
+            f"DELETE /v1/aliases/us: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 8. DELETE unknown -> 404.
+    r = delete("ghost")
+    if "404" not in status(r):
+        raise TestFailure(
+            f"DELETE /v1/aliases/ghost: expected 404, got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 9. Catalog lists all three routes.
+    r = _http_roundtrip(b"GET /v1/endpoints HTTP/1.1\r\n" + auth + b"\r\n")
+    b = body_of(r)
+    if '"/v1/aliases"' not in b:
+        raise TestFailure(f"catalog missing /v1/aliases; body={b!r}")
+    if '"/v1/aliases/{alias}"' not in b:
+        raise TestFailure(f"catalog missing /v1/aliases/{{alias}}; body={b!r}")
+
+
 def test_http_registered_users_pr1(staging_dir: Path, proc=None):
     """#82 registered-users family PR-1 (#236): cmd_reg plugin migrates
     GET /v1/registered (paginated, read), POST /v1/registered (admin),
@@ -10875,6 +11077,7 @@ TESTS = [
     ("plain ADC full login (dummy/test)", test_full_login_plain),
     ("TLS ADC full login (dummy/test)", test_full_login_tls),
     ("+cmd routing (post-login +help)", test_command_routing),
+    ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
     ("S1: fragmented frame reassembled (phase8-io)", test_s1_fragmented_frame_reassembled),
     ("S1: two frames in one segment (phase8-io)", test_s1_two_frames_one_segment),
     ("literal [+!#] bracket hint + no-arg-echo (#137)", test_literal_bracket_command_hint),
@@ -11408,6 +11611,17 @@ def main():
             failed.append("HTTP API cmd_topic (#82)")
         else:
             log("PASS  HTTP API cmd_topic (#82)")
+
+        # #327: etc_aliases CRUD over /v1/aliases. Anonymous gate +
+        # create + list + duplicate-409 + bad-target-404 +
+        # bad-alias-400 + delete + delete-404 + catalog.
+        try:
+            test_http_aliases(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API etc_aliases (#327): {e}")
+            failed.append("HTTP API etc_aliases (#327)")
+        else:
+            log("PASS  HTTP API etc_aliases (#327)")
 
         # #82 registered-users family PR-1 (#236): cmd_reg migrated to
         # GET / POST /v1/registered + PATCH /v1/registered/{nick}.

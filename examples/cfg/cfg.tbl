@@ -436,6 +436,16 @@ return { -- the settings are a lua table, do not tough this!
     cmd_topic_llevel = 60,  -- min level to get a report? (only for hubbot msg) (integer)
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_aliases.lua settings | this script adds operator-defined command aliases (#327)
+
+    etc_aliases_minlevel = 80,  -- min level to add/del aliases (integer)
+
+    etc_aliases_report = true,  -- send status report on add/del? (boolean)
+    etc_aliases_report_hubbot = false,  -- send report as hubbot msg? (boolean)
+    etc_aliases_report_opchat = true,  -- send report as opchat feed? (boolean)
+    etc_aliases_llevel = 60,  -- min level to get a report? (only for hubbot msg) (integer)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// cmd_ascii.lua settings | this script adds a command to send ascii pictures to main chat
 
     cmd_ascii_minlevel = 20,  -- min level to send ascii pictures to main? (integer)
@@ -1385,6 +1395,7 @@ return { -- the settings are a lua table, do not tough this!
         "cmd_gag.lua",  -- using report import
         "cmd_sslinfo.lua",
         "etc_hubcommands.lua",
+        "etc_aliases.lua",  -- using report import (#327)
         "etc_usercommands.lua",
         "etc_blacklist.lua",
         "etc_log_cleaner.lua",

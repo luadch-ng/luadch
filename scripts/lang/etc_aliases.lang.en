@@ -1,0 +1,38 @@
+return {
+
+    help_title_add  = "etc_aliases.lua - addalias",
+    help_usage_add  = "[+!#]addalias <alias> <target>",
+    help_desc_add   = "Add a command alias (alias -> target)",
+
+    help_title_del  = "etc_aliases.lua - delalias",
+    help_usage_del  = "[+!#]delalias <alias>",
+    help_desc_del   = "Remove a command alias",
+
+    help_title_list = "etc_aliases.lua - aliases",
+    help_usage_list = "[+!#]aliases",
+    help_desc_list  = "List configured aliases and built-in command names",
+
+    ucmd_menu_add    = { "Hub", "Aliases", "add alias" },
+    ucmd_menu_del    = { "Hub", "Aliases", "delete alias" },
+    ucmd_menu_list   = { "Hub", "Aliases", "list aliases" },
+    ucmd_popup_alias  = "Alias (letters only):",
+    ucmd_popup_target = "Target command:",
+
+    msg_denied            = "You are not allowed to use this command.",
+    msg_usage_add         = "Usage: [+!#]addalias <alias> <target>",
+    msg_usage_del         = "Usage: [+!#]delalias <alias>",
+    msg_bad_alias         = "Invalid alias '%s' - aliases may contain letters only (a-z, A-Z).",
+    msg_alias_is_command  = "'%s' is already a real command and cannot be aliased.",
+    msg_alias_exists      = "Alias '%s' already maps to '%s'. Use +delalias '%s' first.",
+    msg_target_missing    = "Unknown target command '%s'.",
+    msg_no_such_alias     = "No such alias '%s'.",
+    msg_added             = "%s added alias '%s' -> '%s'.",
+    msg_deleted           = "%s removed alias '%s' (was '-> %s').",
+    msg_list_header       = "\n=== ALIASES ===",
+    msg_list_footer       = "=== END ===\n",
+    msg_list_empty        = "(no operator-defined aliases)",
+    msg_list_section_a    = "Operator-defined aliases:",
+    msg_list_section_b    = "Built-in command names:",
+    msg_err               = "etc_aliases.lua: error: database file (cfg/aliases.tbl) corrupt or missing, a new one was created.",
+
+}
