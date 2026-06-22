@@ -1572,7 +1572,7 @@ loadsettings = function( )    -- caching table lookups...
     _cfg_hub_email = cfg_get "hub_email"
     _cfg_max_bad_password = cfg_get "max_bad_password"
     _cfg_bad_pass_timeout = cfg_get "bad_pass_timeout"
-    _cfg_kill_wrong_ips = cfg_get "kill_wrong_ips" -- not in cfg.tbl
+    _cfg_kill_wrong_ips = cfg_get "kill_wrong_ips"
     -- Phase 8 S4b: ZLIF gates. `zlif_enabled` toggles SUP advertise +
     -- post-HSUP IZON initiation. `zlif_over_tls` separately gates the
     -- TLS path (CRIME-class chosen-plaintext-length leak mitigation,
