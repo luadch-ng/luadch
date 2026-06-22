@@ -41,6 +41,8 @@ land on `release/3.1.x` per
 
 ### Breaking
 
+- **`kill_wrong_ips` default flipped from `true` to `false`.** Safe because [#214](https://github.com/luadch-ng/luadch/issues/214) Gap 2 (shipped v3.1.10) already overrides any client-claimed mismatched IP with the authenticated TCP source IP before broadcasting, regardless of this toggle. Effect: VPN / CGNAT / dual-stack users with off claims now stay connected instead of being kicked. Kick message itself was upgraded in PR [#331](https://github.com/luadch-ng/luadch/pull/331). **Operators who prefer the loud kick:** set `kill_wrong_ips = true` in `cfg.tbl`. Trade-off detail in [`docs/SECURITY.md`](docs/SECURITY.md). 3.2.x only.
+
 - [#231](https://github.com/luadch-ng/luadch/issues/231) - HTTP API now requires an **explicit token in cfg.tbl** before binding the listener. Previously the first-boot bootstrap generated a token AND auto-activated it in-memory, so the API "just worked" on first boot. That mechanism had a footgun: `+reload` reads `cfg.tbl` fresh and silently wiped the in-memory token, locking the operator out until a process restart (which then generated a NEW token, overwriting `api_token.first`). Post-#231: hub writes a sample token to `cfg/api_token.first` (chmod 600) when `http_port` is set but `http_api_tokens` is empty, logs a warning, and does NOT bind the listener. Operator must copy the value into `cfg.tbl http_api_tokens` and restart (or `+reload`) to activate. `cfg.tbl` is now the single source of truth. **Action required for operators:** if you upgrade with `http_port` set but no token in `cfg.tbl`, the HTTP API will not be reachable until you copy the sample value over. Details in [`docs/HTTP_API.md` §4.7](docs/HTTP_API.md). 3.2.x only, not backported.
 
 ### Documentation

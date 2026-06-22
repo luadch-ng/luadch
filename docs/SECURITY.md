@@ -331,43 +331,61 @@ the same `icacls` line there. The same recipe lives in
 | Op-level bypass of per-user limits | [`core/ratelimit.lua`](../core/ratelimit.lua) | `ratelimit_bypass_level` (default 60) |
 | Parser-side message-size cap | [`core/adc.lua` parse](../core/adc.lua) | hardcoded 64 KiB |
 | Connection read-buffer cap | [`core/server.lua`](../core/server.lua) | hardcoded 1 MiB |
-| INF-IP consistency check (kick on TCP-source vs INF-claim mismatch) | [`core/hub_dispatch.lua` BINF](../core/hub_dispatch.lua) + [`scripts/hub_inf_manager.lua`](../scripts/hub_inf_manager.lua) | `kill_wrong_ips` (default **true** since v3.1.4) |
+| INF-IP consistency check (kick on TCP-source vs INF-claim mismatch) | [`core/hub_dispatch.lua` BINF](../core/hub_dispatch.lua) + [`scripts/hub_inf_manager.lua`](../scripts/hub_inf_manager.lua) | `kill_wrong_ips` (default **false** since v3.2.x; see operator note below) |
 
 The full DoS-hardening rationale is in Phase 7c
 ([#56](https://github.com/luadch-ng/luadch/issues/56)).
 
 ### `kill_wrong_ips` operator note ([#97](https://github.com/luadch-ng/luadch/issues/97))
 
-The `kill_wrong_ips` default flipped from `false` to `true` in v3.1.4:
-a connecting client whose INF advertises an `I4` / `I6` value
-different from the TCP source IP is now disconnected. Same check
-fires on `onInf` updates in normal state via
-[`scripts/hub_inf_manager.lua`](../scripts/hub_inf_manager.lua) -
-post-login a user cannot re-stamp their advertised IP either.
+The `kill_wrong_ips` default flipped from `true` (v3.1.4 through
+v3.1.x) back to `false` in v3.2.x. The motivation for the v3.1.4
+strict default was to prevent a client from broadcasting a spoofed
+`I4` / `I6` value to other peers (DDoS-amplification risk: peers
+would direct CTM / RCM connection attempts at the spoofed
+victim address). Since v3.2.x that vector is closed at a lower
+level - the
+[#214 Gap 2 fix](https://github.com/luadch-ng/luadch/issues/214)
+in [`core/hub_dispatch.lua`](../core/hub_dispatch.lua) overrides
+any client-claimed mismatched IP with the authenticated TCP source
+IP **before** broadcasting, regardless of `kill_wrong_ips`. The
+gate is therefore no longer protecting anything by construction;
+it only controls whether a mismatched-claim user is killed (loud)
+or has their broadcast INF silently corrected (lenient).
 
 The legitimate **passive-mode `I40.0.0.0`** case is handled before
-the kill check (the hub fills in the real IP at
-[`core/hub_dispatch.lua`](../core/hub_dispatch.lua)), so passive
-clients are unaffected.
+the gate (the hub fills in the real IP), so passive clients are
+unaffected either way.
 
-**When to opt out (`kill_wrong_ips = false`):** deployments where
-clients legitimately advertise an IP different from the TCP source.
-Mostly:
+**With `kill_wrong_ips = false` (new default):**
 
-- users behind symmetric NAT or carrier-grade NAT (CGNAT) where the
-  client cannot determine its public IP and falls back to a stale
-  cached value
-- bridged / dual-stack setups where the user's own selection of
-  `I4` vs `I6` does not match what the kernel chose for the
-  outbound TCP connection
-- corporate proxies / TLS-terminating reverse proxies in front of
-  the hub that rewrite the source IP
+- VPN users with stale cached IPs, CGNAT users with manual WAN-IP
+  misconfiguration, and dual-stack users with kernel-vs-config
+  family mismatch all stay connected. Their broadcast INF carries
+  the authenticated TCP source IP, so peers reach them correctly
+  in the typical VPN-egress / CGNAT-egress / single-NAT scenarios.
+- The edge case where the user's TCP source genuinely cannot reach
+  their P2P listener (multi-WAN with policy routing, certain
+  corporate setups) becomes a silent failure: user stays online,
+  P2P connections from peers fail. Empirically this group is small
+  in practice (such users typically either run passive mode or are
+  CGNAT-blocked from active mode anyway).
 
-The cost of opting out: per-IP rate limits, GeoIP / unified
-blocklist matches, abuse logs, and any plugin reading
-`user:ip()` operate on the **TCP source IP** anyway, so the check
-is purely defence-in-depth against IP-spoofing INFs - the rest of
-the stack stays sound.
+**With `kill_wrong_ips = true` (opt-in):**
+
+- Mismatched-IP clients get an explicit kick on login with an
+  actionable hint pointing them at their client's
+  `External / WAN IP` setting (PR
+  [#331](https://github.com/luadch-ng/luadch/pull/331)). Operator
+  sees these kicks in `log/error.log` for diagnostics.
+- Picks a louder failure mode over a silent one: useful for hubs
+  with a known-tightly-configured userbase where any mismatch is
+  almost certainly an operator-fixable client problem.
+
+Per-IP rate limits, GeoIP / unified blocklist matches, abuse logs,
+and any plugin reading `user:ip()` operate on the **TCP source IP**
+regardless of this toggle - none of those primitives depend on
+the kill semantic.
 
 ### Dual-stack secondary-address verification ([#214](https://github.com/luadch-ng/luadch/issues/214), HBRI)
 

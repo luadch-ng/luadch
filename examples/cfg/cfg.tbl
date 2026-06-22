@@ -79,6 +79,13 @@ return { -- the settings are a lua table, do not tough this!
     min_password_length = 10,  -- minimum length of the password (integer)
     max_password_length = 30,  -- maximum length of the password (integer)
 
+    -- kick on login when client-claimed I4/I6 differs from TCP source IP. (boolean)
+    -- Default false: the hub silently overrides the claim with the verified TCP source
+    -- before broadcasting (spoofing prevented by #214 Gap 2), so VPN / CGNAT / dual-stack
+    -- users with mildly off claims stay connected. Set true to instead kick mismatched
+    -- clients with an actionable hint (useful for hubs with tightly-configured userbases).
+    kill_wrong_ips = false,
+
     -- ====================================================================
     -- !!! IMPORTANT - SET BEFORE PUTTING REAL USERS INTO USER.TBL !!!
     --

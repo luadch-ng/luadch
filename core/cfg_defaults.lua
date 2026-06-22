@@ -3606,17 +3606,29 @@ local defaults = {
             return types_boolean( value, nil, true )
         end
     },
-    -- #97: default kept off historically because some NAT setups
-    -- legitimately advertise a different IP than the TCP source
-    -- (clients behind symmetric NAT, IPv6 fallback weirdness). The
-    -- legitimate "I40.0.0.0" passive-mode case is handled separately
-    -- in core/hub_dispatch.lua (the hub fills in the real IP); the
-    -- only branch this gate fires on is "client claims a real but
-    -- different IP". Per-IP rate limits, GeoIP rules, abuse logs, and
-    -- the unified blocklist all rely on the IP being trustworthy, so
-    -- the default is now true. NAT-weird deployments opt out by
-    -- setting kill_wrong_ips = false in their cfg/cfg.tbl.
-    kill_wrong_ips = { true,
+    -- #97 (default true since v3.1.4), flipped back to false in
+    -- v3.2.x: with the #214 Gap 2 fix in place, kill_wrong_ips=false
+    -- no longer broadcasts a client-claimed (potentially spoofed) IP
+    -- - the hub overrides the claim with the authenticated TCP source
+    -- in core/hub_dispatch.lua before any broadcast, so the
+    -- DDoS-amplification vector that motivated the strict default
+    -- is closed by construction regardless of this toggle.
+    --
+    -- The practical effect of the strict default was kicking users
+    -- with legitimate IP mismatches (VPN clients with stale cached
+    -- IPs, CGNAT users with manual WAN-IP misconfiguration, dual-
+    -- stack users where the kernel picked a different outbound family
+    -- than the user's configured advertise). Per-IP rate limits, GeoIP
+    -- rules, abuse logs, and the unified blocklist all operate on the
+    -- TCP source IP anyway, so the gate is purely defence-in-depth -
+    -- and post-Gap-2 there is nothing left to depend on.
+    --
+    -- Operators who prefer the loud "tell the user to fix their client"
+    -- kick over the silent IP-override can opt in via cfg.tbl:
+    --     kill_wrong_ips = true
+    -- The improved kick message (PR #331) includes a config hint
+    -- pointing the user at their client's 'External / WAN IP' setting.
+    kill_wrong_ips = { false,
         function( value )
             return types_boolean( value, nil, true )
         end
