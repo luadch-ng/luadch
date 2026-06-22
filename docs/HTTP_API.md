@@ -1129,6 +1129,9 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 |---|---|---|---|
 | POST | `/v1/announce` | admin | `cmd_mass` - **migrated** [^http-announce-1] |
 | POST | `/v1/topic` | admin | `cmd_topic` - **migrated** [^http-topic-1] |
+| GET | `/v1/aliases` | read | `etc_aliases` - **migrated (#327)** [^http-aliases-1] |
+| POST | `/v1/aliases` | admin | `etc_aliases` - **migrated (#327)** [^http-aliases-2] |
+| DELETE | `/v1/aliases/{alias}` | admin | `etc_aliases` - **migrated (#327)** [^http-aliases-3] |
 | POST | `/v1/reload` | admin | `cmd_reload` - requires `X-Confirm: yes` (§4.6) - **migrated** [^http-reload-1] |
 | POST | `/v1/restart` | admin | `cmd_restart` - requires `X-Confirm: yes` (§4.6) - **migrated (Phase 3 PR-1)** [^http-restart-1] |
 | POST | `/v1/shutdown` | admin | `cmd_shutdown` - requires `X-Confirm: yes` (§4.6) - **migrated (Phase 3 PR-2)** [^http-shutdown-1] |
@@ -1142,6 +1145,12 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 [^http-restart-1]: Body `{message?: string}` (max 1024 chars, control-byte sanitised). The message broadcasts to the hub as a chat banner just like `+restart <MSG>`; absent / empty message skips the broadcast. Returns 200 with `data: {action:"restart", message, countdown}` per §7.1.1 (no `sid`/`nick` - hub-control endpoint). `countdown` reflects `cfg.cmd_restart_toggle_countdown` (true = 10-second ASCII countdown before exit; false = immediate exit after ~2s). A concurrent second call returns **409 E_CONFLICT** (restart already armed); use `X-Idempotency-Key` for safe retries. The ADC-side `cmd_restart_permission` level table does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
 
 [^http-shutdown-1]: Body `{message?: string}` (max 1024 chars, control-byte sanitised). Same shape as `POST /v1/restart`. Returns 200 with `data: {action:"shutdown", message, countdown}` per §7.1.1 (no `sid`/`nick` - hub-control endpoint). `countdown` reflects `cfg.cmd_shutdown_toggle_countdown` (true = 10-second ASCII countdown before exit; false = `hub.requestexit()` immediately, which fires `onShutdown` and the do_exit timer). A concurrent second call returns **409 E_CONFLICT**; use `X-Idempotency-Key` for safe retries. The ADC-side `cmd_shutdown_permission` level table does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
+
+[^http-aliases-1]: No request body. Returns 200 with `data: {aliases: [{alias, target}, ...], count}` per §7.1. Entries are sorted by `alias` for stable pagination-free output. The list mirrors what `+aliases` shows in the "Operator-defined aliases" section - built-in plugin multi-name registrations (e.g. usr_uptime's `useruptime` + `uu`) are NOT included; those are surfaced only on the ADC side via `etc_hubcommands.list()` and are visible in the `+aliases` "Built-in command names" section. The `read` scope gate (not `admin`) matches the GET-is-read convention.
+
+[^http-aliases-2]: Body `{alias: string required (max 64, must match `^[A-Za-z]+$` - letters only, matching the ADC dispatcher's `%a+` capture), target: string required (max 64, must be an existing registered command name)}`. Returns **201 Created** with `data: {action:"added", alias, target}` per §7.1.1. Persists immediately to `cfg/aliases.tbl` (atomic write). Error mapping: **400 E_BAD_INPUT** (`bad_alias` - non-alpha alias / target name); **404 E_NOT_FOUND** (`no_target` - target is not a registered command); **409 E_CONFLICT** (`conflict_command` - alias name collides with an existing real command, real commands always win; or `exists` - alias is already mapped to a target, the operator must `DELETE` first - no silent overwrite). The ADC-side `etc_aliases_minlevel` does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
+
+[^http-aliases-3]: No request body. Returns 200 with `data: {action:"deleted", alias, previous}` per §7.1.1 - `previous` is the target the alias used to map to (so the caller can correlate / restore). Persists immediately to `cfg/aliases.tbl`. Returns **404 E_NOT_FOUND** (`not_found`) if the alias is not configured; **400 E_BAD_INPUT** (`bad_alias`) if the path parameter does not match `^[A-Za-z]+$`. The ADC-side `etc_aliases_minlevel` does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
 
 #### Logs + records + runtime
 

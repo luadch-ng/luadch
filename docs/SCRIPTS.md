@@ -400,7 +400,55 @@ registered.
 
 Internal registry module for `+cmd` handlers. Exported library used by
 every command plugin via `hub.import("etc_hubcommands")`. Also emits
-the "Did you mean +X?" reminder on bare-word typos.
+the "Did you mean +X?" reminder on bare-word typos. Exports `add(cmd, fn)`
+plus `has(cmd)` (predicate, used by etc_aliases at `+addalias` time) and
+`list()` (enumeration helper used by `+aliases` to show built-in
+command names).
+
+### etc_aliases
+
+Operator-defined command aliases. Lets the hub admin map short or
+memorable alias names to existing commands (e.g. `+us` -> `+usersearch`,
+`+tm` -> `+trafficmanager`). Closes [#327](https://github.com/luadch-ng/luadch/issues/327).
+
+**Commands:**
+- `+addalias <alias> <target>` - create a new alias
+- `+delalias <alias>` - remove an alias
+- `+aliases` - list configured aliases AND built-in command names
+
+**Storage:** `cfg/aliases.tbl`, grouped by target for human readability:
+
+```lua
+return {
+    usersearch     = { "us" },
+    trafficmanager = { "tm", "trma" },
+}
+```
+
+The plugin inverts to a flat `{ [alias] = target }` map in memory.
+`+addalias` / `+delalias` rewrite the file atomically; `+reload` re-reads.
+
+**Validation at `+addalias`** rejects with a distinct error string:
+- alias not matching `^%a+$` (the hub dispatcher's regex constraint)
+- alias name is already a real command (real commands always win,
+  cannot be aliased)
+- alias already mapped (use `+delalias` first - no silent overwrite)
+- target command does not exist
+
+**Resolver fallback** runs in `etc_hubcommands` on direct-lookup miss:
+the typed token is resolved to its target through
+`etc_aliases.resolve(name)` and the real command dispatches with its
+own name echoed in `[command] +<target>`. Both fall-through hints
+("Did you mean +X?" and the literal-bracket hint) also pass through
+the resolver so the suggestion is the real target.
+
+**HTTP API:** `GET /v1/aliases`, `POST /v1/aliases` (admin),
+`DELETE /v1/aliases/{alias}` (admin). See [HTTP_API.md](HTTP_API.md).
+
+**Config:** `etc_aliases_minlevel` (default 80 = admin),
+`etc_aliases_report` / `_report_hubbot` / `_report_opchat` / `_llevel`
+(opchat audit trail toggles, matching the cmd_topic / etc_msgmanager
+pattern).
 
 ### etc_keyprint
 
