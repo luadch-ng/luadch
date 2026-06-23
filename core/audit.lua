@@ -82,6 +82,11 @@ local DEFAULT_MAX_META_VALUE_CHARS = 1000
 -- Snapshot a user-object into the actor table. Plugins call
 -- audit.build with the user-object; snapshotting here means the
 -- writer never has to call methods on a possibly-disconnected user.
+-- nick is captured as `firstnick` (canonical identity, prefix-less)
+-- to match the user.tbl `by` field and the etc_report convention -
+-- audit-trail entries survive nick-prefix-table edits this way.
+-- `display_nick` carries the at-the-time visible form (with level
+-- prefix if any) for operators correlating chat lines.
 local function _snapshot_actor( actor )
     if actor == nil then
         return { nick = "", level = 0, sid = "", cid = "", ip = "" }
@@ -94,13 +99,21 @@ local function _snapshot_actor( actor )
     end
     -- user-object detection: `nick` is a method (function), not a string.
     if type( actor.nick ) == "function" then
-        return {
-            nick  = tostring( actor:nick( )  or "" ),
+        local canonical = ( type( actor.firstnick ) == "function" )
+                          and tostring( actor:firstnick( ) or "" )
+                          or  tostring( actor:nick( )      or "" )
+        local visible   = tostring( actor:nick( ) or "" )
+        local snap = {
+            nick  = canonical,
             level = tonumber( actor:level( ) ) or 0,
             sid   = tostring( actor:sid( )   or "" ),
             cid   = ( actor.cid and tostring( actor:cid( ) or "" ) ) or "",
             ip    = ( actor.ip  and tostring( actor:ip( )  or "" ) ) or "",
         }
+        if visible ~= "" and visible ~= canonical then
+            snap.display_nick = visible
+        end
+        return snap
     end
     -- Flat table: pass-through with defaults for missing fields.
     return {
@@ -122,9 +135,14 @@ end
 
 -- One-level table normalize: string values get _normalize_str,
 -- numbers and booleans pass through, anything else gets tostring'd.
+-- Returns nil for empty input or all-keys-collapsed result so the
+-- downstream JSON encoder produces no `meta` / `target` field
+-- instead of an ambiguous `[]` (Lua empty tables serialize as
+-- arrays under dkjson).
 local function _normalize_table( t, max )
     if t == nil or type( t ) ~= "table" then return nil end
     local out = { }
+    local has_any = false
     for k, v in pairs( t ) do
         local vt = type( v )
         if vt == "string" then
@@ -134,7 +152,9 @@ local function _normalize_table( t, max )
         else
             out[ k ] = _normalize_str( tostring( v ), max )
         end
+        has_any = true
     end
+    if not has_any then return nil end
     return out
 end
 
@@ -142,17 +162,26 @@ end
 -- Same shape (nick / sid / cid / ip / level) as actor, but flat
 -- tables can also carry plugin-specific keys (e.g. cmd_ban passes
 -- ip in addition to nick - those keys pass through normalize_table).
+-- Mirrors _snapshot_actor's firstnick-canonical / nick-display split.
 local function _snapshot_target( target, max )
     if target == nil then return nil end
     -- user-object: nick is a method.
     if type( target ) == "table" and type( target.nick ) == "function" then
-        return {
-            nick  = tostring( target:nick( )  or "" ),
+        local canonical = ( type( target.firstnick ) == "function" )
+                          and tostring( target:firstnick( ) or "" )
+                          or  tostring( target:nick( )      or "" )
+        local visible   = tostring( target:nick( ) or "" )
+        local snap = {
+            nick  = canonical,
             level = tonumber( target:level( ) ) or 0,
             sid   = tostring( target:sid( )   or "" ),
             cid   = ( target.cid and tostring( target:cid( ) or "" ) ) or "",
             ip    = ( target.ip  and tostring( target:ip( )  or "" ) ) or "",
         }
+        if visible ~= "" and visible ~= canonical then
+            snap.display_nick = visible
+        end
+        return snap
     end
     -- Flat table: pass through normalize_table.
     return _normalize_table( target, max )

@@ -8331,6 +8331,8 @@ def test_audit_log_84(staging_dir: Path, proc=None):
     adc_event = matches_adc[-1]
     if adc_event.get("action") != "reg.add":
         raise TestFailure(f"action mismatch: {adc_event!r}")
+    # actor.nick is the canonical firstnick (no level prefix); the
+    # visible-in-chat form lands in display_nick (e.g. "[HUBOWNER]dummy").
     if (adc_event.get("actor") or {}).get("nick") != "dummy":
         raise TestFailure(f"actor.nick != dummy: {adc_event!r}")
     if (adc_event.get("target") or {}).get("nick") != nick_adc:

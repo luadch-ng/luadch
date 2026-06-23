@@ -101,11 +101,12 @@ end
 local function mock_user( fields )
     fields = fields or {}
     return {
-        nick  = function( ) return fields.nick  or "alice"   end,
-        level = function( ) return fields.level or 80        end,
-        sid   = function( ) return fields.sid   or "ABCD"    end,
-        cid   = function( ) return fields.cid   or "CID1234" end,
-        ip    = function( ) return fields.ip    or "1.2.3.4" end,
+        nick      = function( ) return fields.nick      or fields.firstnick or "alice" end,
+        firstnick = function( ) return fields.firstnick or fields.nick      or "alice" end,
+        level     = function( ) return fields.level     or 80                          end,
+        sid       = function( ) return fields.sid       or "ABCD"                      end,
+        cid       = function( ) return fields.cid       or "CID1234"                   end,
+        ip        = function( ) return fields.ip        or "1.2.3.4"                   end,
     }
 end
 
@@ -133,7 +134,7 @@ end
 ----------------------------------------------------------------------
 
 do
-    local ev = audit.build( "test.action", mock_user{ nick = "admin", level = 100, sid = "AAAA", cid = "C1", ip = "10.0.0.1" } )
+    local ev = audit.build( "test.action", mock_user{ firstnick = "admin", level = 100, sid = "AAAA", cid = "C1", ip = "10.0.0.1" } )
     check( "actor user-object: event built", type( ev ) == "table" )
     eq( "actor user-object: action", ev.action, "test.action" )
     eq( "actor user-object: nick",   ev.actor.nick,  "admin" )
@@ -141,6 +142,18 @@ do
     eq( "actor user-object: sid",    ev.actor.sid,   "AAAA"  )
     eq( "actor user-object: cid",    ev.actor.cid,   "C1"    )
     eq( "actor user-object: ip",     ev.actor.ip,    "10.0.0.1" )
+    check( "actor user-object: no display_nick when firstnick == nick",
+        ev.actor.display_nick == nil )
+end
+
+do
+    -- Level-prefixed display name: `nick()` returns "[OP]bob" while
+    -- `firstnick()` returns "bob". audit.nick = firstnick; the
+    -- visible form lands in display_nick.
+    local ev = audit.build( "test.action",
+        mock_user{ firstnick = "bob", nick = "[OP]bob", level = 60 } )
+    eq( "actor prefixed: nick = firstnick",         ev.actor.nick,         "bob"     )
+    eq( "actor prefixed: display_nick = visible",   ev.actor.display_nick, "[OP]bob" )
 end
 
 do
@@ -168,7 +181,7 @@ end
 ----------------------------------------------------------------------
 
 do
-    local victim = mock_user{ nick = "victim", level = 20, sid = "ZZZZ", cid = "C2", ip = "5.5.5.5" }
+    local victim = mock_user{ firstnick = "victim", level = 20, sid = "ZZZZ", cid = "C2", ip = "5.5.5.5" }
     local ev = audit.build( "user.kick", mock_user( ), victim )
     eq( "target user-object: nick",  ev.target.nick,  "victim" )
     eq( "target user-object: level", ev.target.level, 20       )
@@ -241,6 +254,21 @@ end
 do
     local ev = audit.build( "ban.add", mock_user( ), nil, nil, nil )
     check( "meta nil: meta is nil in event", ev.meta == nil )
+end
+
+do
+    -- Empty meta table collapses to nil so dkjson does not emit
+    -- an ambiguous `[]` (Lua empties serialize as arrays). Fix for
+    -- the `meta: []` artifact spotted in the first smoke run.
+    local ev = audit.build( "ban.add", mock_user( ), nil, nil, { } )
+    check( "meta empty table: collapses to nil", ev.meta == nil )
+end
+
+do
+    -- Likewise for a table whose entries all happen to be nil
+    -- (Lua-collapsed at construction time).
+    local ev = audit.build( "ban.add", mock_user( ), nil, nil, { x = nil, y = nil } )
+    check( "meta all-nil collapses: nil in event", ev.meta == nil )
 end
 
 ----------------------------------------------------------------------
