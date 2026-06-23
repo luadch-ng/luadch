@@ -594,6 +594,12 @@ end
 -- count (always >= 0, often 0 on routine runs).
 local http_handler_delete_expired = function( req )
     local result = _classify_and_delete( "expired" )
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    audit.fire( audit.build( "user.cleanup",
+        { nick = actor_label, sid = "<http>" }, nil, nil,
+        { mode = "delexpired",
+          deleted = #( result.deleted or {} ),
+          orphan_comments_removed = result.orphan_comments_removed or 0 } ) )
     return { status = 200, data = {
         action                   = "users-cleaned",
         mode                     = "expired",
@@ -677,6 +683,12 @@ end
 -- expired variant.
 local http_handler_delete_ghosts = function( req )
     local result = _classify_and_delete( "ghosts" )
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    audit.fire( audit.build( "user.cleanup",
+        { nick = actor_label, sid = "<http>" }, nil, nil,
+        { mode = "delghosts",
+          deleted = #( result.deleted or {} ),
+          orphan_comments_removed = result.orphan_comments_removed or 0 } ) )
     return { status = 200, data = {
         action                   = "users-cleaned",
         mode                     = "ghosts",
@@ -697,6 +709,11 @@ end
 -- chat command `+usercleaner cleancomment`.
 local http_handler_clean_orphan_comments = function( req )
     local removed = sweep_orphan_descriptions()
+    if removed > 0 then
+        local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+        audit.fire( audit.build( "user.cleanup.orphan_comments",
+            { nick = actor_label, sid = "<http>" }, nil, nil, { removed = removed } ) )
+    end
     return { status = 200, data = {
         action                   = "orphan-comments-cleaned",
         orphan_comments_removed  = removed,
@@ -827,22 +844,29 @@ local onbmsg = function( user, command, parameters )
     end
     if ( param == cmd_p4 ) then --> delexpired
         delUsers( true, false, user )
+        audit.fire( audit.build( "user.cleanup", user, nil, nil, { mode = "delexpired" } ) )
         return PROCESSED
     end
     if ( param == cmd_p5 ) then --> delghosts
         delUsers( false, true, user )
+        audit.fire( audit.build( "user.cleanup", user, nil, nil, { mode = "delghosts" } ) )
         return PROCESSED
     end
     if ( param == cmd_p6 ) and nick then --> addexception
         userExceptions( true, false, false, false, user, nick )
+        audit.fire( audit.build( "user.cleanup.exception.add", user,
+            { nick = nick }, nil, nil ) )
         return PROCESSED
     end
     if ( param == cmd_p7 ) and nick then --> delexception
         userExceptions( false, true, false, false, user, nick )
+        audit.fire( audit.build( "user.cleanup.exception.remove", user,
+            { nick = nick }, nil, nil ) )
         return PROCESSED
     end
     if ( param == cmd_p8 ) then --> delexceptionall
         userExceptions( false, false, true, false, user, false )
+        audit.fire( audit.build( "user.cleanup.exception.clear", user, nil, nil, nil ) )
         return PROCESSED
     end
     if ( param == cmd_p9 ) then --> showexceptions
@@ -851,6 +875,8 @@ local onbmsg = function( user, command, parameters )
     end
     if ( param == cmd_p10 ) and days then --> setdays
         changeSettings( days, user )
+        audit.fire( audit.build( "user.cleanup.setdays", user, nil, nil,
+            { days = tonumber( days ) } ) )
         return PROCESSED
     end
     if ( param == cmd_p11 ) then --> cleancomment (#311: explicit one-shot orphan sweep)
@@ -859,6 +885,8 @@ local onbmsg = function( user, command, parameters )
             local msg = utf.format( msg_orphan_comments_cleaned, removed )
             user:reply( msg, hub.getbot() )
             report.send( report_activate, report_hubbot, report_opchat, report_level, msg )
+            audit.fire( audit.build( "user.cleanup.orphan_comments", user, nil, nil,
+                { removed = removed } ) )
         else
             user:reply( msg_orphan_comments_none, hub.getbot() )
         end

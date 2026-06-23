@@ -236,6 +236,8 @@ onbmsg = function( user, command, parameters )
                             user_tbl[ k ].password = pass
                             user:reply( msg_ok, hub.getbot() )
                             cfg.saveusers( user_tbl )
+                            audit.fire( audit.build( "reg.password.change", user,
+                                { nick = target_nick }, nil, { self_change = true } ) )
                             return PROCESSED
                         end
                     end
@@ -268,6 +270,9 @@ onbmsg = function( user, command, parameters )
                                 target:reply( msg_ok2 .. pass, hub.getbot(), hub.getbot() )
                             end
                             cfg.saveusers( user_tbl )
+                            audit.fire( audit.build( "reg.password.change", user,
+                                { nick = target_nick, level = target_level }, nil,
+                                { self_change = false } ) )
                             return PROCESSED
                         end
                     end
@@ -292,6 +297,8 @@ onbmsg = function( user, command, parameters )
                                     user_tbl[ k ].password = pass
                                     user:reply( msg_ok, hub.getbot() )
                                     cfg.saveusers( user_tbl )
+                                    audit.fire( audit.build( "reg.password.change", user,
+                                        { nick = target_firstnick }, nil, { self_change = true } ) )
                                     return PROCESSED
                                 end
                             end
@@ -307,6 +314,8 @@ onbmsg = function( user, command, parameters )
                                     user:reply( msg_ok, hub.getbot() )
                                     target:reply( msg_ok2 .. pass, hub.getbot(), hub.getbot() )
                                     cfg.saveusers( user_tbl )
+                                    audit.fire( audit.build( "reg.password.change", user,
+                                        target, nil, { self_change = false } ) )
                                     return PROCESSED
                                 end
                             end
@@ -390,6 +399,11 @@ local http_handler_set_password = function( req )
     -- assigned to both indexes). saveusers persists the array.
     profile.password = password
     cfg.saveusers( regusers_list )
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    audit.fire( audit.build( "reg.password.change",
+        { nick = actor_label, sid = "<http>" },
+        { nick = nick, level = tonumber( profile.level ) or 0 },
+        nil, { self_change = false } ) )
 
     -- Notify the target if currently online so they know the new
     -- password (matches the ADC msg_ok2 behaviour). Respects the

@@ -820,6 +820,13 @@ http_handler_create_ban = function( req )
         -- the ADC `+ban` path. The TL value is bantime in seconds.
         victim:kill( "ISTA 232 " .. hub.escapeto( message ) .. "\n", "TL" .. bantime )
     end
+    local _audit_target = { }
+    _audit_target[ target_type ] = target_id
+    if entry.nick and entry.nick ~= "" then _audit_target.nick = entry.nick end
+    audit.fire( audit.build( "ban.add",
+        { nick = actor_label, sid = "<http>" }, _audit_target,
+        ( clean_reason ~= "" and clean_reason or nil ),
+        { by = target_type, duration_sec = bantime, online = ( victim ~= nil ) } ) )
 
     local data = {
         action           = "ban",
@@ -881,6 +888,10 @@ http_handler_delete_ban = function( req )
                     or removed.ip
     local message = utf.format( msg_ok2, actor_label, display or "" )
     report.send( report_activate, report_hubbot, report_opchat, llevel, message )
+    audit.fire( audit.build( "ban.remove",
+        { nick = actor_label, sid = "<http>" },
+        { nick = removed.nick or "", cid = removed.cid or "", ip = removed.ip or "" },
+        nil, { id = id } ) )
 
     return { status = 200, data = {
         action  = "unban",
@@ -918,6 +929,7 @@ local onbmsg = function( user, command, parameters )
         cleanbans()
         user:reply( msg_clean_bans .. user:nick(), hub.getbot() )
         report.send( report_activate, report_hubbot, report_opchat, llevel, msg_clean_bans .. user:nick() )
+        audit.fire( audit.build( "ban.clear", user, nil, nil, nil ) )
         return PROCESSED
     end
     -----------------------------------------------------------------------
@@ -938,6 +950,7 @@ local onbmsg = function( user, command, parameters )
         cleanhistory()
         user:reply( msg_clean_banhistory .. user:nick(), hub.getbot() )
         report.send( report_activate, report_hubbot, report_opchat, llevel, msg_clean_banhistory .. user:nick() )
+        audit.fire( audit.build( "ban.history.clear", user, nil, nil, nil ) )
         return PROCESSED
     end
 
@@ -988,6 +1001,11 @@ local onbmsg = function( user, command, parameters )
             local message = utf.format( msg_ok, id, usernick, get_bantime( bantime ), reason )
             report.send( report_activate, report_hubbot, report_opchat, llevel, message )
             user:reply( message, hub.getbot() )
+            local _target = { }
+            _target[ by ] = id
+            audit.fire( audit.build( "ban.add", user, _target,
+                ( reason ~= msg_reason and reason or nil ),
+                { by = by, duration_sec = bantime, online = false } ) )
             return PROCESSED
         end
     end
@@ -1021,6 +1039,9 @@ local onbmsg = function( user, command, parameters )
         -- "generic kick" - lacks the ban-list intent.
         target:kill( "ISTA 232 " .. hub.escapeto( message ) .. "\n", "TL" .. bantime )
         user:reply( message, hub.getbot() )
+        audit.fire( audit.build( "ban.add", user, target,
+            ( reason ~= msg_reason and reason or nil ),
+            { by = by, duration_sec = bantime, online = true } ) )
         return PROCESSED
     end
 end
@@ -1046,11 +1067,16 @@ hub.setlistener( "onBroadcast", {},
                         user:reply( msg_god2, hub.getbot() )
                         return PROCESSED
                     end
+                    local removed_entry = ban_tbl
                     table.remove( bans, i )
                     util.savearray( bans, bans_path )
                     local message = utf.format( msg_ok2, user_nick, id )
                     report.send( report_activate, report_hubbot, report_opchat, llevel, message )
                     user:reply( message, hub.getbot() )
+                    audit.fire( audit.build( "ban.remove", user,
+                        { nick = removed_entry.nick or "", cid = removed_entry.cid or "",
+                          ip = removed_entry.ip or "" },
+                        nil, { by = by, id = i } ) )
                     return PROCESSED
                 end
             end
