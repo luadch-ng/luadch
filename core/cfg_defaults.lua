@@ -397,6 +397,29 @@ local defaults = {
                 and value <= 100000
         end
     },
+    -- #84: audit-log per-field caps applied by core/audit.lua at
+    -- event build time. Caps reason strings and per-meta string
+    -- values to prevent a malicious actor from blowing up a log
+    -- line. The cap applies BEFORE the writer plugin serializes
+    -- so the on-disk JSONL also stays bounded. Apply to both core
+    -- audit events AND the corresponding /v1/events ringbuffer
+    -- entries (sanitised once at build time, propagated as-is).
+    audit_log_max_reason_chars = { 1000,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 32
+                and value <= 100000
+        end
+    },
+    audit_log_max_meta_value_chars = { 1000,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 32
+                and value <= 100000
+        end
+    },
     -- Phase 8 S4b: ADC-EXT ZLIF (zlib stream compression). Off by
     -- default - operator opt-in, matches the S3 http_port pattern.
     -- When enabled and the client also advertises ADZLIF in HSUP, the
@@ -2548,6 +2571,71 @@ local defaults = {
     etc_aliases_llevel = { 60,
         function( value )
             return types_number( value, nil, true )
+        end
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_auditlog.lua settings (#84)
+
+    -- Master kill-switch. When false the plugin loads but writes
+    -- nothing to disk and the HTTP read endpoint returns an empty
+    -- list. The /v1/events audit stream remains populated either
+    -- way (driven by core/http_events.lua's tap, not this plugin)
+    -- - operators who want to disable the live stream entirely
+    -- should drop the plugin from cfg.scripts instead.
+    etc_auditlog_activate = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Directory for the JSONL files. Created on first write if
+    -- missing. The plugin chmods every file 0600 (POSIX) since
+    -- audit content is sensitive (target nicks / IPs / CIDs).
+    etc_auditlog_dir = { "log/",
+        function( value )
+            return types_string( value, nil, true )
+        end
+    },
+
+    -- File-name prefix. Final form: <dir><prefix><YYYY-MM-DD>.jsonl
+    -- Default produces log/audit-2026-06-23.jsonl.
+    etc_auditlog_prefix = { "audit-",
+        function( value )
+            return types_string( value, nil, true )
+        end
+    },
+
+    -- Days to retain. On rollover (first write past UTC midnight)
+    -- the plugin unlinks any matching file whose date is older
+    -- than this many days. Set 0 to disable retention sweep
+    -- (operator owns the cleanup manually).
+    etc_auditlog_retention_days = { 90,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 0
+                and value <= 36500
+        end
+    },
+
+    -- GET /v1/log/audit?lines=N defaults + cap (same envelope as
+    -- /v1/log/cmd and /v1/errors per HTTP_API.md §6.4).
+    etc_auditlog_http_lines_default = { 200,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 1
+                and value <= 1000
+        end
+    },
+
+    etc_auditlog_http_lines_max = { 1000,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 1
+                and value <= 10000
         end
     },
 
