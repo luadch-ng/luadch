@@ -443,12 +443,18 @@ _identify = {
         local inf_i4 = adccmd:getnp "I4"
         local inf_i6 = adccmd:getnp "I6"
         local hash = user.hash( )
+        local userip = user.ip( ) or ""
         if not ( cid and pid and nick ) then
             user:kill( "ISTA 220 " .. _i18n.no_cid_nick_found .. "\n", "TL-1" )
-            scripts_firelistener( "onFailedAuth", ( nick or _i18n.unknown ), ( inf_i4 or inf_i6 or _i18n.unknown ), ( cid or _i18n.unknown ), escapefrom( _i18n.no_cid_nick_found ) )
+            -- IP arg: log the authenticated TCP source rather than
+            -- `inf_i4 or inf_i6` (the client-claimed INF address). The
+            -- INF claim is unreliable here by construction - the BINF
+            -- is malformed - and operators correlate failed-auth lines
+            -- by source IP. Falls back to `unknown` only if the socket
+            -- has no peer (defensive; should not happen post-connect).
+            scripts_firelistener( "onFailedAuth", ( nick or _i18n.unknown ), ( userip ~= "" and userip or _i18n.unknown ), ( cid or _i18n.unknown ), escapefrom( _i18n.no_cid_nick_found ) )
             return true
         end
-        local userip = user.ip( ) or ""
         local userfam = ( userip:find( ":", 1, true ) and "I6" or "I4" )
         -- Field that the TCP source's family can authenticate. The
         -- other family (if advertised) is stripped below, post-stamp.
