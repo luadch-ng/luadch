@@ -65,6 +65,18 @@ local string_sub = string.sub
 local util = use "util"
 local strip_control_bytes = util.strip_control_bytes
 
+-- Belt-and-suspenders defense-in-depth: every string field that
+-- can reach the on-disk JSONL OR the live /v1/events ringbuffer
+-- goes through control-byte strip + length cap, including fields
+-- snapshotted from user-object methods. INF-derived strings are
+-- already F-INF-2-clamped at parse time so this is theoretical
+-- today, but the contract "audit.lua sanitises everything that
+-- reaches disk" is documented and unit-tested.
+local function _safe_str( s )
+    if s == nil then return "" end
+    return strip_control_bytes( tostring( s ) )
+end
+
 -- scripts + cfg + out are late-bound to avoid a load-order cycle
 -- (scripts.lua does not `use "audit"` but audit needs scripts at
 -- fire time; cfg needs to be live before reading the cap keys).
@@ -100,15 +112,15 @@ local function _snapshot_actor( actor )
     -- user-object detection: `nick` is a method (function), not a string.
     if type( actor.nick ) == "function" then
         local canonical = ( type( actor.firstnick ) == "function" )
-                          and tostring( actor:firstnick( ) or "" )
-                          or  tostring( actor:nick( )      or "" )
-        local visible   = tostring( actor:nick( ) or "" )
+                          and _safe_str( actor:firstnick( ) )
+                          or  _safe_str( actor:nick( )      )
+        local visible   = _safe_str( actor:nick( ) )
         local snap = {
             nick  = canonical,
             level = tonumber( actor:level( ) ) or 0,
-            sid   = tostring( actor:sid( )   or "" ),
-            cid   = ( actor.cid and tostring( actor:cid( ) or "" ) ) or "",
-            ip    = ( actor.ip  and tostring( actor:ip( )  or "" ) ) or "",
+            sid   = _safe_str( actor:sid( ) ),
+            cid   = ( actor.cid and _safe_str( actor:cid( ) ) ) or "",
+            ip    = ( actor.ip  and _safe_str( actor:ip( )  ) ) or "",
         }
         if visible ~= "" and visible ~= canonical then
             snap.display_nick = visible
@@ -117,11 +129,11 @@ local function _snapshot_actor( actor )
     end
     -- Flat table: pass-through with defaults for missing fields.
     return {
-        nick  = tostring( actor.nick  or "" ),
+        nick  = _safe_str( actor.nick ),
         level = tonumber( actor.level ) or 0,
-        sid   = tostring( actor.sid   or "" ),
-        cid   = tostring( actor.cid   or "" ),
-        ip    = tostring( actor.ip    or "" ),
+        sid   = _safe_str( actor.sid ),
+        cid   = _safe_str( actor.cid ),
+        ip    = _safe_str( actor.ip ),
     }
 end
 
@@ -168,15 +180,15 @@ local function _snapshot_target( target, max )
     -- user-object: nick is a method.
     if type( target ) == "table" and type( target.nick ) == "function" then
         local canonical = ( type( target.firstnick ) == "function" )
-                          and tostring( target:firstnick( ) or "" )
-                          or  tostring( target:nick( )      or "" )
-        local visible   = tostring( target:nick( ) or "" )
+                          and _safe_str( target:firstnick( ) )
+                          or  _safe_str( target:nick( )      )
+        local visible   = _safe_str( target:nick( ) )
         local snap = {
             nick  = canonical,
             level = tonumber( target:level( ) ) or 0,
-            sid   = tostring( target:sid( )   or "" ),
-            cid   = ( target.cid and tostring( target:cid( ) or "" ) ) or "",
-            ip    = ( target.ip  and tostring( target:ip( )  or "" ) ) or "",
+            sid   = _safe_str( target:sid( ) ),
+            cid   = ( target.cid and _safe_str( target:cid( ) ) ) or "",
+            ip    = ( target.ip  and _safe_str( target:ip( )  ) ) or "",
         }
         if visible ~= "" and visible ~= canonical then
             snap.display_nick = visible

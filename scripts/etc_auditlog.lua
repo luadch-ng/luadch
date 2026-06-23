@@ -111,16 +111,30 @@ local _current_date_path = function( )
     return cfg_dir .. cfg_prefix .. d .. ".jsonl", d
 end
 
--- Open today's file in APPEND-BINARY mode. The "ab" flag is the
+-- Per-process set of files we have already chmod'd 600 since
+-- start, so the chmod_secret syscall fires once per file (on the
+-- first write to a new daily path) rather than on every event.
+-- Cleared implicitly on +reload (plugin re-loads with a fresh
+-- empty table); the chmod is idempotent so re-running is safe.
+local _chmodded = {}
+
+-- Open today's file in APPEND-BINARY mode + chmod 600 on POSIX
+-- the first time we touch a given path. The "ab" flag is the
 -- only mode this plugin ever uses - no truncation surface. Caller
 -- closes the handle (we don't hold it open between writes; the
 -- append cost is one syscall per event and avoids "stale handle
--- across rollover" bugs at midnight).
+-- across rollover" bugs at midnight). chmod via util.chmod_secret
+-- = no-op on Windows, POSIX gets 0600 (matches user.tbl baseline
+-- from docs/SECURITY.md F-AUTH-1 +  cmd_secret + cert_bootstrap).
 local _open_append = function( path )
     local f, oerr = io_open( path, "ab" )
     if not f then
         hub_debug( scriptname .. ": cannot open '" .. tostring( path ) .. "' for append: " .. tostring( oerr ) )
         return nil
+    end
+    if not _chmodded[ path ] then
+        util.chmod_secret( path )
+        _chmodded[ path ] = true
     end
     return f
 end
@@ -281,6 +295,16 @@ hub.setlistener( "onStart", {},
         if not dkjson then
             hub_debug( scriptname .. ": dkjson optional dep missing; plugin is a no-op." )
         end
+        -- One-shot retention sweep at boot. Without this a hub
+        -- that restarts every day before the first event of the
+        -- new day fires the daily rollover detection would never
+        -- unlink stale files - the operator-facing surprise is
+        -- "retention 7 days configured but log/ still has month-old
+        -- files". Idempotent, cheap (max 365 io.open probes).
+        _retention_sweep( )
+        -- Seed the rollover tracker so the FIRST write today does
+        -- not trigger a second sweep on top of the boot one.
+        _last_seen_date = os_date( "!%Y-%m-%d", os_time( ) )
         local help = hub_import( "cmd_help" )
         if help then
             help.reg( help_title, help_usage, help_desc, minlevel )

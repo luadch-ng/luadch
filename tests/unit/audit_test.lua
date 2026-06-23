@@ -157,6 +157,25 @@ do
 end
 
 do
+    -- User-object snapshot must strip control bytes from every
+    -- string field (defense-in-depth gap caught in two-pass
+    -- review). INF-derived strings are F-INF-2-clamped at parse
+    -- time so this is theoretical today, but the contract is
+    -- "audit.lua sanitises everything that reaches disk."
+    local ev = audit.build( "test.ctrl",
+        mock_user{ firstnick = "alice\x01bob",
+                   nick      = "[OP]\x07alice\x01bob",
+                   sid       = "AA\x00ZZ",
+                   cid       = "C1\x1fX",
+                   ip        = "1.2.3\x7f.4" } )
+    eq( "user-object snapshot: nick ctrl-stripped",         ev.actor.nick,         "alicebob"     )
+    eq( "user-object snapshot: display_nick ctrl-stripped", ev.actor.display_nick, "[OP]alicebob" )
+    eq( "user-object snapshot: sid ctrl-stripped",          ev.actor.sid,          "AAZZ"         )
+    eq( "user-object snapshot: cid ctrl-stripped",          ev.actor.cid,          "C1X"          )
+    eq( "user-object snapshot: ip ctrl-stripped",           ev.actor.ip,           "1.2.3.4"      )
+end
+
+do
     local ev = audit.build( "test.action", { nick = "tok-label", sid = "<http>" } )
     eq( "actor flat table: nick",  ev.actor.nick,  "tok-label" )
     eq( "actor flat table: sid",   ev.actor.sid,   "<http>"    )
