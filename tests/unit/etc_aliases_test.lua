@@ -109,6 +109,15 @@ _G.util = {
 _G.utf = { match = string.match, format = string.format }
 _G.PROCESSED = 1
 
+-- #84: etc_aliases now fires audit events via the core `audit`
+-- module. Stub with no-op so the unit test stays free of the
+-- core load order; the audit pipeline is covered by the smoke
+-- harness's end-to-end test.
+_G.audit = {
+    build = function( ) return { } end,
+    fire  = function( ) end,
+}
+
 ----------------------------------------------------------------------
 -- minimal test framework
 ----------------------------------------------------------------------
