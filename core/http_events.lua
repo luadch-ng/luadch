@@ -46,9 +46,11 @@ local tostring = use "tostring"
 
 local os = use "os"
 local table = use "table"
+local socket = use "socket"
 
 local os_date         = os.date
 local os_time         = os.time
+local socket_gettime  = socket.gettime
 local table_insert    = table.insert
 local table_remove    = table.remove
 
@@ -290,7 +292,14 @@ local register_waiter = function( handler, since_raw, types_str, wait_seconds, r
         since        = since,
         types_str    = types_str,
         types_filter = _parse_types_filter( types_str ),
-        deadline     = os_time( ) + secs,
+        -- socket.gettime() gives ms-resolution wall clock; os.time()
+        -- returns integer seconds, which on the deadline math meant a
+        -- request arriving at epoch T.99 with wait=2 got deadline =
+        -- floor(T.99)+2 = T+2 and resolved at the very next tick at
+        -- T+2 (elapsed = 1.01s, NOT the requested 2s). Closes the
+        -- "events PR-B long-poll: returned too fast" flake from
+        -- post-merge Windows CI (#332 master run, post #263 PR-B).
+        deadline     = socket_gettime( ) + secs,
         render_fn    = render_fn,
     }
 end
@@ -298,8 +307,10 @@ end
 -- PR-B: called from server.lua's timer loop ~once per second.
 -- Resolves any waiter whose deadline has elapsed with an empty
 -- events array (client picks up the cursor and immediately re-polls).
+-- Uses socket.gettime() to match register_waiter's ms-resolution
+-- deadline (see comment above).
 local tick = function( )
-    local now = os_time( )
+    local now = socket_gettime( )
     for i = #_waiters, 1, -1 do
         local w = _waiters[ i ]
         if w.deadline <= now then
