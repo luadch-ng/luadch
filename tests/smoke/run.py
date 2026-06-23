@@ -8294,17 +8294,21 @@ def test_audit_log_84(staging_dir: Path, proc=None):
     if cursor_baseline is None:
         raise TestFailure(f"missing data.cursor on baseline: {parsed!r}")
 
-    # 1. ADC: +reg nick <nick> <level> via dummy (level 100).
+    # 1. ADC: +reg nick <nick> <level> via dummy (level 100). The
+    # success banner is `[ REG ]--> User regged with ...`; the
+    # etc_hubcommands `[command] +reg ...` echo also contains the
+    # nick but NOT the literal "User regged", so we anchor on that
+    # string to avoid mistaking the echo for the success message
+    # (the same pattern bit the +delreg branch below).
+    def _is_chat(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
     with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
         sid, reader = _adc_login(sock, "dummy", "test")
         sock.sendall(
             f"BMSG {sid} +reg\\snick\\s{nick_adc}\\s20\n".encode("utf-8")
         )
-        # cmd_reg replies with msg_ok + msg_accinfo on success;
-        # both contain the new nick.
         reply = reader.recv_until(
-            lambda f: ( f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ") )
-                      and nick_adc in f,
+            lambda f: _is_chat(f) and "User\\sregged" in f and nick_adc in f,
             timeout=PROTOCOL_TIMEOUT_SEC,
         )
         if not reply:
@@ -8364,13 +8368,19 @@ def test_audit_log_84(staging_dir: Path, proc=None):
             f"HTTP actor.sid expected '<http>', got: {http_event!r}"
         )
 
-    # 4. ADC +delreg removes the first user.
+    # 4. ADC +delreg removes the first user. cmd_delreg syntax is
+    # `+delreg <option> <nick> [<reason>]` where option ∈ {nick, nicku} -
+    # NOT `+delreg <nick>` (that path hits msg_usage). The success
+    # banner is `[ DELREG ]--> User <nick> was delregged by <op>`
+    # so the predicate looks for "delregged" specifically; the
+    # etc_hubcommands `[command] +delreg ...` echo doesn't contain
+    # that word, so we won't mistake it for the actual success.
     with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
         sid, reader = _adc_login(sock, "dummy", "test")
-        sock.sendall(f"BMSG {sid} +delreg\\s{nick_adc}\n".encode("utf-8"))
+        sock.sendall(f"BMSG {sid} +delreg\\snick\\s{nick_adc}\n".encode("utf-8"))
         reply = reader.recv_until(
             lambda f: ( f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ") )
-                      and nick_adc in f,
+                      and "delregged" in f and nick_adc in f,
             timeout=PROTOCOL_TIMEOUT_SEC,
         )
         if not reply:
