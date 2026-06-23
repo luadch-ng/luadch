@@ -261,6 +261,35 @@ local _listener_arg_to_event = function( ltype, a1, a2, a3, a4, a5 )
             message = tostring( a1 or "" ),
         }
     end
+    -- #84: audit events for staff actions. a1 is the canonical
+    -- event table built by core/audit.lua (action / actor /
+    -- target / reason / meta). We flatten the nested actor +
+    -- target shapes into the ringbuffer payload so the existing
+    -- per-string _sanitise pass covers everything in one
+    -- recursion level. `meta` is dropped from the live stream
+    -- to keep the wire size bounded - the disk JSONL (written by
+    -- etc_auditlog.lua) carries the full payload for operators
+    -- who need it. Admin-scope-only filter belongs in the HTTP
+    -- handler (same model as `pm`), see docs/SECURITY.md §X.
+    if ltype == "onAudit" then
+        if type( a1 ) ~= "table" then return nil end
+        local actor  = a1.actor  or { }
+        local target = a1.target or { }
+        return "audit", {
+            action      = tostring( a1.action      or "" ),
+            actor_nick  = tostring( actor.nick     or "" ),
+            actor_level = tonumber( actor.level    ) or 0,
+            actor_sid   = tostring( actor.sid      or "" ),
+            actor_cid   = tostring( actor.cid      or "" ),
+            actor_ip    = tostring( actor.ip       or "" ),
+            target_nick = tostring( target.nick    or "" ),
+            target_sid  = tostring( target.sid     or "" ),
+            target_cid  = tostring( target.cid     or "" ),
+            target_ip   = tostring( target.ip      or "" ),
+            target_level = tonumber( target.level  ) or 0,
+            reason      = tostring( a1.reason      or "" ),
+        }
+    end
     return nil
 end
 

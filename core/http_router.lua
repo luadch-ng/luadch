@@ -1489,22 +1489,28 @@ local function events_get_handler( req )
         return { status = 500, error = { code = "E_INTERNAL",
             message = "http_events.poll not available" } }
     end
-    -- pm-event scope filter: builds a closure that strips pm
-    -- events for non-admin tokens. Used both on the immediate-
-    -- return path AND in the deferred render closure passed
-    -- through to http_events.register_waiter.
+    -- Scope-based event filter: strips `pm` (user content) and
+    -- `audit` (staff-action trail with target IPs / CIDs) from the
+    -- read-scope stream. Admin tokens see everything. Used on
+    -- both the immediate-return path AND the deferred render
+    -- closure passed through to http_events.register_waiter.
+    -- #84: audit events carry target IPs / CIDs and the actor's
+    -- session metadata; gating them admin-only matches the
+    -- plugin trust contract in SECURITY.md §2.
     local is_admin = ( req.token_scope == "admin" )
-    local function filter_pm( rows )
+    local function filter_for_scope( rows )
         if is_admin then return rows end
         local out = { }
         for _, ev in ipairs( rows ) do
-            if ev.type ~= "pm" then out[ #out + 1 ] = ev end
+            if ev.type ~= "pm" and ev.type ~= "audit" then
+                out[ #out + 1 ] = ev
+            end
         end
         return out
     end
 
     local rows, cursor, cursor_lost = events_mod.poll( q.since, q.types )
-    rows = filter_pm( rows )
+    rows = filter_for_scope( rows )
 
     -- Parse wait. Default 0 (immediate). Max 60s per spec.
     local wait_secs = tonumber( q.wait ) or 0
@@ -1533,7 +1539,7 @@ local function events_get_handler( req )
     -- on the deferred path same as the immediate path (§6.5).
     local request_id = req.request_id
     local render_fn = function( final_rows, final_cursor, final_cursor_lost )
-        final_rows = filter_pm( final_rows or { } )
+        final_rows = filter_for_scope( final_rows or { } )
         local data = { events = final_rows, cursor = final_cursor }
         if final_cursor_lost then data.cursor_lost = true end
         local body = json_encode( { ok = true, data = data } )
