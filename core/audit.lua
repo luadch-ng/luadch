@@ -138,6 +138,26 @@ local function _normalize_table( t, max )
     return out
 end
 
+-- Target snapshot: accepts user-object OR flat table OR nil.
+-- Same shape (nick / sid / cid / ip / level) as actor, but flat
+-- tables can also carry plugin-specific keys (e.g. cmd_ban passes
+-- ip in addition to nick - those keys pass through normalize_table).
+local function _snapshot_target( target, max )
+    if target == nil then return nil end
+    -- user-object: nick is a method.
+    if type( target ) == "table" and type( target.nick ) == "function" then
+        return {
+            nick  = tostring( target:nick( )  or "" ),
+            level = tonumber( target:level( ) ) or 0,
+            sid   = tostring( target:sid( )   or "" ),
+            cid   = ( target.cid and tostring( target:cid( ) or "" ) ) or "",
+            ip    = ( target.ip  and tostring( target:ip( )  or "" ) ) or "",
+        }
+    end
+    -- Flat table: pass through normalize_table.
+    return _normalize_table( target, max )
+end
+
 local function build( action, actor, target, reason, meta )
     if type( action ) ~= "string" or action == "" then
         if out_error then
@@ -156,7 +176,7 @@ local function build( action, actor, target, reason, meta )
     return {
         action = action,
         actor  = _snapshot_actor( actor ),
-        target = _normalize_table( target, max_reason ),
+        target = _snapshot_target( target, max_reason ),
         reason = _normalize_str(  reason, max_reason ),
         meta   = _normalize_table( meta,  max_meta ),
     }
