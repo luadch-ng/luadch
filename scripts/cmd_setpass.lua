@@ -237,7 +237,8 @@ onbmsg = function( user, command, parameters )
                             user:reply( msg_ok, hub.getbot() )
                             cfg.saveusers( user_tbl )
                             audit.fire( audit.build( "reg.password.change", user,
-                                { nick = target_nick }, nil, { self_change = true } ) )
+                                { nick = target_nick, level = user_level },
+                                nil, { self_change = true } ) )
                             return PROCESSED
                         end
                     end
@@ -298,7 +299,8 @@ onbmsg = function( user, command, parameters )
                                     user:reply( msg_ok, hub.getbot() )
                                     cfg.saveusers( user_tbl )
                                     audit.fire( audit.build( "reg.password.change", user,
-                                        { nick = target_firstnick }, nil, { self_change = true } ) )
+                                        { nick = target_firstnick, level = user_level },
+                                        nil, { self_change = true } ) )
                                     return PROCESSED
                                 end
                             end

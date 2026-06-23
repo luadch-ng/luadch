@@ -720,8 +720,13 @@ local http_handler_clean_orphan_comments = function( req )
     } }
 end
 
+-- Returns (deleted_count, orphan_comments_removed_count) so the
+-- caller can include the totals in the audit-event meta. Matches
+-- the HTTP twin's response shape (#84 review followup - removes
+-- the ADC-vs-HTTP audit asymmetry).
 local delUsers = function( expired, ghosts, user )
     local tbl_users_level = checkUsers( false, false, false, true )
+    local deleted = 0
     if expired then --> Delete all expired offline users (ghosts excludet)
         local tbl_users_expired = checkUsers( false, true, false )
         for nick, days in vPairs( tbl_users_expired, function( t, a, b ) return t[ b ] < t[ a ] end ) do
@@ -736,6 +741,7 @@ local delUsers = function( expired, ghosts, user )
                 if block then block.del( nick ) end -- remove block if it exists (etc_trafficmanager.tbl)
                 user:reply( utf.format( msg_delreg_expired, nick, days ), hub.getbot() )
                 report.send( report_activate, report_hubbot, report_opchat, report_level, utf.format( msg_delreg_expired, nick, days ) )
+                deleted = deleted + 1
             end
         end
     end
@@ -751,6 +757,7 @@ local delUsers = function( expired, ghosts, user )
                 if block then block.del( nick ) end -- remove block if it exists (etc_trafficmanager.tbl)
                 user:reply( utf.format( msg_delreg_unused, nick, days ), hub.getbot() )
                 report.send( report_activate, report_hubbot, report_opchat, report_level, utf.format( msg_delreg_unused, nick, days ) )
+                deleted = deleted + 1
             end
         end
     end
@@ -763,6 +770,7 @@ local delUsers = function( expired, ghosts, user )
         user:reply( msg, hub.getbot() )
         report.send( report_activate, report_hubbot, report_opchat, report_level, msg )
     end
+    return deleted, removed
 end
 
 local userExceptions = function( add, del, delall, show, user, nick )
@@ -843,13 +851,19 @@ local onbmsg = function( user, command, parameters )
         return PROCESSED
     end
     if ( param == cmd_p4 ) then --> delexpired
-        delUsers( true, false, user )
-        audit.fire( audit.build( "user.cleanup", user, nil, nil, { mode = "delexpired" } ) )
+        local _deleted, _orphans = delUsers( true, false, user )
+        audit.fire( audit.build( "user.cleanup", user, nil, nil,
+            { mode = "delexpired",
+              deleted = _deleted,
+              orphan_comments_removed = _orphans } ) )
         return PROCESSED
     end
     if ( param == cmd_p5 ) then --> delghosts
-        delUsers( false, true, user )
-        audit.fire( audit.build( "user.cleanup", user, nil, nil, { mode = "delghosts" } ) )
+        local _deleted, _orphans = delUsers( false, true, user )
+        audit.fire( audit.build( "user.cleanup", user, nil, nil,
+            { mode = "delghosts",
+              deleted = _deleted,
+              orphan_comments_removed = _orphans } ) )
         return PROCESSED
     end
     if ( param == cmd_p6 ) and nick then --> addexception
