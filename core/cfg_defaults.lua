@@ -2594,7 +2594,7 @@ local defaults = {
     -- audit content is sensitive (target nicks / IPs / CIDs).
     etc_auditlog_dir = { "log/",
         function( value )
-            return types_string( value, nil, true )
+            return types_utf8( value, nil, true )
         end
     },
 
@@ -2602,7 +2602,7 @@ local defaults = {
     -- Default produces log/audit-2026-06-23.jsonl.
     etc_auditlog_prefix = { "audit-",
         function( value )
-            return types_string( value, nil, true )
+            return types_utf8( value, nil, true )
         end
     },
 
