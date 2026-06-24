@@ -83,16 +83,39 @@ _G.util = {
         _saved_table = tbl
         return true
     end,
-    spairs = function( t )
-        local keys = { }
-        for k in pairs( t ) do keys[ #keys + 1 ] = k end
-        table.sort( keys )
-        local i = 0
-        return function( )
-            i = i + 1
-            if keys[ i ] then return keys[ i ], t[ keys[ i ] ] end
+    -- REAL util.spairs impl from core/util.lua (intentional copy:
+    -- the test must exercise the same mutate-orderedIndex behaviour
+    -- so the R1 regression test catches early-return leaks). The
+    -- only difference from the core impl is the `k ~= "orderedIndex"`
+    -- guard in genOrderedIndex to avoid recursive re-indexing if a
+    -- prior leak left the field in place (same as core does in #266
+    -- variants but written explicitly here so the test stays
+    -- self-contained).
+    spairs = ( function( )
+        local function genOrderedIndex( tbl )
+            local idx = { }
+            for k in pairs( tbl ) do
+                if k ~= "orderedIndex" then idx[ #idx + 1 ] = k end
+            end
+            table.sort( idx )
+            return idx
         end
-    end,
+        local function orderedNext( tbl, state )
+            local key
+            if state == nil then
+                tbl.orderedIndex = genOrderedIndex( tbl )
+                key = tbl.orderedIndex[ 1 ]
+            else
+                for i = 1, #tbl.orderedIndex do
+                    if tbl.orderedIndex[ i ] == state then key = tbl.orderedIndex[ i + 1 ] end
+                end
+            end
+            if key then return key, tbl[ key ] end
+            tbl.orderedIndex = nil
+            return
+        end
+        return function( tbl ) return orderedNext, tbl, nil end
+    end )( ),
     strip_control_bytes = function( s ) return s end,
 }
 _G.utf = { match = string.match, format = string.format }
@@ -303,6 +326,29 @@ do
     -- supported by core/audit.lua's _snapshot_actor); the test stub
     -- just forwards the raw value so we assert the string directly.
     eq( "check covered level: audit actor", _audit_fired[ 1 ].actor,        "etc_clientblocker" )
+end
+
+----------------------------------------------------------------------
+-- 10b. check_clients does NOT leak util.spairs `orderedIndex` field
+--      into patterns_tbl after the kick early-returns. Regression
+--      test for the security review R1 finding. The pre-fix code
+--      ran `util_spairs(patterns_tbl)` and `return PROCESSED` mid-
+--      iteration, leaving the internal `orderedIndex` array
+--      attached to patterns_tbl. The test stub's util.spairs IS
+--      the real impl (lifted from core/util.lua) so the leak is
+--      observable here.
+----------------------------------------------------------------------
+
+do
+    -- patterns_tbl currently has "AirDC%+%+%s2" (from test 10). A
+    -- match + kick triggers the early-return; we then assert the
+    -- internal util.spairs `orderedIndex` artifact did NOT leak
+    -- through. Pre-fix code used `util_spairs(patterns_tbl)` +
+    -- `return PROCESSED` mid-iteration, which leaked. The fix
+    -- snapshot+sort+ipairs sidesteps it.
+    local user, _killed_of = fresh_user{ level = 20, version = "AirDC++ 2.5.0" }
+    _registered.onConnect( user )
+    eq( "orderedIndex leak: not present", plugin.get_patterns_tbl( ).orderedIndex, nil )
 end
 
 ----------------------------------------------------------------------

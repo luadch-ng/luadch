@@ -238,12 +238,25 @@ local check_clients = function( user )
     if not version or version == "" then return end
 
     local user_client = hub_escapefrom( version )
-    -- spairs (sorted) for deterministic actor-attribution + match
-    -- reason on collision. Two patterns matching the same VE would
-    -- otherwise pick a hash-order dependent reason - confusing in
-    -- audit logs. Cost is a sort over the pattern table on each
-    -- onConnect; operator pattern tables stay tiny so negligible.
-    for pattern, reason in util_spairs( patterns_tbl ) do
+    -- Snapshot keys into a sorted local array BEFORE iterating
+    -- rather than `util_spairs(patterns_tbl)`. Sorted-pairs gives
+    -- deterministic actor-attribution + match-reason on collision
+    -- (two patterns matching the same VE would otherwise pick a
+    -- hash-order dependent reason - confusing in audit logs),
+    -- but `util.spairs` stashes an internal `orderedIndex` array
+    -- on the iterated table and only clears it on iterator
+    -- exhaustion. The `return PROCESSED` below would leave that
+    -- artifact attached to patterns_tbl, contaminating the next
+    -- persist() / GET /v1/clientblocker / +blocker output. The
+    -- snapshot-then-ipairs form sidesteps the leak without
+    -- changing the externally-visible ordering.
+    local ordered = { }
+    for pat in pairs( patterns_tbl ) do
+        ordered[ #ordered + 1 ] = pat
+    end
+    table.sort( ordered )
+    for _, pattern in ipairs( ordered ) do
+        local reason = patterns_tbl[ pattern ]
         local ok, hit = pcall( string_find, user_client, pattern )
         if ok and hit then
             -- System actor: audit.lua's _snapshot_actor turns a
