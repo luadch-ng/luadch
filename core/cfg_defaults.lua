@@ -2664,6 +2664,7 @@ local defaults = {
         [ 30 ]  = true,
         [ 40 ]  = true,
         [ 50 ]  = true,
+        [ 55 ]  = false,
         [ 60 ]  = false,
         [ 70 ]  = false,
         [ 80 ]  = false,
@@ -2704,6 +2705,39 @@ local defaults = {
                 and value % 1 == 0
                 and value >= 1
                 and value <= 4096
+        end
+    },
+
+    -- Operator-chat report on every kick. When true, the plugin
+    -- fires etc_report.send with a human-readable banner (nick,
+    -- IP, version, matched pattern) so staff see kicks in chat
+    -- without tailing the audit log. Defaults match sibling
+    -- plugins (etc_aliases / etc_msgmanager): opchat ON, hubbot
+    -- OFF.
+    etc_clientblocker_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    etc_clientblocker_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    etc_clientblocker_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Minimum level required to receive the hubbot-PM report (only
+    -- consulted when etc_clientblocker_report_hubbot=true). Mirrors
+    -- the etc_report.send signature used across bundled plugins.
+    etc_clientblocker_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
         end
     },
 

@@ -573,6 +573,35 @@ All other Lua-pattern punctuation (`%`, `+`, `.`, `(`, `)`,
 version}` so post-mortem can reconstruct which rule fired and what
 the offending VE actually was.
 
+**Op-chat / hubbot report on kick.** When
+`etc_clientblocker_report=true` (default) the plugin fires
+`etc_report.send` with a human-readable banner
+`[ CLIENT BLOCKER ]--> The user <nick> with IP <ip> is running
+<version> and is not allowed in this hub. Matching pattern: <pat>`
+so staff see kicks live in op-chat without tailing the audit log.
+The audit log carries the same fields structured for forensics;
+the report is for operational awareness. Sub-toggles
+`etc_clientblocker_report_opchat` (default true) and
+`etc_clientblocker_report_hubbot` (default false) match the
+sibling-plugin convention.
+
+**Default blocklist** (`scripts/data/etc_clientblocker.tbl`):
+ships with 6 well-known cheat/mod clients pre-blocked
+(`CleanDC++`, `RSX++`, `CrZ++`, `SmVDC++`, `DC@fe++`,
+`FearDC`). These are universally-malicious clients across DC
+hubs - operators almost never want them. Remove individual
+entries via `+delblocker <pattern>` or edit the .tbl directly
+and `+reload`.
+
+**Extended example list** (`examples/data/etc_clientblocker.tbl.example`):
+~40 additional patterns curated by Sopor over years of hub
+operation - blocks outdated stable releases of DC++ (0.0xx-0.8xx),
+AirDC++ (1.0-4.29 + Web Client 0.x-2.14b + nano), EiskaltDC++ (<2.4.1),
+ApexDC++ (<1.6.4), ncdc (<1.18), Jucy (<0.86), plus legacy mods
+(StrgDC++, IceDC++, PDC++, PWDC++). Copy this file to
+`scripts/data/etc_clientblocker.tbl` and `+reload` to adopt the
+broader policy.
+
 **HTTP API:**
 - `GET /v1/clientblocker` (read scope) - list patterns
 - `POST /v1/clientblocker` (admin scope) - add pattern; body
@@ -587,9 +616,13 @@ applies" semantic for any other missing input.
 
 **Config:** `etc_clientblocker_oplevel` (write floor for the ADC
 cmd; default 80), `etc_clientblocker_check_levels` (per-level
-boolean table), `etc_clientblocker_default_reason`
+boolean table; level 55 (SBOT) + 60/70/80 exempt by default),
+`etc_clientblocker_default_reason`
 (`"Your client is not allowed"`),
-`etc_clientblocker_max_pattern_len` (200).
+`etc_clientblocker_max_pattern_len` (200),
+`etc_clientblocker_report` (true), `etc_clientblocker_report_opchat`
+(true), `etc_clientblocker_report_hubbot` (false),
+`etc_clientblocker_llevel` (60).
 
 ### etc_keyprint
 

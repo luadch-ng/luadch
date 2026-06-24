@@ -74,6 +74,11 @@ local check_levels    = cfg.get( "etc_clientblocker_check_levels" ) or { }
 local default_reason  = cfg.get( "etc_clientblocker_default_reason" )
 local max_pattern_len = cfg.get( "etc_clientblocker_max_pattern_len" ) or 200
 
+local report_activate = cfg.get( "etc_clientblocker_report" )
+local report_hubbot   = cfg.get( "etc_clientblocker_report_hubbot" )
+local report_opchat   = cfg.get( "etc_clientblocker_report_opchat" )
+local report_llevel   = cfg.get( "etc_clientblocker_llevel" )
+
 local report = hub.import( "etc_report" )
 
 
@@ -125,6 +130,7 @@ local msg_list_header        = lang.msg_list_header        or "\n=== CLIENT BLOC
 local msg_list_footer        = lang.msg_list_footer        or "=== END ===\n"
 local msg_list_empty         = lang.msg_list_empty         or "(no patterns configured)"
 local msg_err                = lang.msg_err                or "etc_clientblocker.lua: error: database file (scripts/data/etc_clientblocker.tbl) corrupt or missing, a new one was created."
+local msg_report             = lang.msg_report             or "[ CLIENT BLOCKER ]--> The user %s with IP %s is running %s and is not allowed in this hub. Matching pattern: %s"
 
 
 ----------
@@ -266,6 +272,17 @@ local check_clients = function( user )
             audit.fire( audit.build( "client.block.kick",
                 scriptname, user, reason,
                 { pattern = pattern, version = version } ) )
+            -- Human-readable opchat / hubbot report. The audit log
+            -- carries the same fields in structured form for
+            -- compliance / forensics; this banner is for live
+            -- staff awareness. Imported from Sopor v0.4.
+            if report then
+                local user_ip = user:ip( ) or "?"
+                local rmsg = utf_format( msg_report,
+                    user:nick( ) or "?", user_ip, version, pattern )
+                report.send( report_activate, report_hubbot, report_opchat,
+                    report_llevel, rmsg )
+            end
             user:kill( "ISTA 231 " .. hub_escapeto( reason ) .. " TL-1\n" )
             return PROCESSED
         end

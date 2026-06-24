@@ -23,6 +23,7 @@ local _registered = { onStart = nil, onConnect = nil, hub = { }, http = { } }
 local _saved_table = nil
 local _next_loaded = nil
 local _audit_fired = { }
+local _reports_sent = { }
 
 local stub_hub = {
     setlistener = function( event, opts, fn )
@@ -41,7 +42,16 @@ local stub_hub = {
                 list = function( ) return { } end,
             }
         end
-        if name == "etc_report"        then return nil end
+        if name == "etc_report" then
+            return {
+                send = function( activate, hubbot, opchat, llevel, msg )
+                    _reports_sent[ #_reports_sent + 1 ] = {
+                        activate = activate, hubbot = hubbot, opchat = opchat,
+                        llevel = llevel, msg = msg,
+                    }
+                end,
+            }
+        end
         if name == "etc_usercommands"  then return nil end
         if name == "cmd_help"          then return nil end
         if name == "bot_opchat"        then return nil end
@@ -65,10 +75,15 @@ _G.cfg = {
             return {
                 [ 0 ]   = true,  [ 10 ]  = true,  [ 20 ]  = true,
                 [ 30 ]  = true,  [ 40 ]  = true,  [ 50 ]  = true,
+                [ 55 ]  = false,
                 [ 60 ]  = false, [ 70 ]  = false, [ 80 ]  = false,
                 [ 100 ] = true,
             }
         end
+        if key == "etc_clientblocker_report"        then return true  end
+        if key == "etc_clientblocker_report_hubbot" then return false end
+        if key == "etc_clientblocker_report_opchat" then return true  end
+        if key == "etc_clientblocker_llevel"        then return 60    end
         return nil
     end,
     loadlanguage = function( ) return { }, nil end,
@@ -169,6 +184,7 @@ local function fresh_user( opts )
     return {
         level   = function( ) return opts.level   or 20 end,
         nick    = function( ) return opts.nick    or "tester" end,
+        ip      = function( ) return opts.ip      or "1.2.3.4" end,
         version = function( ) return opts.version end,
         reply   = function( _, msg, _ ) replied = msg end,
         kill    = function( _, msg )    killed  = msg end,
@@ -315,6 +331,7 @@ do
     -- #_audit_fired).
     POST{ body = { pattern = "AirDC%+%+%s2", reason = "old AirDC" }, token_label = "alice" }
     _audit_fired = { }
+    _reports_sent = { }
     local user, killed_of = fresh_user{ level = 20, version = "AirDC++ 2.5.0" }
     local r = _registered.onConnect( user )
     eq( "check covered level: PROCESSED", r,            1 )
@@ -326,6 +343,30 @@ do
     -- supported by core/audit.lua's _snapshot_actor); the test stub
     -- just forwards the raw value so we assert the string directly.
     eq( "check covered level: audit actor", _audit_fired[ 1 ].actor,        "etc_clientblocker" )
+    -- Opchat report fires too (Sopor-imported v0.10 feature).
+    eq( "check covered level: report fired",   #_reports_sent,              1 )
+    eq( "check covered level: report opchat",  _reports_sent[ 1 ].opchat,   true )
+    eq( "check covered level: report hubbot",  _reports_sent[ 1 ].hubbot,   false )
+    eq( "check covered level: report contains nick",    ( _reports_sent[ 1 ].msg or "" ):find( "tester", 1, true ) ~= nil, true )
+    eq( "check covered level: report contains pattern", ( _reports_sent[ 1 ].msg or "" ):find( "AirDC%+%+%s2", 1, true ) ~= nil, true )
+end
+
+----------------------------------------------------------------------
+-- 10c. check_clients level-exempt path does NOT fire the report
+--      (SBOT level 55 is exempt by default - added in the Sopor
+--      import). Regression for the "report fires even on exempt
+--      level" hazard.
+----------------------------------------------------------------------
+
+do
+    _reports_sent = { }
+    _audit_fired = { }
+    local user, killed_of = fresh_user{ level = 55, version = "AirDC++ 2.5.0" }
+    local r = _registered.onConnect( user )
+    eq( "SBOT exempt: returns nil",  r,            nil )
+    eq( "SBOT exempt: no kill",      killed_of( ), nil )
+    eq( "SBOT exempt: no report",    #_reports_sent, 0 )
+    eq( "SBOT exempt: no audit",     #_audit_fired,  0 )
 end
 
 ----------------------------------------------------------------------
