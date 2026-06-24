@@ -3,11 +3,13 @@ name: Docker
 # Triggers:
 #   - tag push v* (real release, publishes vX.Y.Z + vX.Y + latest)
 #   - push to master (publishes :master moving tag for testing)
+#   - push to dev (publishes :dev moving tag for operator testhubs to
+#     try the next-merge candidate before it lands on master)
 #   - PR (build-only, no push) so PRs that touch the Dockerfile or
 #     entrypoint can fail fast in CI before merge
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
     tags: ['v*']
   pull_request:
     paths:
@@ -67,6 +69,8 @@ jobs:
       # Tag policy:
       #   - tag v3.1.4    -> :v3.1.4, :v3.1, :v3, :latest
       #   - master push   -> :master   (moving, for early testers)
+      #   - dev push      -> :dev      (moving, for operator testhubs;
+      #                                  next-merge candidate)
       #   - PR / dispatch -> :pr-<n>   (build-only, no push)
       - name: Compute image tags + labels
         id: meta
