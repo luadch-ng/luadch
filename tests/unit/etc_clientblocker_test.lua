@@ -388,6 +388,28 @@ do
 end
 
 ----------------------------------------------------------------------
+-- 10e. examples/data/etc_clientblocker.tbl.example AirDC++ fork
+--      catchall: `^AirDC%+%+[^%snw]` must MATCH unauthorised forks
+--      (any AP-suffix that is not "w" / "n" / whitespace) and must
+--      NOT match the three legitimate AirDC++ flavours (plain, Web,
+--      nano).
+----------------------------------------------------------------------
+
+do
+    local pat = "^AirDC%+%+[^%snw]"
+    -- Legitimate (must NOT match):
+    eq( "fork catchall: plain AirDC++ legit", ( "AirDC++ 4.30" ):find( pat ) ~= nil, false )
+    eq( "fork catchall: AirDC++w legit",      ( "AirDC++w 2.14.0" ):find( pat ) ~= nil, false )
+    eq( "fork catchall: AirDC++n legit",      ( "AirDC++n 1.2" ):find( pat ) ~= nil, false )
+    -- Forks (MUST match):
+    eq( "fork catchall: AirDC++Q",       ( "AirDC++Q 1.0" ):find( pat ) ~= nil, true )
+    eq( "fork catchall: AirDC++X",       ( "AirDC++X 0.99" ):find( pat ) ~= nil, true )
+    eq( "fork catchall: AirDC++3",       ( "AirDC++3 0.5" ):find( pat ) ~= nil, true )
+    eq( "fork catchall: AirDC++Z-mod",   ( "AirDC++Z-mod 2.0" ):find( pat ) ~= nil, true )
+    eq( "fork catchall: AirDC++pirate",  ( "AirDC++pirate 1.0" ):find( pat ) ~= nil, true )
+end
+
+----------------------------------------------------------------------
 -- 10b. check_clients does NOT leak util.spairs `orderedIndex` field
 --      into patterns_tbl after the kick early-returns. Regression
 --      test for the security review R1 finding. The pre-fix code

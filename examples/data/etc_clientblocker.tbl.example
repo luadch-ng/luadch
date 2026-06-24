@@ -85,6 +85,17 @@ patterns = {
     -- but reads as if it were a character class).
     [ "^AirDC%+%+n%s.-" ] = "AirDC++ nano is outdated. Please switch to AirDC++ Web Client and reconnect!",
 
+    -- AirDC++ unauthorized forks. Real AirDC++ has only three known
+    -- AP-suffix forms: no suffix (plain "AirDC++ X.YY"), "w" for the
+    -- Web Client, "n" for nano. Anything else - "AirDC++Q", "AirDC++3",
+    -- "AirDC++pirate", random one-off forks operators in the wild have
+    -- spotted - is by definition modified / unauthorised. The character
+    -- class `[^%snw]` matches anything that is NOT whitespace AND NOT
+    -- "n" AND NOT "w", which is the cleanest negative-list approach.
+    -- Verified to leave all three legitimate AirDC++ flavours alone
+    -- (see tests/unit/etc_clientblocker_test.lua "fork catchall" cases).
+    [ "^AirDC%+%+[^%snw]" ] = "Modified / unauthorised AirDC++ fork is not allowed in this hub. Please download the official AirDC++ from https://airdcpp.net",
+
     -- ApexDC++ 0.x.x - 1.5.9
     [ "^ApexDC%+%+%s[0-1]%.[0-5]%.[0-9]$" ] = "You are using an old version of ApexDC++. Please update and reconnect!",
     -- ApexDC++ 1.5.10 - 1.5.14
