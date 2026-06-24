@@ -164,6 +164,7 @@ onbmsg = function( user, command, parameters )
                 -- redirect echo first).
                 user:reply( utf.format( msg_redirect, t_nick, clean_url ), hub.getbot() )
                 report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report_str )
+                audit.fire( audit.build( "user.redirect", user, target, nil, { url = clean_url } ) )
                 return PROCESSED
             else
                 user:reply( msg_isbot, hub.getbot() )
@@ -208,6 +209,8 @@ local http_handler_redirect = function( req, target )
     -- report directly so an opchat watcher sees a consistent line
     -- regardless of which surface drove the redirect.
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report_str )
+    audit.fire( audit.build( "user.redirect",
+        { nick = actor_label, sid = "<http>" }, target, nil, { url = clean_url } ) )
     return { url = clean_url }
 end
 

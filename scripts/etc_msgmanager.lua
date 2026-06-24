@@ -315,6 +315,8 @@ onbmsg = function( user, command, parameters )
                     user:reply( msg, hub.getbot() )
                     msg = utf.format( msg_report_block, user_nick, target_nick, msg_mode_main )
                     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+                    audit.fire( audit.build( "msgmanager.block", user,
+                        { nick = target_firstnick }, nil, { mode = "main" } ) )
                     return PROCESSED
                 else
                     user:reply( msg_stillblocked, hub.getbot() )
@@ -349,6 +351,8 @@ onbmsg = function( user, command, parameters )
                     user:reply( msg, hub.getbot() )
                     msg = utf.format( msg_report_block, user_nick, target_nick, msg_mode_pm )
                     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+                    audit.fire( audit.build( "msgmanager.block", user,
+                        { nick = target_firstnick }, nil, { mode = "pm" } ) )
                     return PROCESSED
                 else
                     user:reply( msg_stillblocked, hub.getbot() )
@@ -383,6 +387,8 @@ onbmsg = function( user, command, parameters )
                     user:reply( msg, hub.getbot() )
                     msg = utf.format( msg_report_block, user_nick, target_nick, msg_mode_both )
                     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+                    audit.fire( audit.build( "msgmanager.block", user,
+                        { nick = target_firstnick }, nil, { mode = "both" } ) )
                     return PROCESSED
                 else
                     user:reply( msg_stillblocked, hub.getbot() )
@@ -419,6 +425,8 @@ onbmsg = function( user, command, parameters )
                 user:reply( msg, hub.getbot() )
                 msg = utf.format( msg_report_unblock, user_nick, target_nick )
                 report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+                audit.fire( audit.build( "msgmanager.unblock", user,
+                    { nick = target_firstnick }, nil, nil ) )
                 return PROCESSED
             else
                 user:reply( msg_notfound, hub.getbot() )
@@ -585,6 +593,10 @@ local http_handler_block_user = function( req )
     end
     block_tbl[ nick ] = letter
     util.savetable( block_tbl, "block_tbl", block_file )
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    audit.fire( audit.build( "msgmanager.block",
+        { nick = actor_label, sid = "<http>" },
+        { nick = nick }, nil, { mode = mode } ) )
     return { status = 200, data = {
         action = "blocked",
         nick   = nick,
@@ -628,6 +640,11 @@ local http_handler_unblock_user = function( req )
     end
     block_tbl[ nick ] = nil
     util.savetable( block_tbl, "block_tbl", block_file )
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    audit.fire( audit.build( "msgmanager.unblock",
+        { nick = actor_label, sid = "<http>" },
+        { nick = nick }, nil,
+        { previous_mode = _http_letter_to_mode[ letter ] or letter } ) )
     return { status = 200, data = {
         action        = "unblocked",
         nick          = nick,

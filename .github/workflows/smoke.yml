@@ -114,6 +114,11 @@ jobs:
       - name: Run etc_aliases unit test
         run: lua5.4 tests/unit/etc_aliases_test.lua
 
+      # #84 audit: event-shape contract + actor / target snapshot +
+      # reason / meta normalization. Pure helper, no hub state needed.
+      - name: Run audit unit test
+        run: lua5.4 tests/unit/audit_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -206,6 +211,10 @@ jobs:
       - name: Run etc_aliases unit test
         shell: msys2 {0}
         run: lua tests/unit/etc_aliases_test.lua
+
+      - name: Run audit unit test
+        shell: msys2 {0}
+        run: lua tests/unit/audit_test.lua
 
       - name: Configure
         shell: msys2 {0}

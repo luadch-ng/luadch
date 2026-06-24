@@ -270,6 +270,9 @@ onbmsg = function( user, command, parameters )
                     description_check( newnick, user_firstnick )
                     local msg = utf.format( msg_op, user_firstnick, newnick )
                     report.send( report_activate, report_hubbot, report_opchat, oplevel, msg )
+                    audit.fire( audit.build( "reg.nickchange", user,
+                        { nick = newnick }, nil,
+                        { previous_nick = user_firstnick, self_change = true } ) )
                     return PROCESSED
                 end
             end
@@ -332,6 +335,9 @@ onbmsg = function( user, command, parameters )
                     description_check( newnickfrom, oldnickfrom )
                     local msg = utf.format( msg_op2, user_firstnick, oldnickfrom, newnickfrom )
                     report.send( report_activate, report_hubbot, report_opchat, oplevel, msg )
+                    audit.fire( audit.build( "reg.nickchange", user,
+                        { nick = newnickfrom }, nil,
+                        { previous_nick = oldnickfrom, self_change = false } ) )
                     return PROCESSED
                 end
             end
@@ -388,6 +394,9 @@ onbmsg = function( user, command, parameters )
                     description_check( newnickfrom, target_firstnick )
                     local msg = utf.format( msg_op2, user_firstnick, target_firstnick, newnickfrom )
                     report.send( report_activate, report_hubbot, report_opchat, oplevel, msg )
+                    audit.fire( audit.build( "reg.nickchange", user,
+                        { nick = newnickfrom }, nil,
+                        { previous_nick = target_firstnick, self_change = false } ) )
                     return PROCESSED
                 end
             end
@@ -503,6 +512,10 @@ local http_handler_set_nick = function( req )
     local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
     local msg = utf.format( msg_op2, actor_label, old_nick, new_nick )
     report.send( report_activate, report_hubbot, report_opchat, oplevel, msg )
+    audit.fire( audit.build( "reg.nickchange",
+        { nick = actor_label, sid = "<http>" },
+        { nick = new_nick }, nil,
+        { previous_nick = old_nick, self_change = false } ) )
 
     return { status = 200, data = {
         action        = "nick-changed",

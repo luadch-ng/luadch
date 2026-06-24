@@ -1,0 +1,23 @@
+return {
+
+    help_title = "etc_auditlog.lua",
+    help_usage = "[+!#]auditlog show",
+    help_desc  = "Zeigt das Audit-Log (heutige Datei).",
+
+    msg_denied = "Du darfst diesen Befehl nicht benutzen.",
+    msg_nofile = "Heute liegen noch keine Audit-Log-Eintraege vor.",
+    msg_usage  = "Benutzung: [+!#]auditlog show",
+
+    msg_out = [[
+
+
+=== AUDIT LOG (heute) ====================================================================================
+
+%s
+==================================================================================== AUDIT LOG (heute) ===
+
+      ]],
+
+    ucmd_menu = { "Hub", "Logs", "anzeigen", "audit.log (heute)" },
+
+}

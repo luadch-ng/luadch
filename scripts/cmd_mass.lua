@@ -256,6 +256,7 @@ onbmsg = function( user, command, param )
             return PROCESSED
         end
         do_announce_all( msg, user_nick )
+        audit.fire( audit.build( "hub.announce.all", user, nil, msg, nil ) )
         return PROCESSED
     end
     --// masslvl
@@ -275,9 +276,11 @@ onbmsg = function( user, command, param )
             user:reply( txt, hub_getbot )
             return PROCESSED
         end
-        do_announce_level( msg, user_nick, lvl )
+        local sent = do_announce_level( msg, user_nick, lvl )
         local levelname = cfg_get( "levels" )[ lvl ] or "UNREG"
         user:reply( msg_ok .. lvl .. " [ " .. levelname .. " ]", hub_getbot )
+        audit.fire( audit.build( "hub.announce.level", user, nil, msg,
+            { level = lvl, recipients = sent } ) )
         return PROCESSED
     end
     --// masshub
@@ -292,6 +295,7 @@ onbmsg = function( user, command, param )
             return PROCESSED
         end
         do_announce_hub( msg )
+        audit.fire( audit.build( "hub.announce.hub", user, nil, msg, nil ) )
         return PROCESSED
     end
 end
@@ -344,10 +348,13 @@ local http_handler_announce = function( req )
         sender  = sender,
     }
 
+    local actor_for_audit = { nick = sender, sid = "<http>" }
     if scope == "all" then
         do_announce_all( clean_msg, sender )
+        audit.fire( audit.build( "hub.announce.all", actor_for_audit, nil, clean_msg, nil ) )
     elseif scope == "hub" then
         do_announce_hub( clean_msg )
+        audit.fire( audit.build( "hub.announce.hub", actor_for_audit, nil, clean_msg, nil ) )
     else    -- scope == "level"
         local lvl = body.level
         if type( lvl ) ~= "number" or lvl % 1 ~= 0 then
@@ -361,6 +368,8 @@ local http_handler_announce = function( req )
         local recipients = do_announce_level( clean_msg, sender, lvl )
         data.level = lvl
         data.recipients = recipients
+        audit.fire( audit.build( "hub.announce.level", actor_for_audit, nil, clean_msg,
+            { level = lvl, recipients = recipients } ) )
     end
 
     return { status = 200, data = data }

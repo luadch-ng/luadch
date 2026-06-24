@@ -147,13 +147,17 @@ local ontopic = function( user, command, parameters )
         return PROCESSED
     end
     local msg
+    local action_name = "hub.topic.set"
     if topic == "default" then
         msg = do_reset_topic( user_nick )
+        action_name = "hub.topic.reset"
     else
         msg = do_set_topic( topic, user_nick )
     end
     user:reply( msg, hub_getbot )
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+    audit.fire( audit.build( action_name, user, nil, nil,
+        ( topic ~= "default" and { topic = topic } or nil ) ) )
     return PROCESSED
 end
 
@@ -178,10 +182,12 @@ local http_handler_topic = function( req )
     local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
     local previous = topic_tbl[ new ] or default_topic
     local msg, action, new_topic
+    local audit_action_name = "hub.topic.set"
     if not topic or topic == "" then
         msg = do_reset_topic( actor_label )
         action = "topic-reset"
         new_topic = default_topic
+        audit_action_name = "hub.topic.reset"
     else
         local clean_topic = util.strip_control_bytes( topic )
         msg = do_set_topic( clean_topic, actor_label )
@@ -189,6 +195,9 @@ local http_handler_topic = function( req )
         new_topic = clean_topic
     end
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+    audit.fire( audit.build( audit_action_name,
+        { nick = actor_label, sid = "<http>" }, nil, nil,
+        ( audit_action_name == "hub.topic.set" and { topic = new_topic } or nil ) ) )
     return { status = 200, data = {
         action   = action,
         topic    = new_topic,

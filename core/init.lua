@@ -102,6 +102,13 @@ _core = {    -- luadch core, order is important
     -- HTTP API list endpoints (#264). Loaded after util_http for
     -- symmetry; pure-Lua, no runtime dependency on hub state.
     "http_filter",
+    -- core/audit.lua (#84): canonical audit-event builder + fire
+    -- helper. Loaded BEFORE scripts so the module is in _G when
+    -- the plugin sandbox iterates the whitelist (admin plugins
+    -- call `audit.fire(audit.build(...))`). Late-binds scripts +
+    -- cfg + out via `use` at first call to avoid a load-order
+    -- cycle with scripts.lua.
+    "audit",
     -- core/http_client.lua: non-blocking OUTBOUND HTTP(S) client for
     -- plugins (hublist announce, webhooks). Loaded after server is
     -- available (it lazy-`use`s server.addtimer) and BEFORE scripts

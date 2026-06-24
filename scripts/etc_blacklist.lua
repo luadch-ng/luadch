@@ -144,6 +144,8 @@ local onbmsg = function( user, adccmd, parameters )
                 blacklist_tbl[ param2 ] = nil
                 util_savetable( blacklist_tbl, "blacklist_tbl", blacklist_file )
                 user:reply( msg_04 .. param2, hub_getbot )
+                audit.fire( audit.build( "blacklist.remove", user,
+                    { nick = param2 }, nil, nil ) )
                 return PROCESSED
             else
                 user:reply( msg_05, hub_getbot )
@@ -278,6 +280,11 @@ local http_handler_delete_blacklist_entry = function( req )
     end
     blacklist_tbl[ nick ] = nil
     util_savetable( blacklist_tbl, "blacklist_tbl", blacklist_file )
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    audit.fire( audit.build( "blacklist.remove",
+        { nick = actor_label, sid = "<http>" },
+        { nick = nick }, nil,
+        { previous_reason = ( entry and entry.tReason ) or nil } ) )
     return { status = 200, data = {
         action = "blacklist-removed",
         nick   = nick,

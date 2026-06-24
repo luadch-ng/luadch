@@ -268,6 +268,11 @@ local onbmsg = function( user, command, parameters )
     end
     in_progress = true
     local comment = utf.match( parameters, "^(.*)" )
+    -- Fire BEFORE do_shutdown arms the exit timer (process gone
+    -- afterwards; the audit listener cannot consume queued events).
+    audit.fire( audit.build( "hub.shutdown", user, nil,
+        ( comment and comment ~= "" and comment or nil ),
+        { countdown = not not toggle_countdown } ) )
     do_shutdown( comment )
     if not toggle_countdown then
         user:reply( msg_ok, hub.getbot() )
@@ -295,6 +300,12 @@ local http_handler_shutdown = function( req )
     end
     in_progress = true
     local message = ( req.body and req.body.message ) or ""
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    -- Fire BEFORE do_shutdown (see ADC-path rationale above).
+    audit.fire( audit.build( "hub.shutdown",
+        { nick = actor_label, sid = "<http>" }, nil,
+        ( message ~= "" and util.strip_control_bytes( message ) or nil ),
+        { countdown = not not toggle_countdown } ) )
     do_shutdown( message )
     local clean_message = util.strip_control_bytes( message )
     return { status = 200, data = {

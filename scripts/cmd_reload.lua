@@ -76,6 +76,10 @@ local onbmsg = function( user, command )
         user:reply( msg_denied, hub_getbot )
         return PROCESSED
     end
+    -- Fire BEFORE the destructive call: hub_restartscripts() unloads
+    -- every plugin (including the audit-log writer), so an
+    -- audit.fire after the call would have no listener subscribed.
+    audit.fire( audit.build( "hub.reload", user, nil, nil, nil ) )
     hub_reloadcfg()
     hub_restartscripts()
     user:reply( msg_ok, hub.getbot() )
@@ -103,6 +107,10 @@ end
 -- Lua semantics, so the response generation after the call
 -- proceeds normally on the existing socket.
 local http_handler_reload = function( req )
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    -- Fire BEFORE the destructive call (see ADC-path rationale above).
+    audit.fire( audit.build( "hub.reload",
+        { nick = actor_label, sid = "<http>" }, nil, nil, nil ) )
     hub_reloadcfg()
     hub_restartscripts()
     return { status = 200, data = {
