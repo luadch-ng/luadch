@@ -370,6 +370,24 @@ do
 end
 
 ----------------------------------------------------------------------
+-- 10d. examples/data/etc_clientblocker.tbl.example Sopor-isms:
+--      `%w` was normalised to literal `w` because Lua's `%w` matches
+--      ANY word char (the original pattern silently over-blocked any
+--      "AirDC++X 0.5" not just "AirDC++w 0.5"). `%n` is left as-is
+--      (Lua 5.4 treats `%X` for non-class X as literal X). The two
+--      assertions below are regression tests per CLAUDE.md §1a.7:
+--      they would FAIL on the original Sopor pattern `^AirDC%+%+%w%s`
+--      because the over-permissive class would let "AirDC++Q 0.5"
+--      match, and they PASS on the normalised `^AirDC%+%+w%s`.
+----------------------------------------------------------------------
+
+do
+    local pat = "^AirDC%+%+w%s"
+    eq( "%w->w fix: AirDC++w 0.5 matches", ( "AirDC++w 0.5" ):find( pat ) ~= nil, true )
+    eq( "%w->w fix: AirDC++Q 0.5 does NOT match", ( "AirDC++Q 0.5" ):find( pat ) ~= nil, false )
+end
+
+----------------------------------------------------------------------
 -- 10b. check_clients does NOT leak util.spairs `orderedIndex` field
 --      into patterns_tbl after the kick early-returns. Regression
 --      test for the security review R1 finding. The pre-fix code

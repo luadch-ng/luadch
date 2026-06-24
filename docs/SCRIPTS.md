@@ -585,6 +585,14 @@ the report is for operational awareness. Sub-toggles
 `etc_clientblocker_report_hubbot` (default false) match the
 sibling-plugin convention.
 
+Flood-control note: the report fires synchronously on every kick.
+Op-chat flood protection relies on the upstream per-IP / per-CID
+connect rate-limit in `core/ratelimit.lua` (Phase 7); a determined
+attacker who throttles connections below the limit can sustain
+~1 kick/sec/IP. If your hub sees this and op-chat noise becomes
+unmanageable, flip `etc_clientblocker_report=false` and rely on
+the audit log alone.
+
 **Default blocklist** (`scripts/data/etc_clientblocker.tbl`):
 ships with 6 well-known cheat/mod clients pre-blocked
 (`CleanDC++`, `RSX++`, `CrZ++`, `SmVDC++`, `DC@fe++`,

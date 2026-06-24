@@ -17,13 +17,15 @@ local patterns
 -- with `+delblocker <pattern>` or add custom rules with
 -- `+addblocker <pattern> [reason]`.
 --
--- Two Sopor-isms were normalised on import:
+-- Two Sopor-isms were normalised on import for clarity:
 --   - `%w` (Lua's word-character class) was used as if it were
 --     a literal "w" to match "AirDC++w" (Web Client). The class
 --     matches any letter/digit so the original was over-permissive
 --     (would also match e.g. "AirDC++Q"). Switched to literal `w`.
---   - `%n` was already literal "n" (Lua 5.4 treats `%X` for non-
---     class X as the literal byte X). Left as-is for readability.
+--   - `%n` was technically equivalent to literal "n" (Lua 5.4
+--     treats `%X` for non-class X as the literal byte X) but
+--     reads as if it were a class - normalised to literal `n`
+--     for the same readability reason that drove the `%w` fix.
 --
 -- Reason strings include Swedish translations for Sopor's hub
 -- (kept verbatim - operators of non-SE hubs can re-edit via
@@ -78,7 +80,9 @@ patterns = {
     [ "^AirDC%+%+w%s2%.13%.[0-9]b.-" ]   = "You are using an old ALPHA/BETA version of AirDC++ Web Client. Please update and reconnect!",
     [ "^AirDC%+%+w%s2%.14%.0b.-" ]       = "You are using an old ALPHA/BETA version of AirDC++ Web Client. Please update and reconnect!",
 
-    -- AirDC++ nano (any version - deprecated)
+    -- AirDC++ nano (any version - deprecated). Literal `n`, not the
+    -- `%n` Sopor wrote (which would have been equivalent in Lua 5.4
+    -- but reads as if it were a character class).
     [ "^AirDC%+%+n%s.-" ] = "AirDC++ nano is outdated. Please switch to AirDC++ Web Client and reconnect!",
 
     -- ApexDC++ 0.x.x - 1.5.9
