@@ -2640,6 +2640,74 @@ local defaults = {
     },
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_clientblocker.lua settings (#81)
+
+    -- Operator level that can run `+blocker add / del` (read is open
+    -- to anyone authorised on the ADC cmd, gated by etc_hubcommands).
+    -- Mirrors the etc_blacklist convention (oplevel = the write floor).
+    etc_clientblocker_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    -- Which user levels the client check applies to. Operators (60+)
+    -- are exempt by default so an operator who adds a pattern that
+    -- inadvertently matches their own client does not self-lockout.
+    -- HUBOWNER (100) is kept in scope so the maintainer is not given
+    -- a quiet bypass - a hub-owner who really wants to test from a
+    -- blocked client can flip [100] to false at runtime.
+    etc_clientblocker_check_levels = { {
+        [ 0 ]   = true,
+        [ 10 ]  = true,
+        [ 20 ]  = true,
+        [ 30 ]  = true,
+        [ 40 ]  = true,
+        [ 50 ]  = true,
+        [ 60 ]  = false,
+        [ 70 ]  = false,
+        [ 80 ]  = false,
+        [ 100 ] = true,
+    },
+        function( value )
+            if not types_table( value ) then
+                return false
+            else
+                for level, allowed in pairs( value ) do
+                    if not ( types_number( level, nil, true )
+                             and types_boolean( allowed, nil, true ) ) then
+                        return false
+                    end
+                end
+            end
+            return true
+        end
+    },
+
+    -- Fallback reason emitted when an operator adds a pattern via
+    -- `+blocker add <pattern>` without a custom reason argument.
+    -- Per-pattern overrides live in scripts/data/etc_clientblocker.tbl.
+    etc_clientblocker_default_reason = { "Your client is not allowed",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Hard cap on operator-supplied pattern length. Lua patterns do
+    -- not backtrack the way PCRE does, but `.- ` chains + nested
+    -- captures can still produce expensive `string.find` runs on
+    -- every onConnect. 200 chars is comfortably larger than any
+    -- legitimate AP/VE rule (the v0.2 upstream patterns are <40).
+    etc_clientblocker_max_pattern_len = { 200,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 1
+                and value <= 4096
+        end
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_trafficmanager.lua settings
 
     etc_trafficmanager_activate = { true,
