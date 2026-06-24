@@ -425,17 +425,22 @@ project follows a standard maintenance-branch model:
 
 | Line | Where | Status | What it gets |
 |---|---|---|---|
-| **3.2.x** | `master` | active development | All new features, Phase 8 work (#82 HTTP API, #83 Prometheus, #84 audit log, ...), refactors, plugin changes |
-| **3.1.x** | `release/3.1.x` | security fixes only | Critical CVE / severity-1 backports only. No features, no refactors, no Phase-8-anything |
-| ≤ v3.0.x | (untagged history) | end of life | No updates of any kind |
+| **3.2.x** | `master` | active development (release substrate) | Tagged releases only. Feature PRs land here after dev testhub validation. |
+| **dev** | `dev` | testing staging | Long-lived. Every feature lands here first for testhub validation (`ghcr.io/luadch-ng/luadch:dev` auto-built on push). PR'd to master once green on the testhub. |
+| **3.1.x** | `release/3.1.x` | security fixes only | Critical CVE / severity-1 backports only. No features, no refactors, no Phase-8-anything. |
+| ≤ v3.0.x | (untagged history) | end of life | No updates of any kind. |
 
 ### Workflow
 
-- **New work**: PR against `master`. Period. Don't think about 3.1.x.
-- **Security backport**: PR against master first, merge there, then
-  cherry-pick the merge commit to `release/3.1.x`, push, tag the
-  next v3.1.N patch. Don't open security PRs directly against
-  `release/3.1.x` - master is the canonical source of truth.
+- **New work** (GitFlow A): branch `feat/X` off `dev`, PR to `dev` when
+  ready. Docker auto-builds `ghcr.io/luadch-ng/luadch:dev` on merge.
+  Maintainer pulls + tests on the testhub. When green, second PR
+  `dev -> master`. Master tag (e.g. `v3.2.0`) cuts from master HEAD.
+- **Security backport**: PR against master first (NOT dev - security
+  fixes skip the dev-validation cycle because they are time-sensitive),
+  merge there, then cherry-pick the merge commit to `release/3.1.x`,
+  push, tag the next v3.1.N patch. master is the canonical source of
+  truth for the backport chain.
 - **3.2.x first release** will be tagged `v3.2.0` when Phase 8 has
   enough content to merit a release. No fixed timeline.
 - **3.1.x EOL**: declared after v3.2.0 is released and has had 6-12
@@ -459,11 +464,21 @@ The bar for 3.1.x backport is high. When in doubt, don't.
 
 ### Branch hygiene
 
-- `release/3.1.x` is the only long-lived maintenance branch. Do not
-  create `release/3.0.x` or similar for older lines (those are EOL).
+- Long-lived branches: `master`, `dev`, `release/3.1.x`. All three
+  have GitHub branch-protection: `allow_deletions: false` +
+  `allow_force_pushes: false`. Nobody can wipe them with a stray
+  push.
+- `dev` is the rolling testing-staging branch. Feature merges
+  land here continuously; cherry-pick or merge to master once the
+  testhub validates the `:dev` image. `dev` is not a release
+  substrate (no tags are cut from `dev`).
+- `release/3.1.x` is the only maintenance branch. Do not create
+  `release/3.0.x` or similar for older lines (those are EOL).
 - Tags `v3.1.8`, `v3.1.9`, ... live on `release/3.1.x`. Tags
-  `v3.2.0`, `v3.2.1`, ... live on `master`.
+  `v3.2.0`, `v3.2.1`, ... live on `master`. NEVER tag from `dev`.
+- Feature branches (`feat/X`) are short-lived: created off `dev`,
+  PR'd into `dev`, deleted post-merge. Squash-merge keeps `dev`
+  history readable.
 - Old `release/vX.Y.Z` prep branches (the per-release prep branches
   we used through v3.1.7) can be deleted post-merge - their tags
-  preserve the history. The `release/3.1.x` maintenance branch is
-  the only one that stays around.
+  preserve the history.
