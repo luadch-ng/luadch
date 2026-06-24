@@ -304,6 +304,10 @@ local on_addalias = function( user, command, parameters )
     if _ok and report then
         report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
     end
+    if _ok then
+        audit.fire( audit.build( "alias.add", user, nil, nil,
+            { alias = alias, target = target } ) )
+    end
     return PROCESSED
 end
 
@@ -321,6 +325,10 @@ local on_delalias = function( user, command, parameters )
     user:reply( msg, hub_getbot( ) )
     if _ok and report then
         report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+    end
+    if _ok then
+        audit.fire( audit.build( "alias.remove", user, nil, nil,
+            { alias = alias } ) )
     end
     return PROCESSED
 end
@@ -375,6 +383,9 @@ local http_create_alias = function( req )
     if report then
         report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
     end
+    audit.fire( audit.build( "alias.add",
+        { nick = actor_label, sid = "<http>" }, nil, nil,
+        { alias = alias, target = target } ) )
     return { status = 201, data = {
         action = "added",
         alias  = alias,
@@ -396,6 +407,9 @@ local http_delete_alias = function( req )
     if report then
         report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
     end
+    audit.fire( audit.build( "alias.remove",
+        { nick = actor_label, sid = "<http>" }, nil, nil,
+        { alias = alias, previous_target = previous } ) )
     return { status = 200, data = {
         action   = "deleted",
         alias    = alias,

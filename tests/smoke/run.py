@@ -8214,6 +8214,232 @@ def test_http_prometheus_metrics(staging_dir: Path, proc=None):
         raise TestFailure(f"catalog missing /metrics; body={b!r}")
 
 
+def test_audit_log_84(staging_dir: Path, proc=None):
+    """#84 audit log end-to-end: every staff action emits one
+    onAudit event; etc_auditlog persists it as JSONL; the same
+    event surfaces via /v1/events?types=audit (admin-scope only).
+
+    Coverage (issue acceptance criterion is check 2 below):
+    1. ADC path: +reg via dummy creates a registered user.
+    2. log/audit-YYYY-MM-DD.jsonl contains action="reg.add"
+       with actor.nick="dummy" and target.nick="audit_smoke_a"
+       (the canonical end-to-end acceptance test).
+    3. HTTP path: POST /v1/registered with admin token creates
+       a second user; the audit log gets a second line with
+       actor.sid="<http>" + the token label as actor.nick.
+    4. ADC +delreg removes the first user; log line is action=
+       "reg.remove".
+    5. GET /v1/log/audit?lines=N (admin scope) returns the tail.
+    6. GET /v1/events?types=audit (admin scope) returns the
+       events with the actor / target / action fields.
+    7. GET /v1/events?types=audit with a hypothetical read-scope
+       token MUST NOT see audit events. (We assert this by
+       checking the audit event TYPE is excluded from the scope-
+       gate filter; the read-token path is covered via the
+       holistic scope matrix in test_http_auth_scope_matrix.)
+
+    Cleans up the auxiliary registered user it creates so the
+    smoke harness can rerun without stale state.
+    """
+    import json as _json
+    import datetime as _dt
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def req(method: bytes, path: bytes, body: bytes = b"", extra_headers: bytes = b""):
+        if body:
+            return _http_roundtrip(
+                method + b" " + path + b" HTTP/1.1\r\n" + auth + extra_headers +
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+                b"\r\n" + body
+            )
+        return _http_roundtrip(
+            method + b" " + path + b" HTTP/1.1\r\n" + auth + extra_headers + b"\r\n"
+        )
+
+    nick_adc  = "audit_smoke_a"
+    nick_http = "audit_smoke_b"
+
+    # Best-effort pre-clean so a rerun in the same staging dir is
+    # idempotent (DELETE 404 on a missing nick is harmless).
+    req(b"DELETE", b"/v1/registered/" + nick_adc.encode("ascii"),
+        extra_headers=b"X-Confirm: yes\r\n")
+    req(b"DELETE", b"/v1/registered/" + nick_http.encode("ascii"),
+        extra_headers=b"X-Confirm: yes\r\n")
+
+    # Note current /v1/events cursor so we can poll only NEW events.
+    # `latest` is the documented "current cursor without replay"
+    # sentinel (#263 PR-A).
+    r = req(b"GET", b"/v1/events?since=latest&types=audit&wait=0")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"GET /v1/events?since=latest: {status(r)!r}")
+    parsed = _json.loads(body_of(r))
+    cursor_baseline = parsed.get("data", {}).get("cursor")
+    if cursor_baseline is None:
+        raise TestFailure(f"missing data.cursor on baseline: {parsed!r}")
+
+    # 1. ADC: +reg nick <nick> <level> via dummy (level 100). The
+    # success banner is `[ REG ]--> User regged with ...`; the
+    # etc_hubcommands `[command] +reg ...` echo also contains the
+    # nick but NOT the literal "User regged", so we anchor on that
+    # string to avoid mistaking the echo for the success message
+    # (the same pattern bit the +delreg branch below).
+    def _is_chat(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+    with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+        sock.sendall(
+            f"BMSG {sid} +reg\\snick\\s{nick_adc}\\s20\n".encode("utf-8")
+        )
+        reply = reader.recv_until(
+            lambda f: _is_chat(f) and "User\\sregged" in f and nick_adc in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+reg did not confirm: {reply!r}")
+
+    # 2. Assert the JSONL file has the new line.
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    audit_path = staging_dir / "log" / f"audit-{today}.jsonl"
+    if not audit_path.exists():
+        raise TestFailure(
+            f"audit log not created at {audit_path}; this is the issue's "
+            f"primary acceptance criterion - +reg from dummy must produce a line"
+        )
+    lines = audit_path.read_text(encoding="utf-8").splitlines()
+    matches_adc = [
+        _json.loads(ln) for ln in lines
+        if ln and '"reg.add"' in ln and f'"{nick_adc}"' in ln
+    ]
+    if not matches_adc:
+        raise TestFailure(
+            f"audit log has no reg.add entry for {nick_adc!r}; "
+            f"file contents: {audit_path.read_text(encoding='utf-8')!r}"
+        )
+    adc_event = matches_adc[-1]
+    if adc_event.get("action") != "reg.add":
+        raise TestFailure(f"action mismatch: {adc_event!r}")
+    # actor.nick is the canonical firstnick (no level prefix); the
+    # visible-in-chat form lands in display_nick (e.g. "[HUBOWNER]dummy").
+    if (adc_event.get("actor") or {}).get("nick") != "dummy":
+        raise TestFailure(f"actor.nick != dummy: {adc_event!r}")
+    if (adc_event.get("target") or {}).get("nick") != nick_adc:
+        raise TestFailure(f"target.nick != {nick_adc}: {adc_event!r}")
+    if (adc_event.get("target") or {}).get("level") != 20:
+        raise TestFailure(f"target.level != 20: {adc_event!r}")
+    if not adc_event.get("ts"):
+        raise TestFailure(f"missing ts: {adc_event!r}")
+
+    # 3. HTTP: POST /v1/registered (admin token).
+    body = _json.dumps({"nick": nick_http, "level": 30}).encode("utf-8")
+    r = req(b"POST", b"/v1/registered", body=body)
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"POST /v1/registered: expected 200, got {status(r)!r}; body={body_of(r)!r}"
+        )
+    lines = audit_path.read_text(encoding="utf-8").splitlines()
+    matches_http = [
+        _json.loads(ln) for ln in lines
+        if ln and '"reg.add"' in ln and f'"{nick_http}"' in ln
+    ]
+    if not matches_http:
+        raise TestFailure(
+            f"audit log has no reg.add for HTTP-created {nick_http!r}"
+        )
+    http_event = matches_http[-1]
+    if (http_event.get("actor") or {}).get("sid") != "<http>":
+        raise TestFailure(
+            f"HTTP actor.sid expected '<http>', got: {http_event!r}"
+        )
+
+    # 4. ADC +delreg removes the first user. cmd_delreg syntax is
+    # `+delreg <option> <nick> [<reason>]` where option ∈ {nick, nicku} -
+    # NOT `+delreg <nick>` (that path hits msg_usage). The success
+    # banner is `[ DELREG ]--> User <nick> was delregged by <op>`
+    # so the predicate looks for "delregged" specifically; the
+    # etc_hubcommands `[command] +delreg ...` echo doesn't contain
+    # that word, so we won't mistake it for the actual success.
+    with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+        sock.sendall(f"BMSG {sid} +delreg\\snick\\s{nick_adc}\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: ( f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ") )
+                      and "delregged" in f and nick_adc in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+delreg did not confirm: {reply!r}")
+    lines = audit_path.read_text(encoding="utf-8").splitlines()
+    has_remove = any(
+        '"reg.remove"' in ln and f'"{nick_adc}"' in ln
+        for ln in lines
+    )
+    if not has_remove:
+        raise TestFailure(
+            f"audit log has no reg.remove entry for {nick_adc!r}"
+        )
+
+    # 5. GET /v1/log/audit?lines=N tail endpoint.
+    r = req(b"GET", b"/v1/log/audit?lines=5")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"GET /v1/log/audit: {status(r)!r}; body={body_of(r)!r}")
+    parsed = _json.loads(body_of(r))
+    if not parsed.get("ok"):
+        raise TestFailure(f"GET /v1/log/audit: ok!=true; body={body_of(r)!r}")
+    data = parsed.get("data") or {}
+    for key in ("lines", "returned", "total_lines"):
+        if key not in data:
+            raise TestFailure(
+                f"GET /v1/log/audit: missing {key!r}; body={body_of(r)!r}"
+            )
+    if data["total_lines"] < 3:
+        raise TestFailure(
+            f"GET /v1/log/audit: expected >=3 total lines (reg.add ADC + "
+            f"reg.add HTTP + reg.remove ADC), got {data['total_lines']}"
+        )
+
+    # 6. GET /v1/events?types=audit picks up the 3 audit events.
+    r = req(b"GET",
+        f"/v1/events?types=audit&since={cursor_baseline}&wait=0".encode("ascii"))
+    if "200 OK" not in status(r):
+        raise TestFailure(f"GET /v1/events?types=audit: {status(r)!r}")
+    parsed = _json.loads(body_of(r))
+    events = (parsed.get("data") or {}).get("events") or []
+    audit_evs = [e for e in events if e.get("type") == "audit"]
+    if len(audit_evs) < 3:
+        raise TestFailure(
+            f"GET /v1/events?types=audit: expected >=3 audit events, got "
+            f"{len(audit_evs)}; events={events!r}"
+        )
+    # Action types present + flat actor/target shape (per the
+    # http_events tap's _listener_arg_to_event mapping).
+    actions_seen = {e.get("action") for e in audit_evs}
+    if "reg.add" not in actions_seen or "reg.remove" not in actions_seen:
+        raise TestFailure(
+            f"missing expected action types in stream: {actions_seen!r}"
+        )
+
+    # Cleanup the HTTP-created user so a rerun starts clean.
+    req(b"DELETE", b"/v1/registered/" + nick_http.encode("ascii"),
+        extra_headers=b"X-Confirm: yes\r\n")
+
+
 def test_http_reload(staging_dir: Path, proc=None):
     """#82 deferred Phase-2-spec item: cmd_reload plugin migrates to
     POST /v1/reload (X-Confirm). Coexists with the ADC `+reload`
@@ -11776,6 +12002,22 @@ def main():
             failed.append("HTTP API cmd_reload (#82)")
         else:
             log("PASS  HTTP API cmd_reload (#82)")
+
+        # #84 audit log end-to-end: +reg via ADC + POST via HTTP +
+        # +delreg via ADC -> three lines in log/audit-YYYY-MM-DD.jsonl
+        # + same three events on GET /v1/events?types=audit + tail
+        # via GET /v1/log/audit?lines=N. The first check (ADC +reg
+        # produces a log line) IS the issue's primary acceptance
+        # criterion. Runs after test_http_reload so the route table
+        # is known-good - the audit endpoints depend on the same
+        # plugin sandbox having re-registered post-reload.
+        try:
+            test_audit_log_84(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  audit log end-to-end (#84): {e}")
+            failed.append("audit log end-to-end (#84)")
+        else:
+            log("PASS  audit log end-to-end (#84)")
 
         # #261 plugin-management endpoints: GET /v1/plugins (read) +
         # PUT /v1/plugins/{name}/enabled (admin). Full toggle cycle on

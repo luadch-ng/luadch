@@ -238,6 +238,7 @@ local SANDBOX_GLOBALS = {
     "sysinfo",
     -- luadch core modules (always present in _G after init.lua)
     "cfg", "util", "util_http", "http_filter", "http_events", "http_client", "adc", "adclib", "signal", "out",
+    "audit",
     "unicode",
     -- read-only program constants (PROGRAM_NAME / VERSION / FORK /
     -- COPYRIGHT / CONFIG_PATH). Static strings, no capability; lets

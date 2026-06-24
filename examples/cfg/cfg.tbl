@@ -949,6 +949,16 @@ return { -- the settings are a lua table, do not tough this!
     },
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_auditlog.lua settings | structured audit trail for staff actions (#84)
+
+    etc_auditlog_activate = true,  -- master kill-switch; when false the plugin loads but writes nothing (boolean)
+    etc_auditlog_dir = "log/",  -- directory for the JSONL files (string; trailing slash required)
+    etc_auditlog_prefix = "audit-",  -- filename prefix; final form <dir><prefix><YYYY-MM-DD>.jsonl (string)
+    etc_auditlog_retention_days = 90,  -- days to retain; older files are unlinked on UTC-midnight rollover (integer, 0 = no sweep)
+    etc_auditlog_http_lines_default = 200,  -- GET /v1/log/audit default lines (integer)
+    etc_auditlog_http_lines_max = 1000,  -- GET /v1/log/audit max lines (integer)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_log_cleaner.lua settings | this script adds a command to clean log files
 
     etc_log_cleaner_minlevel = 100,  -- min level to use this command? (integer)
@@ -1410,6 +1420,7 @@ return { -- the settings are a lua table, do not tough this!
         { "etc_userlogininfo.lua", enabled = true },  -- API-toggleable (#261)
         { "etc_banner.lua", enabled = true },  -- API-toggleable (#261)
         "etc_msgmanager.lua",  -- using report import
+        "etc_auditlog.lua",  -- #84 staff-action audit trail (JSONL + /v1/events audit type)
         { "etc_chatlog.lua", enabled = true },  -- API-toggleable (#261)
         "etc_trafficmanager.lua",  -- using report import -- must be above all other scripts who wants to use the block import
         "cmd_delreg.lua",  -- using report, ban, block import

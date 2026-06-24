@@ -279,6 +279,9 @@ POSIX (Phase 7b,
 - `cfg/user.tbl` (registered-user database, encrypted blob)
 - `cfg/user.tbl.bak`
 - `cfg/master.key`
+- `log/audit-YYYY-MM-DD.jsonl` (#84 staff-action audit trail;
+  `etc_auditlog` `chmod_secret`s the file on first write per
+  daily path).
 - `certs/serverkey.pem` and `certs/cakey.pem` are 0600'd by
   `examples/certs/make_cert.sh` at generation time.
 
@@ -301,6 +304,7 @@ attempt to enforce permissions automatically. After install, run:
 icacls "cfg\user.tbl"           /inheritance:r /grant:r "%USERNAME%:F"
 icacls "cfg\user.tbl.bak"       /inheritance:r /grant:r "%USERNAME%:F"
 icacls "cfg\master.key"         /inheritance:r /grant:r "%USERNAME%:F"
+icacls "log"                    /inheritance:r /grant:r "%USERNAME%:F"
 icacls "certs\serverkey.pem"    /inheritance:r /grant:r "%USERNAME%:F"
 icacls "certs\cakey.pem"        /inheritance:r /grant:r "%USERNAME%:F"
 ```
@@ -310,6 +314,64 @@ runs as `LocalService` or similar. If `master_key_path` points to a
 different location (e.g. `C:\ProgramData\luadch\master.key`), apply
 the same `icacls` line there. The same recipe lives in
 [`docs/BUILDING.md`](BUILDING.md).
+
+### Audit log of staff actions ([#84](https://github.com/luadch-ng/luadch/issues/84))
+
+`log/audit-YYYY-MM-DD.jsonl` is the centralised, machine-readable
+record of every staff action across both ADC chat (`+ban`, `+reg`,
+`+disconnect`, ...) and the HTTP API (`POST /v1/registered`,
+`DELETE /v1/users/{sid}`, ...). One JSON object per line; see
+[`SCRIPTS.md` etc_auditlog](SCRIPTS.md#etc_auditlog) for the shape
+and the full action vocabulary.
+
+**Append-only contract.** `scripts/etc_auditlog.lua` opens the
+file via `io.open(path, "ab")` exclusively. No code path in the
+plugin truncates the active file. There is no
+`DELETE /v1/log/audit` endpoint and no `+clearauditlog` ADC cmd.
+Clearing is filesystem-level only (operator deletes the file
+with explicit OS chain-of-custody). This is deliberate: a
+mutable audit trail provides no compliance value.
+
+**chmod 0600.** First write to each new daily path triggers
+`util.chmod_secret(path)` (POSIX). Audit lines carry target IPs,
+CIDs, and actor session metadata; world-readable defaults would
+leak operator activity. Per-process tracking set ensures the
+chmod fires once per file, not once per event.
+
+**Retention.** `etc_auditlog_retention_days` (default 90). On
+each UTC-midnight rollover (and once at boot) the plugin
+unlinks any `audit-*.jsonl` whose embedded date is older. Set
+`0` to disable the sweep; operator-driven cleanup then. The
+sweep probes by reconstructing the known filename pattern day
+by day from `now - retention_days - 1` back to `now -
+retention_days - 365` (sandboxed plugins cannot enumerate the
+directory; this approach handles retention shrinkage).
+
+**Plugin trust contract.** Any admin-trusted plugin can call
+`audit.fire(audit.build(...))` with arbitrary actor / target /
+reason fields. The audit log is therefore as trustworthy as the
+plugin set in `cfg.scripts`. This is the same baseline as
+[`§2 Plugin trust contract`](#2-plugin-trust-contract):
+operators MUST review every third-party plugin before enabling
+it. A malicious plugin could spoof audit entries; the file's
+append-only contract bounds the damage to "addition only, no
+deletion of legitimate entries". The four-fields-snapshotted-at-
+fire-time invariant (`core/audit.lua` `_snapshot_actor`) means
+even a misbehaving plugin cannot fabricate a different actor's
+session metadata than its own at the moment of fire.
+
+**Field caps.** `audit_log_max_reason_chars` (default 1000) and
+`audit_log_max_meta_value_chars` (default 1000) bound per-string
+length at `audit.build` time, applied to both the disk JSONL and
+the `/v1/events` ringbuffer entries. Defense against a malicious
+input ballooning a single log line.
+
+**Control-byte sanitization.** Every string field that lands on
+disk or in the events ringbuffer is `util.strip_control_bytes`'d
+at build time (`core/audit.lua` `_safe_str` for user-object
+snapshots, `_normalize_str` for flat-table input). INF-derived
+strings are F-INF-2-clamped at parse time too, so this is
+defense-in-depth.
 
 ---
 

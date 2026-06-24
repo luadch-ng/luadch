@@ -228,6 +228,9 @@ local onbmsg = function( user, command, parameters )
                 cfg_saveusers( user_tbl )
                 user:reply( msg, hub_getbot )
                 report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+                audit.fire( audit.build( "reg.level.set", user,
+                    { nick = target_firstnick, level = tonumber( level ) },
+                    nil, { previous_level = target_oldlevel } ) )
                 return PROCESSED
             end
         end
@@ -276,10 +279,14 @@ local onbmsg = function( user, command, parameters )
                             target:kill( "ISTA 230 " .. hub_escapeto( msg ) .. "\n", "TL300" )
                         end
                     end
+                    local _previous_level = target_level
                     user_tbl[ k ].level = tonumber( level )
                     cfg_saveusers( user_tbl )
                     user:reply( msg, hub_getbot )
                     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+                    audit.fire( audit.build( "reg.level.set", user,
+                        { nick = target_firstnick, level = tonumber( level ) },
+                        nil, { previous_level = _previous_level } ) )
                     return PROCESSED
                 else
                     target_isregged = false
@@ -388,6 +395,10 @@ local http_handler_set_level = function( req )
         online_kicked = true
     end
     report.send( report_activate, report_hubbot, report_opchat, llevel, kill_msg )
+    audit.fire( audit.build( "reg.level.set",
+        { nick = actor_label, sid = "<http>" },
+        { nick = nick, level = new_level },
+        nil, { previous_level = previous_level, online_kicked = online_kicked } ) )
 
     return { status = 200, data = {
         action         = "level-changed",

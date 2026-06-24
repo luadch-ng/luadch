@@ -453,6 +453,76 @@ the operator the correct command name.
 (opchat audit trail toggles, matching the cmd_topic / etc_msgmanager
 pattern).
 
+### etc_auditlog
+
+Persistent JSONL audit trail for staff actions. Subscribes to
+`onAudit` events fired by every staff-action plugin via the
+core/audit.lua helper (`audit.fire(audit.build(action, actor,
+target, reason, meta))`). Closes [#84](https://github.com/luadch-ng/luadch/issues/84).
+
+**Commands:** `+auditlog show` (today's file as chat banner).
+
+**Storage:** `log/audit-YYYY-MM-DD.jsonl`, one JSON object per
+line. UTC daily rollover; on the first write past midnight the
+plugin opens a new file and unlinks any `audit-*.jsonl` older than
+`etc_auditlog_retention_days`. POSIX chmod 0600 on every file
+(no-op on Windows; see SECURITY.md §4 for the NTFS ACL recipe).
+
+**Append-only.** The plugin opens `io.open(path, "ab")` exclusively;
+no code path truncates the active file. The `DELETE /v1/log/audit`
+endpoint deliberately does NOT exist (audit-trail philosophy:
+clearing must be a filesystem-level operation with explicit
+chain-of-custody).
+
+**Per-line shape:**
+
+```json
+{
+    "ts":     "2026-06-23T15:42:11Z",
+    "action": "ban.add",
+    "actor":  { "nick": "op", "level": 80, "sid": "ABCD",
+                "cid": "...", "ip": "1.2.3.4" },
+    "target": { "nick": "baduser", "ip": "5.6.7.8" },
+    "reason": "spam",
+    "meta":   { "by": "ip", "duration_sec": 86400, "online": true }
+}
+```
+
+`actor.nick` is the canonical firstnick (prefix-less); the visible
+form (e.g. `[OP]op`) lands in optional `display_nick` when it
+differs. `actor.sid = "<http>"` for events fired via the HTTP API
+(actor_label = the bearer token's `comment`). Optional fields
+(`target`, `reason`, `meta`, `display_nick`) are dropped when
+empty so the on-disk shape stays compact.
+
+**Action vocabulary (25 names across 20 plugins):**
+`ban.add`, `ban.remove`, `ban.clear`, `ban.history.clear`,
+`gag.add`, `gag.remove`, `user.kick`, `user.redirect`,
+`user.mass.kick`, `reg.add`, `reg.remove`, `reg.update`,
+`reg.desc.set`, `reg.level.set`, `reg.nickchange`,
+`reg.password.change`, `hub.topic.set`, `hub.topic.reset`,
+`hub.reload`, `hub.restart`, `hub.shutdown`,
+`hub.announce.{all,hub,level}`,
+`alias.{add,remove}`, `msgmanager.{block,unblock}`,
+`blacklist.remove`, `log.clear`, `records.reset`,
+`user.cleanup`, `user.cleanup.exception.{add,remove,clear}`,
+`user.cleanup.setdays`, `user.cleanup.orphan_comments`.
+
+**HTTP API:** `GET /v1/log/audit?lines=N` (admin). Same envelope
+(`{lines, returned, total_lines}`) as `/v1/log/cmd` and
+`/v1/errors`. The audit stream also surfaces as
+`GET /v1/events?types=audit` (admin scope only, see HTTP_API.md
+§10.1 footnote).
+
+**Config:** `etc_auditlog_activate` (master kill-switch, default
+true), `etc_auditlog_dir` (`log/`), `etc_auditlog_prefix`
+(`audit-`), `etc_auditlog_retention_days` (90, `0` disables the
+sweep), `etc_auditlog_http_lines_default` (200),
+`etc_auditlog_http_lines_max` (1000). Cap keys live on the core
+side: `audit_log_max_reason_chars` (1000),
+`audit_log_max_meta_value_chars` (1000) - applied at `audit.build`
+time so both disk and `/v1/events` payloads stay bounded.
+
 ### etc_keyprint
 
 Automatically extract and cache hub certificate keyprint (SHA256) for

@@ -336,6 +336,7 @@ local onbmsg = function(user, command, parameters)
             return PROCESSED
         end
         user:reply(remove_user(first_nick, display_nick, online_obj, user:nick()), hub.getbot())
+        audit.fire(audit.build("gag.remove", user, { nick = first_nick }, nil, nil))
         return PROCESSED
     end
 
@@ -369,6 +370,8 @@ local onbmsg = function(user, command, parameters)
     end
 
     user:reply(add_user(target, action, duration, user:nick()), hub.getbot())
+    audit.fire(audit.build("gag.add", user, target, nil,
+        { mode = action, duration_sec = duration }))
     return PROCESSED
 end
 
@@ -620,6 +623,9 @@ http_handler_gag = function(req, target)
     -- only need the side-effect, not the returned report-message
     -- string (the HTTP audit log already covers the operator trail).
     add_user(target, mode, duration_seconds, actor_label)
+    audit.fire(audit.build("gag.add",
+        { nick = actor_label, sid = "<http>" }, target, nil,
+        { mode = mode, duration_sec = duration_seconds }))
     local data = { mode = mode }
     if duration_seconds then
         data.duration_minutes = duration_minutes
@@ -646,6 +652,9 @@ http_handler_ungag = function(req, target)
     local previous_mode = entry.mode
     local actor_label = req.token_label or "http-api"
     remove_user(first_nick, target:nick(), target, actor_label)
+    audit.fire(audit.build("gag.remove",
+        { nick = actor_label, sid = "<http>" }, target, nil,
+        { previous_mode = previous_mode }))
     return { previous_mode = previous_mode }
 end
 

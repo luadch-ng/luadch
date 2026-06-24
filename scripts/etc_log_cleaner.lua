@@ -147,6 +147,10 @@ local http_handler_clean_log = function( req )
     -- profile and the http_router catches handler errors as
     -- 500 E_INTERNAL.
     cleanlog( path )
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    audit.fire( audit.build( "log.clear",
+        { nick = actor_label, sid = "<http>" }, nil, nil,
+        { name = name, bytes_before = bytes_before } ) )
     return { status = 200, data = {
         action       = "log-cleared",
         name         = name,
@@ -165,6 +169,7 @@ local onbmsg = function( user, adccmd, parameters, txt )
         if activate_error then
             cleanlog( logfile_error )
             user:reply( logfile_error_msg, hub_getbot )
+            audit.fire( audit.build( "log.clear", user, nil, nil, { name = "error" } ) )
         else
             user:reply( activate_error_msg, hub_getbot )
         end
@@ -174,6 +179,7 @@ local onbmsg = function( user, adccmd, parameters, txt )
         if activate_cmd then
             cleanlog( logfile_cmd )
             user:reply( logfile_cmd_msg, hub_getbot )
+            audit.fire( audit.build( "log.clear", user, nil, nil, { name = "cmd" } ) )
         else
             user:reply( activate_cmd_msg, hub_getbot )
         end

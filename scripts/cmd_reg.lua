@@ -374,6 +374,8 @@ local onbmsg = function( user, command, parameters )
                 local msg = utf.format( msg_desc, user_firstnick, target_firstnick, desc2 )
                 user:reply( msg, hub.getbot() )
                 report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+                audit.fire( audit.build( "reg.desc.set", user,
+                    { nick = target_firstnick, level = target_level }, nil, { comment = desc2 } ) )
             else
                 user:reply( msg_denied, hub.getbot() )
             end
@@ -412,6 +414,10 @@ local onbmsg = function( user, command, parameters )
             end
             --// refresh "cfg/user.tbl.bak"
             cfg.checkusers()
+            audit.fire( audit.build( "reg.add", user,
+                { nick = target_firstnick, level = target_level },
+                nil,
+                { comment = ( desc ~= "" and desc or nil ) } ) )
         end
     end
     return PROCESSED
@@ -653,6 +659,11 @@ local http_handler_create_reguser = function( req )
     local msg = utf.format( msg_report, actor_label, clean_nick, level, levelname,
                             ( clean_comment ~= "" and clean_comment or msg_nocomment ) )
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+    audit.fire( audit.build( "reg.add",
+        { nick = actor_label, sid = "<http>" },
+        { nick = clean_nick, level = level },
+        nil,
+        { comment = ( clean_comment ~= "" and clean_comment or nil ) } ) )
 
     return { status = 200, data = {
         action     = "register",
@@ -716,6 +727,11 @@ local http_handler_patch_reguser = function( req )
     local msg = utf.format( msg_desc, actor_label, nick,
                             ( clean_comment ~= "" and clean_comment or msg_nocomment ) )
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
+    audit.fire( audit.build( "reg.desc.set",
+        { nick = actor_label, sid = "<http>" },
+        { nick = nick, level = tonumber( profile.level ) or 0 },
+        nil,
+        { comment = clean_comment } ) )
 
     return { status = 200, data = {
         action  = "patch-registered",

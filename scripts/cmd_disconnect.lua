@@ -165,6 +165,8 @@ local onbmsg = function( user, adccmd, parameters )
     -- in opchat, and historically they saw their own kick echo first).
     if sendmainmsg then user:reply( msg_report, hub.getbot() ) end
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report )
+    audit.fire( audit.build( "user.kick", user, targetuser,
+        ( reason ~= "" and reason or nil ), nil ) )
     return PROCESSED
 end
 
@@ -187,6 +189,10 @@ local http_handler_disconnect = function( req, target )
     -- opchat report directly so an operator watching opchat sees
     -- a consistent line regardless of which surface drove the kick.
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report )
+    audit.fire( audit.build( "user.kick",
+        { nick = actor_label, sid = "<http>" },
+        target,
+        ( reason ~= "" and reason or nil ), nil ) )
     return { reason = reason }
 end
 

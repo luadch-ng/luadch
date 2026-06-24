@@ -163,6 +163,7 @@ local onbmsg = function( user, adccmd, parameters )
         if user_level == min_level_reset then  -- owners only
             sendItTo( reportlvl, msg_reseted )
             reset( )
+            audit.fire( audit.build( "records.reset", user, nil, nil, nil ) )
         else
             user:reply( help_err, hub_getbot)
         end
@@ -250,6 +251,9 @@ end
 -- token's `admin` scope IS the authorisation gate.
 local http_handler_reset_records = function( req )
     reset()
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    audit.fire( audit.build( "records.reset",
+        { nick = actor_label, sid = "<http>" }, nil, nil, nil ) )
     return { status = 200, data = {
         action = "records-reset",
     } }

@@ -264,6 +264,12 @@ local onbmsg = function( user, command, parameters )
     end
     in_progress = true
     local comment = utf.match( parameters, "^(.*)" )
+    -- Fire BEFORE do_restart arms the exit timer (the timer's
+    -- callback closes the process via hub.shutdown + hub.restart;
+    -- audit fires queued there would never reach the writer).
+    audit.fire( audit.build( "hub.restart", user, nil,
+        ( comment and comment ~= "" and comment or nil ),
+        { countdown = not not toggle_countdown } ) )
     do_restart( comment )
     if not toggle_countdown then
         user:reply( msg_ok, hub.getbot() )
@@ -291,6 +297,12 @@ local http_handler_restart = function( req )
     end
     in_progress = true
     local message = ( req.body and req.body.message ) or ""
+    local actor_label = util.strip_control_bytes( req.token_label or "http-api" )
+    -- Fire BEFORE do_restart (see ADC-path rationale above).
+    audit.fire( audit.build( "hub.restart",
+        { nick = actor_label, sid = "<http>" }, nil,
+        ( message ~= "" and util.strip_control_bytes( message ) or nil ),
+        { countdown = not not toggle_countdown } ) )
     do_restart( message )
     local clean_message = util.strip_control_bytes( message )
     return { status = 200, data = {

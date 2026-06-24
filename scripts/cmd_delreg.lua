@@ -337,6 +337,10 @@ local onbmsg = function( user, command, parameters )
         end
         --// refresh "cfg/user.tbl.bak"
         cfg.checkusers()
+        audit.fire( audit.build( "reg.remove", user,
+            { nick = target_firstnick },
+            ( reason ~= "" and reason or nil ),
+            { blacklisted = ( reason ~= "" ) } ) )
     end
     return PROCESSED
 end
@@ -454,6 +458,11 @@ local http_handler_delreguser = function( req )
         message = utf.format( msg_ok, nick, by_label )
     end
     report.send( report_activate, report_hubbot, report_opchat, llevel, message )
+    audit.fire( audit.build( "reg.remove",
+        { nick = by_label, sid = "<http>" },
+        { nick = nick },
+        ( clean_reason ~= "" and clean_reason or nil ),
+        { blacklisted = blacklisted, online_kicked = online_kicked } ) )
 
     return { status = 200, data = {
         action        = "delreg",
