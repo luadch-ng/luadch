@@ -141,6 +141,13 @@ local patterns_tbl = { }
 -- Validate an operator-supplied pattern.
 --   - non-empty string
 --   - length-capped (etc_clientblocker_max_pattern_len)
+--   - URL-path-safe: no `/`, `?`, `#`, `&` chars. The HTTP DELETE
+--     endpoint identifies the pattern via a path-var; the router
+--     uses `([^/]+)` and does not percent-decode, so a `/` in the
+--     pattern would make the pattern undeletable via HTTP (silent
+--     404). Real-world DC client AP/VE strings are alphanumeric
+--     + `+`/`.`/`-`, so disallowing these four chars rules out
+--     zero legitimate use. Fail loud at edit time instead.
 --   - compile-probe via pcall(string.find, "", pat) so we fail
 --     loud at edit time, never silent at onConnect kick time
 -- Returns: true | nil, err_msg.
@@ -149,6 +156,9 @@ local function validate_pattern( pat )
         return nil, msg_bad_pattern
     end
     if #pat > max_pattern_len then
+        return nil, msg_bad_pattern
+    end
+    if pat:find( "[/?#&]" ) then
         return nil, msg_bad_pattern
     end
     local ok = pcall( string_find, "", pat )
@@ -168,6 +178,18 @@ local function persist( )
 end
 
 
+-- Resolve operator-supplied reason -> the effective string the
+-- kick will use. Treats nil and empty-string the same (= "use the
+-- cfg default"). Single helper to avoid drift between the ADC
+-- chat-cmd path and the HTTP API path.
+local function _effective_reason( reason )
+    if type( reason ) == "string" and reason ~= "" then
+        return reason
+    end
+    return default_reason
+end
+
+
 -- Shared action helpers used by BOTH the ADC chat-cmd path AND
 -- the HTTP API path. Each returns
 --     ok=true,                 msg
@@ -183,7 +205,7 @@ local do_add_pattern = function( pattern, reason, actor_label )
     if patterns_tbl[ pattern ] ~= nil then
         return nil, "exists", utf_format( msg_pattern_exists, pattern )
     end
-    reason = ( type( reason ) == "string" and reason ~= "" ) and reason or default_reason
+    reason = _effective_reason( reason )
     patterns_tbl[ pattern ] = reason
     persist( )
     return true, nil, utf_format( msg_added, actor_label or "?", pattern, reason )
@@ -216,11 +238,20 @@ local check_clients = function( user )
     if not version or version == "" then return end
 
     local user_client = hub_escapefrom( version )
-    for pattern, reason in pairs( patterns_tbl ) do
+    -- spairs (sorted) for deterministic actor-attribution + match
+    -- reason on collision. Two patterns matching the same VE would
+    -- otherwise pick a hash-order dependent reason - confusing in
+    -- audit logs. Cost is a sort over the pattern table on each
+    -- onConnect; operator pattern tables stay tiny so negligible.
+    for pattern, reason in util_spairs( patterns_tbl ) do
         local ok, hit = pcall( string_find, user_client, pattern )
         if ok and hit then
+            -- System actor: audit.lua's _snapshot_actor turns a
+            -- plain string into { nick=<string>, level=0, sid="",
+            -- cid="", ip="" } - the canonical shorthand for plugin-
+            -- fired events with no operator behind them.
             audit.fire( audit.build( "client.block.kick",
-                { nick = "<auto>", sid = "<system>" }, user, reason,
+                scriptname, user, reason,
                 { pattern = pattern, version = version } ) )
             user:kill( "ISTA 231 " .. hub_escapeto( reason ) .. " TL-1\n" )
             return PROCESSED
@@ -271,7 +302,7 @@ local on_addblocker = function( user, command, parameters )
             report.send( false, false, true, oplevel, msg )
         end
         audit.fire( audit.build( "client.block.add", user, nil, nil,
-            { pattern = pattern, reason = reason or default_reason } ) )
+            { pattern = pattern, reason = _effective_reason( reason ) } ) )
     end
     return PROCESSED
 end
@@ -344,8 +375,7 @@ local http_create_pattern = function( req )
     end
     audit.fire( audit.build( "client.block.add",
         { nick = actor_label, sid = "<http>" }, nil, nil,
-        { pattern = pattern,
-          reason  = ( type( reason ) == "string" and reason ~= "" ) and reason or default_reason } ) )
+        { pattern = pattern, reason = _effective_reason( reason ) } ) )
     return { status = 201, data = {
         action  = "added",
         pattern = pattern,

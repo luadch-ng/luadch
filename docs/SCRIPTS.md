@@ -558,10 +558,15 @@ the next `+reload` will kick you on the next connect.
 
 **Pattern validation at edit time.** `+addblocker` / `POST
 /v1/clientblocker` reject patterns that are empty, exceed
-`etc_clientblocker_max_pattern_len` (default 200), or fail a
+`etc_clientblocker_max_pattern_len` (default 200), contain
+URL-unsafe `/`, `?`, `#` or `&` (the DELETE endpoint uses the
+pattern as a path-var and the router does not percent-decode -
+those four chars would silently 404), or fail a
 `pcall(string.find, "", pat)` compile probe. This fails loud at
 add time rather than silently at the next onConnect (the pcall
 guard around the actual match call is belt-and-suspenders).
+All other Lua-pattern punctuation (`%`, `+`, `.`, `(`, `)`,
+`[`, `]`, `*`, `-`, `^`, `$`) is allowed.
 
 **Audit events:** `client.block.add`, `client.block.remove`,
 `client.block.kick`. The kick event's `meta` carries `{pattern,

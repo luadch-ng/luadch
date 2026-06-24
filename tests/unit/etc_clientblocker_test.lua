@@ -195,7 +195,11 @@ end
 ----------------------------------------------------------------------
 
 do
-    local long_pat = string.rep( "a", 250 )
+    -- 250 chars - over the 200 cap but pcall-safe. Mix in `%a`
+    -- character classes so the body is a realistic-looking
+    -- pattern, not just `aaaaa...`, so the long-cap branch is
+    -- exercised independently of the compile-probe branch.
+    local long_pat = string.rep( "x%a", 100 )    -- 300 chars
     local r = POST{ body = { pattern = long_pat }, token_label = "alice" }
     eq( "bad_pattern long: status",  r.status,     400 )
     eq( "bad_pattern long: code",    r.error.code, "bad_pattern" )
@@ -210,6 +214,22 @@ do
     local r = POST{ body = { pattern = "[abc" }, token_label = "alice" }
     eq( "bad_pattern compile: status", r.status,     400 )
     eq( "bad_pattern compile: code",   r.error.code, "bad_pattern" )
+end
+
+----------------------------------------------------------------------
+-- 5b. POST reject: bad_pattern (URL-unsafe chars)
+----------------------------------------------------------------------
+
+do
+    -- The DELETE endpoint uses the pattern as a path-var; the router
+    -- captures with ([^/]+) and does not percent-decode. Patterns
+    -- containing any of /?#& must be rejected at POST time so they
+    -- never end up un-deletable.
+    for _, ch in ipairs( { "/", "?", "#", "&" } ) do
+        local r = POST{ body = { pattern = "pat" .. ch .. "x" }, token_label = "alice" }
+        eq( "url-unsafe " .. ch .. ": status", r.status,     400 )
+        eq( "url-unsafe " .. ch .. ": code",   r.error.code, "bad_pattern" )
+    end
 end
 
 ----------------------------------------------------------------------
@@ -279,6 +299,10 @@ do
     eq( "check covered level: ISTA prefix", killed_of( ) and killed_of( ):sub( 1, 9 ) or "", "ISTA 231 " )
     eq( "check covered level: audit fired", #_audit_fired,                  1 )
     eq( "check covered level: audit action", _audit_fired[ 1 ].action,      "client.block.kick" )
+    -- Actor on the kick event is the plugin name (string shorthand
+    -- supported by core/audit.lua's _snapshot_actor); the test stub
+    -- just forwards the raw value so we assert the string directly.
+    eq( "check covered level: audit actor", _audit_fired[ 1 ].actor,        "etc_clientblocker" )
 end
 
 ----------------------------------------------------------------------
