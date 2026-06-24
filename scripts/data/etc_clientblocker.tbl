@@ -1,0 +1,9 @@
+local patterns
+
+patterns = {
+
+
+
+}
+
+return patterns

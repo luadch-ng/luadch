@@ -318,10 +318,17 @@ class _ADCReader:
             self._buffer += chunk
 
 
-def _adc_login(sock, nick: str, password: str):
+def _adc_login(sock, nick: str, password: str, ve: str | None = None,
+               ap: str | None = None, expect_kill: bool = False):
     """Run a full ADC client login as a registered user. On success returns
     (sid, reader) so the caller can keep using the same socket for further
-    interactions (e.g. sending +help)."""
+    interactions (e.g. sending +help).
+
+    Optional `ve` / `ap` append `VE<ve>` and `AP<ap>` fields to the BINF -
+    useful for #81 etc_clientblocker tests that need to drive the AP+VE
+    match path. If `expect_kill=True` we DO NOT raise on a hub-side ISTA;
+    instead we return (None, reader) so the caller can inspect the kick
+    frame and confirm the connection was dropped."""
     reader = _ADCReader(sock)
 
     # 1. SUP exchange. Hub responds with ISUP (its supported features),
@@ -340,15 +347,33 @@ def _adc_login(sock, nick: str, password: str):
     # SU (supported features) needs a non-empty value or the ADC parser
     # rejects the BINF as malformed. TCP4 declares we accept active TCPv4
     # CTM connections - inert for the smoke test, but parser-valid.
+    extras = ""
+    if ap is not None:
+        extras += f" AP{_adc_escape(ap)}"
+    if ve is not None:
+        extras += f" VE{_adc_escape(ve)}"
     binf = (
         f"BINF {sid}"
         f" ID{cid_b32}"
         f" PD{pid_b32}"
         f" NI{_adc_escape(nick)}"
         f" I40.0.0.0"
-        f" SUTCP4\n"
+        f" SUTCP4"
+        f"{extras}\n"
     )
     sock.sendall(binf.encode("utf-8"))
+
+    if expect_kill:
+        # etc_clientblocker fires its kill on the onConnect listener
+        # BEFORE the hub answers IGPA (the listener chain runs after
+        # parsing BINF but before the password challenge), so we
+        # never see IGPA in this branch. The kick we expect is
+        # ISTA 231 ... TL-1.
+        frame = reader.recv_until(
+            lambda f: f.startswith("ISTA "),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        return None, reader, frame
 
     # 3. Hub answers IGPA <salt> for a registered user. Decode salt, compute
     #    the response = Tiger(password || salt_bytes), send HPAS.
@@ -8440,6 +8465,164 @@ def test_audit_log_84(staging_dir: Path, proc=None):
         extra_headers=b"X-Confirm: yes\r\n")
 
 
+def test_clientblocker_81(staging_dir: Path, proc=None):
+    """#81 etc_clientblocker end-to-end:
+       1. POST /v1/clientblocker with a unique smoke pattern.
+       2. New connection with VEsmokebadcli/1.0 -> hub emits
+          ISTA 231 <reason> TL-1 and drops the socket (the
+          issue's primary acceptance criterion).
+       3. New connection with a non-matching VE -> normal login.
+       4. DELETE /v1/clientblocker/{pattern} -> 200 + audit
+          client.block.remove.
+       5. New connection with the previously-blocked VE -> normal
+          login (verifies the unblock landed in the live cache).
+       6. Audit log on disk gained client.block.kick + .add +
+          .remove lines with the right meta + actor/target shape.
+
+    Anchors the kick predicate on the literal "ISTA 231 " + the
+    custom reason string ("smoke_blocked_81") to avoid the BINF-
+    echo false-match noted in the #84 audit-test pattern. The
+    pattern is unique (`smokebadcli81`) so re-running the smoke
+    harness on the same staging_dir is idempotent (best-effort
+    DELETE up front swallows any leftover).
+    """
+    import json as _json
+    import datetime as _dt
+
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def req(method: bytes, path: bytes, body: bytes = b""):
+        if body:
+            return _http_roundtrip(
+                method + b" " + path + b" HTTP/1.1\r\n" + auth +
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+                b"\r\n" + body
+            )
+        return _http_roundtrip(
+            method + b" " + path + b" HTTP/1.1\r\n" + auth + b"\r\n"
+        )
+
+    pattern = "smokebadcli81"
+    reason = "smoke_blocked_81"
+
+    # Best-effort pre-clean.
+    req(b"DELETE", b"/v1/clientblocker/" + pattern.encode("ascii"))
+
+    # 1. POST adds the pattern.
+    body = _json.dumps({"pattern": pattern, "reason": reason}).encode("utf-8")
+    r = req(b"POST", b"/v1/clientblocker", body)
+    if "201 Created" not in status(r):
+        raise TestFailure(
+            f"POST /v1/clientblocker: expected 201, got {status(r)!r}; "
+            f"body={body_of(r)!r}"
+        )
+
+    # 2. Connect with a matching VE -> ISTA 231 + drop. The plugin's
+    # onConnect listener fires BEFORE the IGPA challenge (see
+    # core/hub_dispatch.lua:589) so we never reach password auth on
+    # this connection. The kick line shape is
+    #     ISTA 231 <reason> TL-1
+    # with the reason wire-escaped via hub.escapeto - a space in
+    # the reason ("smoke_blocked_81" has none) survives unchanged.
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        _sid, _reader, frame = _adc_login(
+            sock, "dummy", "test",
+            ve=f"{pattern}/1.0", expect_kill=True,
+        )
+        if not frame.startswith("ISTA 231"):
+            raise TestFailure(
+                f"#81 acceptance: expected ISTA 231 kick from etc_clientblocker, "
+                f"got {frame!r}"
+            )
+        if reason not in frame:
+            raise TestFailure(
+                f"#81 acceptance: ISTA 231 reason does not contain {reason!r}: "
+                f"{frame!r}"
+            )
+        _assert_adc_drops(sock)
+
+    # 3. Connect with a non-matching VE -> normal login.
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, _reader = _adc_login(sock, "dummy", "test", ve="GoodClient/1.0")
+        if not sid:
+            raise TestFailure(
+                "non-matching VE was kicked - check_levels or the pattern "
+                "logic let through what should have been a normal login"
+            )
+
+    # 4. DELETE the pattern.
+    r = req(b"DELETE", b"/v1/clientblocker/" + pattern.encode("ascii"))
+    if "200 OK" not in status(r):
+        raise TestFailure(
+            f"DELETE /v1/clientblocker/{pattern}: expected 200, "
+            f"got {status(r)!r}; body={body_of(r)!r}"
+        )
+
+    # 5. Reconnect with the previously-blocked VE - should now be
+    # a normal login (verifies the in-memory patterns_tbl mutation
+    # took effect immediately; the plugin saves to disk AND mutates
+    # the live cache so the next onConnect iterates a fresh map).
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, _reader = _adc_login(
+            sock, "dummy", "test", ve=f"{pattern}/1.0"
+        )
+        if not sid:
+            raise TestFailure(
+                "after DELETE, previously-blocked VE was STILL kicked - "
+                "patterns_tbl was not updated in the live cache"
+            )
+
+    # 6. Assert the JSONL audit log gained the right events. The
+    # filename matches the pattern test_audit_log_84 uses.
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    audit_path = staging_dir / "log" / f"audit-{today}.jsonl"
+    if not audit_path.exists():
+        raise TestFailure(
+            f"#81 audit log missing at {audit_path}; the audit plugin "
+            f"should have emitted at least three lines by now"
+        )
+    text = audit_path.read_text(encoding="utf-8")
+    seen_actions = []
+    for ln in text.splitlines():
+        if not ln:
+            continue
+        try:
+            ev = _json.loads(ln)
+        except _json.JSONDecodeError:
+            continue
+        meta = ev.get("meta") or {}
+        if meta.get("pattern") == pattern:
+            seen_actions.append(ev.get("action"))
+    for expected in ("client.block.add", "client.block.kick", "client.block.remove"):
+        if expected not in seen_actions:
+            raise TestFailure(
+                f"#81 audit log missing {expected!r} for pattern={pattern!r}; "
+                f"seen actions: {seen_actions!r}"
+            )
+
+
 def test_http_reload(staging_dir: Path, proc=None):
     """#82 deferred Phase-2-spec item: cmd_reload plugin migrates to
     POST /v1/reload (X-Confirm). Coexists with the ADC `+reload`
@@ -12018,6 +12201,22 @@ def main():
             failed.append("audit log end-to-end (#84)")
         else:
             log("PASS  audit log end-to-end (#84)")
+
+        # #81 etc_clientblocker end-to-end: HTTP POST adds a unique
+        # smoke pattern, a connection with VE matching the pattern
+        # gets ISTA 231 + dropped (the issue acceptance criterion),
+        # a non-matching VE logs in normally, HTTP DELETE removes
+        # the pattern, the previously-blocked VE is now allowed,
+        # and the audit JSONL gained the .add/.kick/.remove triplet
+        # with the right meta.pattern. Runs after test_audit_log_84
+        # so the same audit log file is exercised by both checks.
+        try:
+            test_clientblocker_81(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  client blocker end-to-end (#81): {e}")
+            failed.append("client blocker end-to-end (#81)")
+        else:
+            log("PASS  client blocker end-to-end (#81)")
 
         # #261 plugin-management endpoints: GET /v1/plugins (read) +
         # PUT /v1/plugins/{name}/enabled (admin). Full toggle cycle on

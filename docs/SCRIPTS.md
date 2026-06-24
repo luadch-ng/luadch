@@ -523,6 +523,74 @@ side: `audit_log_max_reason_chars` (1000),
 `audit_log_max_meta_value_chars` (1000) - applied at `audit.build`
 time so both disk and `/v1/events` payloads stay bounded.
 
+### etc_clientblocker
+
+Block clients by Lua-pattern match against the BINF `AP+VE` field
+(`user:version()` returns the concatenated `<AP> <VE>` form). Closes
+[#81](https://github.com/luadch-ng/luadch/issues/81). Promoted into
+core from the `luadch-ng/scripts` companion repo (basis: pulsar
+v0.2, GPLv3).
+
+**Commands:**
+- `+addblocker <pattern> [reason]` - add a pattern. First whitespace-
+  token is the pattern; everything after it is the kick reason
+  (defaults to `etc_clientblocker_default_reason`).
+- `+delblocker <pattern>` - remove a pattern.
+- `+blocker` - list configured patterns.
+
+**Storage:** `scripts/data/etc_clientblocker.tbl`, flat
+`{ [pattern] = reason }`. The plugin auto-creates an empty file at
+onStart if the file is missing.
+
+**Listener-chain placement:** MUST sit AFTER `hub_inf_manager.lua`
+in `cfg.scripts`. The structural BINF validator (forbidden flags /
+identity-spoof kill / I4/I6 strip) is a hard precondition for the
+client-policy match; running the policy filter on un-validated INFs
+would be a layering inversion. `examples/cfg/cfg.tbl` ships them in
+the right order.
+
+**Operator self-lockout footgun.** The default
+`etc_clientblocker_check_levels` table exempts OPERATOR (60),
+SUPERVISOR (70) and ADMIN (80); HUBOWNER (100) stays in scope
+deliberately. If you add a pattern that matches your own client
+from a HUBOWNER session, flip `[100]` to `false` first, otherwise
+the next `+reload` will kick you on the next connect.
+
+**Pattern validation at edit time.** `+addblocker` / `POST
+/v1/clientblocker` reject patterns that are empty, exceed
+`etc_clientblocker_max_pattern_len` (default 200), contain
+URL-unsafe `/`, `?`, `#` or `&` (the DELETE endpoint uses the
+pattern as a path-var and the router does not percent-decode -
+those four chars would silently 404), or fail a
+`pcall(string.find, "", pat)` compile probe. This fails loud at
+add time rather than silently at the next onConnect (the pcall
+guard around the actual match call is belt-and-suspenders).
+All other Lua-pattern punctuation (`%`, `+`, `.`, `(`, `)`,
+`[`, `]`, `*`, `-`, `^`, `$`) is allowed.
+
+**Audit events:** `client.block.add`, `client.block.remove`,
+`client.block.kick`. The kick event's `meta` carries `{pattern,
+version}` so post-mortem can reconstruct which rule fired and what
+the offending VE actually was.
+
+**HTTP API:**
+- `GET /v1/clientblocker` (read scope) - list patterns
+- `POST /v1/clientblocker` (admin scope) - add pattern; body
+  `{pattern, reason?}`
+- `DELETE /v1/clientblocker/{pattern}` (admin scope) - remove
+  pattern (path-encoded; the router decodes the path var)
+
+**F-INF-1d nil-VE guard** (Phase 8a): a client that did not send
+a `VE` field at BINF has nothing to match against. The check
+skips silently rather than crashing; matches the "no rule
+applies" semantic for any other missing input.
+
+**Config:** `etc_clientblocker_oplevel` (write floor for the ADC
+cmd; default 80), `etc_clientblocker_check_levels` (per-level
+boolean table), `etc_clientblocker_default_reason`
+(`"Your client is not allowed"`),
+`etc_clientblocker_max_pattern_len` (200).
+
 ### etc_keyprint
 
 Automatically extract and cache hub certificate keyprint (SHA256) for
