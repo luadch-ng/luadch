@@ -17,8 +17,8 @@
     msg_block = "[ MSGMANAGER ]--> Block User:  %s  |  Mode:  %s",
     msg_unblock = "[ MSGMANAGER ]--> Unblock User:  %s",
 
-    msg_report_block = "[ MSGMANAGER ]--> User:  %s  |  hat folgenden User geblockt:  %s  |  Mode:  %s",
-    msg_report_unblock = "[ MSGMANAGER ]--> User:  %s  |  hob den Block von folgendem User auf:  %s",
+    msg_report_block = "[ MSGMANAGER ]--> User:  %s  |  hat folgenden User geblockt:  %s  |  IP:  %s  |  Mode:  %s",
+    msg_report_unblock = "[ MSGMANAGER ]--> User:  %s  |  hob den Block von folgendem User auf:  %s  |  IP:  %s",
 
     msg_mode_main = "main",
     msg_mode_pm   = "pm",

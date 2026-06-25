@@ -248,8 +248,8 @@ local msg_stillblocked = lang.msg_stillblocked or "[ TRAFFICMANAGER ]--> User:  
 local msg_isbot = lang.msg_isbot or "[ TRAFFICMANAGER ]--> User is a bot."
 local msg_block = lang.msg_block or "[ TRAFFICMANAGER ]--> Block user:  %s  |  reason:  %s"
 local msg_unblock = lang.msg_unblock or "[ TRAFFICMANAGER ]--> Unblock user:  %s"
-local msg_op_report_block = lang.msg_op_report_block or "[ TRAFFICMANAGER ]--> User:  %s  |  has blocked user:  %s  |  reason:  %s"
-local msg_op_report_unblock = lang.msg_op_report_unblock or "[ TRAFFICMANAGER ]--> User:  %s  |  has unblocked user:  %s"
+local msg_op_report_block = lang.msg_op_report_block or "[ TRAFFICMANAGER ]--> User:  %s  |  has blocked user:  %s  |  IP:  %s  |  reason:  %s"
+local msg_op_report_unblock = lang.msg_op_report_unblock or "[ TRAFFICMANAGER ]--> User:  %s  |  has unblocked user:  %s  |  IP:  %s"
 local msg_autoblock = lang.msg_autoblock or "[ TRAFFICMANAGER ]--> This user was autoblocked by script permissions."
 local msg_onsearch = lang.msg_onsearch or "[ TRAFFICMANAGER ]--> Your search function is disabled."
 local msg_unknown = lang.msg_unknown or "<UNKNOWN>"
@@ -694,7 +694,8 @@ add = function( firstnick, scriptname, reason, user )
         local msg_user = utf.format( msg_block, firstnick, reason )
         user:reply( msg_user, hub.getbot() )
         --> send report
-        local msg_report = utf.format( msg_op_report_block, user:nick(), target_nick, reason )
+        local target_ip = ( target and target:ip() ) or msg_unknown
+        local msg_report = utf.format( msg_op_report_block, user:nick(), target_nick, target_ip, reason )
         report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report )
         --> if target is online
         if target then
@@ -720,7 +721,8 @@ add = function( firstnick, scriptname, reason, user )
         block_tbl[ firstnick ][ 3 ] = util.date()
         util.savetable( block_tbl, "block_tbl", block_file )
         --> send report
-        local msg_report = utf.format( msg_op_report_block, scriptname, target_nick, reason )
+        local target_ip = ( target and target:ip() ) or msg_unknown
+        local msg_report = utf.format( msg_op_report_block, scriptname, target_nick, target_ip, reason )
         report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report )
         --> if target is online
         if target then
@@ -800,7 +802,8 @@ del = function( firstnick, scriptname, user )
         block_tbl[ firstnick ] = nil
         util.savetable( block_tbl, "block_tbl", block_file )
         --> send report
-        local msg_report = utf.format( msg_op_report_unblock, user:nick(), target_nick )
+        local target_ip = ( target and target:ip() ) or msg_unknown
+        local msg_report = utf.format( msg_op_report_unblock, user:nick(), target_nick, target_ip )
         report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report )
         --> send msg to user
         local msg_user = utf.format( msg_unblock, firstnick )
@@ -821,7 +824,8 @@ del = function( firstnick, scriptname, user )
         block_tbl[ firstnick ] = nil
         util.savetable( block_tbl, "block_tbl", block_file )
         --> send report
-        local msg_report = utf.format( msg_op_report_unblock, scriptname, target_nick )
+        local target_ip = ( target and target:ip() ) or msg_unknown
+        local msg_report = utf.format( msg_op_report_unblock, scriptname, target_nick, target_ip )
         report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report )
         if target then --> target is online
             --> send msg to target
@@ -1344,7 +1348,8 @@ local http_handler_block_user = function( req )
         local prefix = hub.escapeto( nick_prefix_prefix_table[ target_level ] or "" )
         target_nick = prefix .. target_firstnick
     end
-    local msg_report = utf.format( msg_op_report_block, by, target_nick, reason )
+    local target_ip = ( target and target:ip() ) or msg_unknown
+    local msg_report = utf.format( msg_op_report_block, by, target_nick, target_ip, reason )
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report )
 
     -- If target online: notify + add description flag + broadcast INF
@@ -1438,7 +1443,8 @@ local http_handler_unblock_user = function( req )
     block_tbl[ target_firstnick ] = nil
     util.savetable( block_tbl, "block_tbl", block_file )
 
-    local msg_report = utf.format( msg_op_report_unblock, by, target_nick )
+    local target_ip = ( target and target:ip() ) or msg_unknown
+    local msg_report = utf.format( msg_op_report_unblock, by, target_nick, target_ip )
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report )
 
     if target then

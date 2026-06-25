@@ -199,6 +199,11 @@ return { -- the settings are a lua table, do not tough this!
         [ 100 ] = true,  -- hubowner
     },
 
+    usr_nick_prefix_report = true,  -- on a prefix-kick fire etc_report.send with nick+IP+reason (boolean)
+    usr_nick_prefix_report_hubbot = false,  -- send the report as a hubbot PM (boolean)
+    usr_nick_prefix_report_opchat = true,  -- send the report into op-chat (boolean)
+    usr_nick_prefix_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
     ---------------------------------------------------------------------------------------------------------------------------------
     --// usr_desc_prefix.lua settings | this script adds a prefix to the description of a user
 
