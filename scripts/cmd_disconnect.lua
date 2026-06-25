@@ -56,9 +56,16 @@
 --------------
 
 local scriptname = "cmd_disconnect"
-local scriptversion = "1.4"
+local scriptversion = "1.5"
 
 local cmd = "disconnect"
+
+-- #343: ADC TL bounds. -1 = permanent, 0 = immediate retry,
+-- positive seconds otherwise. The 1-day upper bound matches the
+-- cfg validator (longer cooldowns are abuse-of-tool; the right
+-- mechanism for those is +ban).
+local TL_MIN = -1
+local TL_MAX = 86400
 
 --// imports
 local help, ucmd, hubcmd
@@ -66,6 +73,7 @@ local scriptlang = cfg.get( "language" )
 local lang, err = cfg.loadlanguage( scriptlang, scriptname ); lang = lang or {}; err = err and hub.debug( err )
 local minlevel = cfg.get( "cmd_disconnect_minlevel" )
 local sendmainmsg = cfg.get( "cmd_disconnect_sendmainmsg" )
+local default_tl = cfg.get( "cmd_disconnect_default_tl" ) or 30
 local report = hub.import( "etc_report" )
 local report_activate = cfg.get( "cmd_disconnect_report" )
 local llevel = cfg.get( "cmd_disconnect_llevel" )
@@ -74,13 +82,14 @@ local report_opchat = cfg.get( "cmd_disconnect_report_opchat" )
 
 --// msgs
 local help_title = lang.help_title or "cmd_disconnect.lua"
-local help_usage = lang.help_usage or "[+!#]disconnect <NICK> <REASON>"
-local help_desc = lang.help_desc or "Disconnects a user"
+local help_usage = lang.help_usage or "[+!#]disconnect <NICK> [TL<SECONDS>] <REASON>"
+local help_desc = lang.help_desc or "Disconnects a user. Optional TL<SECONDS> sets the ADC time-left field: -1 = don't auto-reconnect, 0 = immediate retry, N = wait N seconds (default from cfg)."
 
 local user_msg = lang.user_msg or "[ DISCONNECT ]--> You were disconnected by: %s  |  reason: %s"
 local report_msg = lang.report_msg or "[ DISCONNECT ]--> User  %s  was disconnected by  %s  |  reason: %s"
 
-local msg_usage = lang.msg_usage or "Usage: [+!#]disconnect <NICK> <REASON>"
+local msg_usage = lang.msg_usage or "Usage: [+!#]disconnect <NICK> [TL<SECONDS>] <REASON>"
+local msg_bad_tl = lang.msg_bad_tl or "Invalid TL value. Must be an integer between -1 and 86400 (-1 = permanent, 0 = immediate, N = wait N seconds)."
 local msg_denied1 = lang.msg_denied1 or "You are not allowed to use this command."
 local msg_denied2 = lang.msg_denied2 or "You can't disconnect superior users."
 local msg_denied3 = lang.msg_denied3 or "You can't disconnect yourself."
@@ -117,21 +126,69 @@ local ucmd_menu2 = lang.ucmd_menu2 or { "Disconnect", "OK" }
 -- (single source of truth across the Phase 2 bundled-plugin
 -- migrations - defence in depth around adclib::escape, which only
 -- handles ' ', '\n', '\\').
-local do_disconnect = function( targetuser, reason, actor_label )
+-- Pure parser: extract optional TL<N> token from the raw
+-- parameters string. Returns (tl, remaining_reason) where:
+--   - tl == nil:   no TL token present, params is the full reason
+--   - tl == false: TL<N> was present but N is malformed / out of
+--                  bounds (caller surfaces msg_bad_tl)
+--   - tl == N:     valid override, reason is the remainder (may
+--                  be empty if operator typed only "TL<N>")
+-- Two patterns are matched:
+--   (a) "TL<N> <reason ...>" -> the standard case
+--   (b) "TL<N>" alone        -> reason becomes "", N still applies
+-- This avoids the surprising behaviour where "+disconnect Bob TL30"
+-- would treat the literal "TL30" as the reason. Exported via the
+-- public return table for unit testing.
+local function parse_tl_token( params_after_nick )
+    if type( params_after_nick ) ~= "string" then return nil, params_after_nick or "" end
+    local maybe_tl, rest = utf.match( params_after_nick, "^(TL%-?%d+)%s+(.*)$" )
+    if not maybe_tl then
+        maybe_tl = utf.match( params_after_nick, "^(TL%-?%d+)%s*$" )
+        rest = ""
+    end
+    if not maybe_tl then
+        return nil, params_after_nick
+    end
+    local n_str = maybe_tl:sub( 3 )    -- strip "TL" prefix
+    local n = tonumber( n_str )
+    if not n or n ~= math.floor( n ) or n < TL_MIN or n > TL_MAX then
+        return false, nil
+    end
+    return n, rest
+end
+
+local do_disconnect = function( targetuser, reason, actor_label, tl )
     local clean_reason = util.strip_control_bytes( reason )
     local clean_actor  = util.strip_control_bytes( actor_label )
     local targetuser_nick = targetuser:nick()
+    local effective_tl = tl
+    if type( effective_tl ) ~= "number"
+       or effective_tl ~= math.floor( effective_tl )
+       or effective_tl < TL_MIN or effective_tl > TL_MAX
+    then
+        effective_tl = default_tl
+    end
     local msg_target = utf.format( user_msg, clean_actor, clean_reason )
-    targetuser:kill( "ISTA 230 " .. hub.escapeto( msg_target ) .. "\n", "TL30" )
+    targetuser:kill( "ISTA 230 " .. hub.escapeto( msg_target ) .. "\n", "TL" .. effective_tl )
     local msg_report = utf.format( report_msg, targetuser_nick, clean_actor, clean_reason )
-    return msg_report
+    return msg_report, effective_tl
 end
 
 local onbmsg = function( user, adccmd, parameters )
     local user_level = user:level()
     local user_nick = user:nick()
     local target = utf.match( parameters, "^(%S+)" )
-    local reason = ( target and utf.match( parameters, "^%S+ (.*)" ) ) or ""
+    local rest = ( target and utf.match( parameters, "^%S+%s+(.*)$" ) ) or ""
+    -- #343: optional TL<N> token between NICK and REASON. parse_tl_token
+    -- returns (nil, rest) if no TL token, (false, nil) if a TL<N> is
+    -- present but malformed/out-of-bounds (loud usage error), or
+    -- (N, reason) on a valid TL override.
+    local tl, reason = parse_tl_token( rest )
+    if tl == false then
+        user:reply( msg_bad_tl, hub.getbot() )
+        return PROCESSED
+    end
+    reason = reason or ""
     local targetuser = hub.isnickonline( target )
     if not target then
         user:reply( msg_usage, hub.getbot() )
@@ -159,14 +216,14 @@ local onbmsg = function( user, adccmd, parameters )
         user:reply( msg_denied3, hub.getbot() )
         return PROCESSED
     end
-    local msg_report = do_disconnect( targetuser, reason, user_nick )
+    local msg_report, effective_tl = do_disconnect( targetuser, reason, user_nick, tl )
     -- Order preserved from v1.3: chat echo to the operator BEFORE
     -- the opchat report fires (the report can hit the same operator
     -- in opchat, and historically they saw their own kick echo first).
     if sendmainmsg then user:reply( msg_report, hub.getbot() ) end
     report.send( report_activate, report_hubbot, report_opchat, llevel, msg_report )
     audit.fire( audit.build( "user.kick", user, targetuser,
-        ( reason ~= "" and reason or nil ), nil ) )
+        ( reason ~= "" and reason or nil ), { tl = effective_tl } ) )
     return PROCESSED
 end
 
@@ -184,7 +241,11 @@ end
 local http_handler_disconnect = function( req, target )
     local reason = ( req.body and req.body.reason ) or ""
     local actor_label = req.token_label or "http-api"
-    local msg_report = do_disconnect( target, reason, actor_label )
+    -- #343: optional body.tl integer. Schema validation in the
+    -- router already enforces type + range; we accept nil here
+    -- as "use cfg default" via do_disconnect's own clamp logic.
+    local tl = req.body and req.body.tl
+    local msg_report, effective_tl = do_disconnect( target, reason, actor_label, tl )
     -- HTTP path has no operator-chat to echo into; fire the
     -- opchat report directly so an operator watching opchat sees
     -- a consistent line regardless of which surface drove the kick.
@@ -192,8 +253,8 @@ local http_handler_disconnect = function( req, target )
     audit.fire( audit.build( "user.kick",
         { nick = actor_label, sid = "<http>" },
         target,
-        ( reason ~= "" and reason or nil ), nil ) )
-    return { reason = reason }
+        ( reason ~= "" and reason or nil ), { tl = effective_tl } ) )
+    return { reason = reason, tl = effective_tl }
 end
 
 hub.setlistener( "onStart", {},
@@ -217,9 +278,10 @@ hub.setlistener( "onStart", {},
         util_http.http_register_user_action( scriptname,
             "DELETE", "/v1/users/{sid}", "disconnect",
             http_handler_disconnect, {
-                description = "disconnect (kick) an online user by SID; body { reason: string optional }",
+                description = "disconnect (kick) an online user by SID; body { reason: string optional, tl: integer optional (-1..86400, ADC time-left; -1 = permanent, 0 = immediate retry, N = wait N seconds; #343) }",
                 request_schema = {
                     reason = { type = "string", max_length = 256 },
+                    tl     = { type = "integer", min = -1, max = 86400 },
                 },
             }
         )
@@ -228,3 +290,11 @@ hub.setlistener( "onStart", {},
 )
 
 hub.debug( "** Loaded " .. scriptname .. " " .. scriptversion .." **" )
+
+
+-- Public surface: expose the pure parser for the unit test. The
+-- ADC + HTTP handlers use it internally; the test exercises the
+-- TL token shape contract.
+return {
+    parse_tl_token = parse_tl_token,
+}

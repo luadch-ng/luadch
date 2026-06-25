@@ -1197,6 +1197,22 @@ local defaults = {
         end
     },
 
+    -- Default ADC `TL` value (time-left in seconds) sent with the
+    -- disconnect kick. Tells the client when it may reconnect.
+    -- -1 = permanent (client should NOT auto-reconnect via this
+    -- nick); 0 = immediate retry allowed; N > 0 = wait N seconds.
+    -- Operators can override per-command via `+disconnect <NICK>
+    -- TL<N> <REASON>` (#343). Capped at 1 day - longer cooldowns
+    -- belong in `+ban`.
+    cmd_disconnect_default_tl = { 30,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= -1
+                and value <= 86400
+        end
+    },
+
     ---------------------------------------------------------------------------------------------------------------------------------
     --// cmd_errors.lua settings
 

@@ -473,6 +473,7 @@ return { -- the settings are a lua table, do not tough this!
     cmd_disconnect_report_hubbot = false,  -- send report as hubbot msg? (boolean)
     cmd_disconnect_report_opchat = true,  -- send report as opchat feed? (boolean)
     cmd_disconnect_llevel = 60,  -- min level to get a report? (only for hubbot msg) (integer)
+    cmd_disconnect_default_tl = 30,  -- default ADC TL (seconds) sent with the kick; -1 = permanent, 0 = immediate retry, N = wait N seconds; per-cmd override via `+disconnect <NICK> TL<N> <REASON>` (#343) (integer)
 
     ---------------------------------------------------------------------------------------------------------------------------------
     --// cmd_ban.lua settings | this script adds a command to ban/unban users from hub
