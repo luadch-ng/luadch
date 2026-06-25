@@ -127,16 +127,25 @@ local ucmd_menu2 = lang.ucmd_menu2 or { "Disconnect", "OK" }
 -- migrations - defence in depth around adclib::escape, which only
 -- handles ' ', '\n', '\\').
 -- Pure parser: extract optional TL<N> token from the raw
--- parameters string. Returns (tl, remaining_reason) where tl is
--- nil if the second token does not match the TL<N> shape (in
--- which case the entire parameters[after-nick] is the reason).
--- Returns (false, err_msg) when a TL<N> token IS present but
--- the N is malformed / out of bounds - we fail loud at parse
--- time rather than silently clamping. Exported via the public
--- return table for unit testing.
+-- parameters string. Returns (tl, remaining_reason) where:
+--   - tl == nil:   no TL token present, params is the full reason
+--   - tl == false: TL<N> was present but N is malformed / out of
+--                  bounds (caller surfaces msg_bad_tl)
+--   - tl == N:     valid override, reason is the remainder (may
+--                  be empty if operator typed only "TL<N>")
+-- Two patterns are matched:
+--   (a) "TL<N> <reason ...>" -> the standard case
+--   (b) "TL<N>" alone        -> reason becomes "", N still applies
+-- This avoids the surprising behaviour where "+disconnect Bob TL30"
+-- would treat the literal "TL30" as the reason. Exported via the
+-- public return table for unit testing.
 local function parse_tl_token( params_after_nick )
     if type( params_after_nick ) ~= "string" then return nil, params_after_nick or "" end
     local maybe_tl, rest = utf.match( params_after_nick, "^(TL%-?%d+)%s+(.*)$" )
+    if not maybe_tl then
+        maybe_tl = utf.match( params_after_nick, "^(TL%-?%d+)%s*$" )
+        rest = ""
+    end
     if not maybe_tl then
         return nil, params_after_nick
     end

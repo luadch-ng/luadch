@@ -196,16 +196,31 @@ do
 end
 
 ----------------------------------------------------------------------
--- 7. TL token with no rest after it -> NOT a valid TL+reason
---    (the pattern requires whitespace + rest; "TL30" alone has no
---    reason and is treated as the whole reason). This is a documented
---    quirk; operators should always specify a reason.
+-- 7. TL token with no reason after it -> tl applied, reason ""
+--    The original pattern required a trailing reason; the v0.10
+--    follow-up extended parse_tl_token to also accept "TL<N>"
+--    alone (reason becomes ""). Operators should still type a
+--    reason in practice, but the previous quirk (where "TL30"
+--    became the literal reason) was surprising. Per #343 review
+--    NIT 2.
 ----------------------------------------------------------------------
 
 do
     local tl, rest = parse( "TL30" )
-    eq( "TL30 alone (no rest): tl is nil", tl,   nil )
-    eq( "TL30 alone: rest unchanged",      rest, "TL30" )
+    eq( "TL30 alone: tl is 30",  tl,   30 )
+    eq( "TL30 alone: rest is ''", rest, "" )
+
+    tl, rest = parse( "TL-1" )
+    eq( "TL-1 alone: tl is -1",  tl,   -1 )
+    eq( "TL-1 alone: rest is ''", rest, "" )
+
+    tl, rest = parse( "TL30  " )
+    eq( "TL30 trailing-ws: tl is 30",  tl,   30 )
+    eq( "TL30 trailing-ws: rest is ''", rest, "" )
+
+    -- Out-of-bounds still rejected even without a reason.
+    tl, rest = parse( "TL999999" )
+    eq( "TL999999 alone: tl is false (oob)", tl, false )
 end
 
 ----------------------------------------------------------------------

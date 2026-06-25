@@ -13,7 +13,7 @@
     msg_denied3 = "Du kannst dich nicht selbst disconnecten.",
     msg_denied4 = "Der User ist offline.",
     msg_bot = "Fehler: User ist ein Bot.",
-    msg_bad_tl = "Ungueltiger TL-Wert. Muss eine Ganzzahl zwischen -1 und 86400 sein (-1 = permanent, 0 = sofort, N = warte N Sekunden).",
+    msg_bad_tl = "Ungültiger TL-Wert. Muss eine Ganzzahl zwischen -1 und 86400 sein (-1 = permanent, 0 = sofort, N = warte N Sekunden).",
 
     ucmd_target = "Username",
     ucmd_reason = "Begründung",
