@@ -8622,6 +8622,31 @@ def test_clientblocker_81(staging_dir: Path, proc=None):
                 f"seen actions: {seen_actions!r}"
             )
 
+    # 7. Out-of-the-box block: the bundled scripts/data/etc_clientblocker.tbl
+    # ships with the Sopor-curated cheat/mod client list (RSX++, CrZ++,
+    # FearDC, CleanDC++, SmVDC++, DC@fe++). Connecting with one of these
+    # AP/VE strings must be kicked without any operator configuration.
+    # FearDC is the cleanest pattern (`^FearDC.+` - no special-char escape
+    # confusion in the test's BINF construction).
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        _sid, _reader, frame = _adc_login(
+            sock, "dummy", "test",
+            ve="FearDC/2.0", expect_kill=True,
+        )
+        if not frame.startswith("ISTA 231"):
+            raise TestFailure(
+                f"#81 out-of-the-box: expected ISTA 231 kick from bundled "
+                f"FearDC pattern, got {frame!r}"
+            )
+        if "FearDC" not in frame:
+            raise TestFailure(
+                f"#81 out-of-the-box: ISTA 231 reason does not contain "
+                f"FearDC: {frame!r}"
+            )
+        _assert_adc_drops(sock)
+
 
 def test_http_reload(staging_dir: Path, proc=None):
     """#82 deferred Phase-2-spec item: cmd_reload plugin migrates to

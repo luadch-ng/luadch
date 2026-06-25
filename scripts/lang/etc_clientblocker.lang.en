@@ -31,5 +31,6 @@ return {
     msg_list_footer        = "=== END ===\n",
     msg_list_empty         = "(no patterns configured)",
     msg_err                = "etc_clientblocker.lua: error: database file (scripts/data/etc_clientblocker.tbl) corrupt or missing, a new one was created.",
+    msg_report             = "[ CLIENT BLOCKER ]--> The user %s with IP %s is running %s and is not allowed in this hub. Matching pattern: %s",
 
 }

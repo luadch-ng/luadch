@@ -965,19 +965,27 @@ return { -- the settings are a lua table, do not tough this!
     etc_clientblocker_default_reason = "Your client is not allowed",  -- fallback kick reason when an operator adds a pattern without a custom one (string)
     etc_clientblocker_max_pattern_len = 200,  -- hard cap on pattern length to bound string.find runtime (integer)
 
+    etc_clientblocker_report = true,  -- on every kick, fire etc_report.send with nick+ip+version+pattern so staff see it in chat (boolean)
+    etc_clientblocker_report_hubbot = false,  -- send the report as a hubbot PM to operators at or above etc_clientblocker_llevel (boolean)
+    etc_clientblocker_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_clientblocker_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
     etc_clientblocker_check_levels = {  -- which levels the BINF check applies to (table of integer -> boolean)
 
         -- Operators (60+) are exempt by default so an operator who
         -- adds a pattern matching their own client does not self-
         -- lockout. HUBOWNER (100) stays in scope deliberately - if
         -- you really want to test from a blocked client, flip it
-        -- here and +reload.
+        -- here and +reload. Level 55 (SBOT) is exempt: bots have no
+        -- BINF VE/AP to check against and should never be a kick
+        -- target.
         [ 0 ]   = true,   -- UNREG
         [ 10 ]  = true,   -- GUEST
         [ 20 ]  = true,   -- REG
         [ 30 ]  = true,   -- VIP
         [ 40 ]  = true,   -- SVIP
         [ 50 ]  = true,   -- SERVER
+        [ 55 ]  = false,  -- SBOT
         [ 60 ]  = false,  -- OPERATOR
         [ 70 ]  = false,  -- SUPERVISOR
         [ 80 ]  = false,  -- ADMIN

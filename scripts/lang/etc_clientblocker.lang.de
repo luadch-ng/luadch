@@ -31,5 +31,6 @@ return {
     msg_list_footer        = "=== ENDE ===\n",
     msg_list_empty         = "(keine Pattern konfiguriert)",
     msg_err                = "etc_clientblocker.lua: Fehler: Datenbank-Datei (scripts/data/etc_clientblocker.tbl) defekt oder fehlt, neue Datei wurde angelegt.",
+    msg_report             = "[ CLIENT BLOCKER ]--> Benutzer %s mit IP %s nutzt %s und ist hier nicht erlaubt. Matching Pattern: %s",
 
 }
