@@ -73,24 +73,24 @@ local report_hubbot = cfg.get( "cmd_disconnect_report_hubbot" )
 local report_opchat = cfg.get( "cmd_disconnect_report_opchat" )
 
 --// msgs
-local help_title = lang.help_title or "disconnect"
-local help_usage = lang.help_usage or "[+!#]disconnect <Nick> <Grund>"
-local help_desc = lang.help_desc or "disconnected einen User"
+local help_title = lang.help_title or "cmd_disconnect.lua"
+local help_usage = lang.help_usage or "[+!#]disconnect <NICK> <REASON>"
+local help_desc = lang.help_desc or "Disconnects a user"
 
-local user_msg = lang.user_msg or "[ DISCONNECT ]--> Du wurdest disconnected von: %s  |  Grund: %s"
-local report_msg = lang.report_msg or "[ DISCONNECT ]--> Der User: %s  wurde disconnected von: %s  |  Grund: %s"
+local user_msg = lang.user_msg or "[ DISCONNECT ]--> You were disconnected by: %s  |  reason: %s"
+local report_msg = lang.report_msg or "[ DISCONNECT ]--> User  %s  was disconnected by  %s  |  reason: %s"
 
 local msg_usage = lang.msg_usage or "Usage: [+!#]disconnect <NICK> <REASON>"
-local msg_denied1 = lang.msg_denied1 or "Du bist nicht befugt diesen Befehl zu nutzen!"
-local msg_denied2 = lang.msg_denied2 or "Du kannst keinen disconnecten der ein höheres Level hat als du!"
-local msg_denied3 = lang.msg_denied3 or "Du kannst dich nicht selbst disconnecten!"
-local msg_denied4 = lang.msg_denied4 or "Der User ist offline!"
+local msg_denied1 = lang.msg_denied1 or "You are not allowed to use this command."
+local msg_denied2 = lang.msg_denied2 or "You can't disconnect superior users."
+local msg_denied3 = lang.msg_denied3 or "You can't disconnect yourself."
+local msg_denied4 = lang.msg_denied4 or "User is offline."
 local msg_bot = lang.msg_bot or "Error: User is a bot."
 
 local ucmd_target = lang.ucmd_target or "Username"
-local ucmd_reason = lang.ucmd_reason or "Begründung"
-local ucmd_menu1 = lang.ucmd_menu1 or { "User", "Control", "Disconnecten", "nach NICK" }
-local ucmd_menu2 = lang.ucmd_menu2 or { "Disconnecten", "OK" }
+local ucmd_reason = lang.ucmd_reason or "Reason"
+local ucmd_menu1 = lang.ucmd_menu1 or { "User", "Control", "Disconnect", "by NICK" }
+local ucmd_menu2 = lang.ucmd_menu2 or { "Disconnect", "OK" }
 
 
 ----------
