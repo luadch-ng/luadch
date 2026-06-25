@@ -2136,6 +2136,32 @@ local defaults = {
         end
     },
 
+    -- Op-chat report when a nick-prefix conflict causes the kick. The
+    -- onConnect listener can NOT fire onFailedAuth (the prefix kick
+    -- happens inside the same listener chain, causing recursion) so
+    -- the plugin sends a direct report.send instead. Same defaults
+    -- as sibling reporting plugins.
+    usr_nick_prefix_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    usr_nick_prefix_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    usr_nick_prefix_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    usr_nick_prefix_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
     ---------------------------------------------------------------------------------------------------------------------------------
     --// usr_desc_prefix.lua settings
 
