@@ -109,13 +109,25 @@ prevent re-registration.
 
 ### cmd_disconnect
 
-Forcefully disconnect a user with optional reason message.
+Forcefully disconnect a user with optional reason message. Optional
+`TL<seconds>` token between nick and reason overrides the ADC
+time-left field (`-1` = permanent / don't auto-reconnect, `0` =
+immediate retry, `N` = wait N seconds); default comes from
+`cmd_disconnect_default_tl` (#343). Range -1..86400; longer
+cooldowns belong in `+ban`.
 
-**Commands:** `+disconnect <nick> <reason>`
+**Commands:** `+disconnect <nick> [TL<seconds>] <reason>`
+
+**HTTP:** `DELETE /v1/users/{sid}` with optional `body.tl: integer`
+in the same range.
+
+**Audit meta:** `{ tl = <effective_tl> }` so the trail records which
+TL value the kick used.
 
 **Config:** `cmd_disconnect_minlevel`, `cmd_disconnect_sendmainmsg`,
 `cmd_disconnect_report`, `cmd_disconnect_report_hubbot`,
-`cmd_disconnect_report_opchat`, `cmd_disconnect_llevel`
+`cmd_disconnect_report_opchat`, `cmd_disconnect_llevel`,
+`cmd_disconnect_default_tl`
 
 ### cmd_errors
 
