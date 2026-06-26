@@ -239,6 +239,12 @@ local SANDBOX_GLOBALS = {
     -- luadch core modules (always present in _G after init.lua)
     "cfg", "util", "util_http", "http_filter", "http_events", "http_client", "adc", "adclib", "signal", "out",
     "audit",
+    -- core/secrets.lua (#78 Precursor 0c): sensitive-key registry
+    -- + env-var-first cfg lookup. Future API-keyed plugins
+    -- (etc_geoip MaxMind license, etc_proxydetect provider keys,
+    -- webhook tokens) call `secrets.lookup(cfg_key)` so Docker
+    -- operators can set keys via env vars instead of cfg.tbl.
+    "secrets",
     "unicode",
     -- read-only program constants (PROGRAM_NAME / VERSION / FORK /
     -- COPYRIGHT / CONFIG_PATH). Static strings, no capability; lets
