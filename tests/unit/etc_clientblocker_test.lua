@@ -161,13 +161,21 @@ end
 
 ----------------------------------------------------------------------
 -- load plugin + onStart so handlers + patterns_tbl are live
+--
+-- Pre-populate _next_loaded with a sentinel so the v0.10 seed-on-
+-- empty logic (introduced for the testhub-sync bug) does NOT fire
+-- and inject BUNDLED_DEFAULTS into patterns_tbl - those would
+-- inflate the entry counts the rest of the test asserts against.
+-- We clear the sentinel from patterns_tbl right after onStart so
+-- the existing test cases run against a clean empty map.
 ----------------------------------------------------------------------
 
-_next_loaded = { }
+_next_loaded = { [ "__test_sentinel__" ] = "skip-seed" }
 local plugin = assert( loadfile( "scripts/etc_clientblocker.lua" ) )( )
 assert( _registered.onStart, "onStart not registered" )
 assert( _registered.onConnect, "onConnect not registered" )
 _registered.onStart( )
+plugin.get_patterns_tbl( )[ "__test_sentinel__" ] = nil
 
 local POST   = _registered.http[ "POST /v1/clientblocker" ];               assert( POST,   "POST not registered" )
 local GET    = _registered.http[ "GET /v1/clientblocker" ];                assert( GET,    "GET not registered" )
@@ -547,6 +555,119 @@ do
     _registered.onStart( )
     eq( "reload: old in-memory map gone", plugin.get_patterns_tbl( )[ "AirDC%+%+%s2" ], nil )
     eq( "reload: new in-memory map live", plugin.get_patterns_tbl( )[ "manualpat" ],    "from disk" )
+end
+
+----------------------------------------------------------------------
+-- 21. Seed-on-empty: when the .tbl on disk is empty (e.g. a fresh
+--     hub install OR a docker-compose script-sync that left the v0
+--     empty-stub .tbl untouched while replacing the .lua), the v0.10
+--     onStart logic must inject BUNDLED_DEFAULTS into the in-memory
+--     map AND persist them to disk. Regression test for the testhub
+--     symptom Aybo reported.
+----------------------------------------------------------------------
+
+do
+    _saved_table = nil
+    _next_loaded = { }    -- empty .tbl on disk
+    _registered.onStart( )
+    local live = plugin.get_patterns_tbl( )
+    -- 6 bundled cheat / mod client defaults should be seeded.
+    local count = 0
+    for _ in pairs( live ) do count = count + 1 end
+    eq( "seed-on-empty: bundled count == 6", count, 6 )
+    eq( "seed-on-empty: CleanDC default seeded",
+        live[ "^CleanDC%+%+.+" ] ~= nil, true )
+    eq( "seed-on-empty: FearDC default seeded",
+        live[ "^FearDC.+" ] ~= nil, true )
+    -- Defaults must also be PERSISTED to disk so subsequent reloads
+    -- use them as-is (no infinite re-seed loop).
+    eq( "seed-on-empty: persisted to disk",
+        _saved_table and _saved_table[ "^FearDC.+" ] ~= nil, true )
+end
+
+----------------------------------------------------------------------
+-- 22. Seed-on-non-empty: when the .tbl has any operator entries,
+--     onStart MUST leave them alone (no merge with bundled defaults).
+--     This is what protects an operator who has +delblocker'd a
+--     bundled default from having it come back on reload.
+----------------------------------------------------------------------
+
+do
+    _saved_table = nil
+    _next_loaded = { [ "operator_only_pattern" ] = "kept" }
+    _registered.onStart( )
+    local live = plugin.get_patterns_tbl( )
+    local count = 0
+    for _ in pairs( live ) do count = count + 1 end
+    eq( "non-empty .tbl: count stays at 1",                    count, 1 )
+    eq( "non-empty .tbl: operator entry preserved",            live[ "operator_only_pattern" ], "kept" )
+    eq( "non-empty .tbl: bundled NOT injected",                live[ "^FearDC.+" ], nil )
+    eq( "non-empty .tbl: NOT re-persisted (no save call)",     _saved_table, nil )
+end
+
+----------------------------------------------------------------------
+-- 22b. +delblocker by 1-based index from +blocker output. Operator
+--      should not need to retype `^FearDC.+` (with the easy-to-miss
+--      `^` anchor on the bundled defaults) - typing the row number
+--      from the +blocker list works just as well.
+----------------------------------------------------------------------
+
+do
+    -- Reset to a known state with 3 patterns. spairs sorts alpha so
+    -- the order is: "aaa" -> 1, "mmm" -> 2, "zzz" -> 3.
+    local tbl = plugin.get_patterns_tbl( )
+    for k in pairs( tbl ) do tbl[ k ] = nil end
+    tbl[ "aaa" ] = "aaa-reason"
+    tbl[ "mmm" ] = "mmm-reason"
+    tbl[ "zzz" ] = "zzz-reason"
+
+    local user, _, replied_of = fresh_user{ level = 80, nick = "op" }
+
+    -- Delete row 2 ("mmm") via index.
+    del_h( user, "delblocker", "2" )
+    eq( "delblocker by index 2: removed mmm", plugin.get_patterns_tbl( )[ "mmm" ], nil )
+    eq( "delblocker by index 2: aaa still there", plugin.get_patterns_tbl( )[ "aaa" ], "aaa-reason" )
+    eq( "delblocker by index 2: zzz still there", plugin.get_patterns_tbl( )[ "zzz" ], "zzz-reason" )
+
+    -- After delete, indices re-shift: 1 = aaa, 2 = zzz. Delete row 1.
+    del_h( user, "delblocker", "1" )
+    eq( "delblocker by index 1: removed aaa", plugin.get_patterns_tbl( )[ "aaa" ], nil )
+    eq( "delblocker by index 1: zzz still there", plugin.get_patterns_tbl( )[ "zzz" ], "zzz-reason" )
+
+    -- Out-of-range index falls through to literal-pattern not_found.
+    del_h( user, "delblocker", "99" )
+    eq( "delblocker by index 99: literal-fallback not_found in reply",
+        ( replied_of( ) or "" ):find( "No such pattern" ) ~= nil
+        or ( replied_of( ) or "" ):find( "99" ) ~= nil, true )
+
+    -- Literal pattern still works (post-fix, pattern "zzz" remains).
+    del_h( user, "delblocker", "zzz" )
+    eq( "delblocker literal: removed zzz", plugin.get_patterns_tbl( )[ "zzz" ], nil )
+end
+
+----------------------------------------------------------------------
+-- 23. +blocker uses DMSG (3-arg reply) so multi-line list output
+--     renders correctly across DC clients incl. AirDC++ (testhub
+--     feedback: BMSG path appeared empty in AirDC++).
+----------------------------------------------------------------------
+
+do
+    -- Need a fresh_user variant that captures the reply ARITY.
+    local last_reply
+    local op_user = {
+        level = function( ) return 100 end,
+        nick  = function( ) return "op" end,
+        ip    = function( ) return "1.2.3.4" end,
+        reply = function( _, msg, from, to )
+            last_reply = { msg = msg, from = from, to = to }
+        end,
+        kill  = function( ) end,
+    }
+    list_h( op_user, "blocker", "" )
+    eq( "+blocker: reply got a message",
+        type( last_reply ) == "table" and type( last_reply.msg ) == "string", true )
+    eq( "+blocker: reply is DMSG (3rd arg present)",
+        last_reply.to ~= nil, true )
 end
 
 ----------------------------------------------------------------------

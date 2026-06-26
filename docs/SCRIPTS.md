@@ -547,7 +547,7 @@ v0.2, GPLv3).
 - `+addblocker <pattern> [reason]` - add a pattern. First whitespace-
   token is the pattern; everything after it is the kick reason
   (defaults to `etc_clientblocker_default_reason`).
-- `+delblocker <pattern>` - remove a pattern.
+- `+delblocker <pattern|N>` - remove a pattern by literal pattern OR by 1-based row number from the `+blocker` list output (so operators don't need to retype the `^anchor.+` form of the bundled defaults).
 - `+blocker` - list configured patterns.
 
 **Storage:** `scripts/data/etc_clientblocker.tbl`, flat
