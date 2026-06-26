@@ -1413,7 +1413,7 @@ return { -- the settings are a lua table, do not tough this!
 
         "usr_nick_length.lua",
         "hub_inf_manager.lua",
-        "etc_clientblocker.lua",  -- #81 client AP/VE blocklist. Must sit AFTER hub_inf_manager so structural BINF rejects (forbidden flags / identity spoofing) happen first; client-policy kicks then run on already-validated INFs.
+        { "etc_clientblocker.lua", enabled = true },  -- #81 client AP/VE blocklist. API-toggleable (#261). Must sit AFTER hub_inf_manager so structural BINF rejects (forbidden flags / identity spoofing) happen first; client-policy kicks then run on already-validated INFs.
         { "hub_runtime.lua", enabled = true },  -- using report import; API-toggleable (#261)
         { "bot_regchat.lua", enabled = true },  -- API-toggleable (#261)
         { "bot_session_chat.lua", enabled = true },  -- API-toggleable (#261)
