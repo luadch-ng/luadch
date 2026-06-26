@@ -558,31 +558,47 @@ do
 end
 
 ----------------------------------------------------------------------
--- 21. Seed-on-empty: when the .tbl on disk is empty (e.g. a fresh
---     hub install OR a docker-compose script-sync that left the v0
---     empty-stub .tbl untouched while replacing the .lua), the v0.10
---     onStart logic must inject BUNDLED_DEFAULTS into the in-memory
---     map AND persist them to disk. Regression test for the testhub
---     symptom Aybo reported.
+-- 21. Seed-on-missing: when scripts/data/etc_clientblocker.tbl does
+--     NOT exist on disk (util.loadtable returns nil), onStart seeds
+--     the 6 bundled defaults into the in-memory map and persists
+--     them. This is the canonical "first run" / fresh install path.
 ----------------------------------------------------------------------
 
 do
     _saved_table = nil
-    _next_loaded = { }    -- empty .tbl on disk
+    _next_loaded = nil    -- file missing (util_load returns nil)
     _registered.onStart( )
     local live = plugin.get_patterns_tbl( )
-    -- 6 bundled cheat / mod client defaults should be seeded.
     local count = 0
     for _ in pairs( live ) do count = count + 1 end
-    eq( "seed-on-empty: bundled count == 6", count, 6 )
-    eq( "seed-on-empty: CleanDC default seeded",
+    eq( "seed-on-missing: bundled count == 6", count, 6 )
+    eq( "seed-on-missing: CleanDC default seeded",
         live[ "^CleanDC%+%+.+" ] ~= nil, true )
-    eq( "seed-on-empty: FearDC default seeded",
+    eq( "seed-on-missing: FearDC default seeded",
         live[ "^FearDC.+" ] ~= nil, true )
-    -- Defaults must also be PERSISTED to disk so subsequent reloads
-    -- use them as-is (no infinite re-seed loop).
-    eq( "seed-on-empty: persisted to disk",
+    eq( "seed-on-missing: persisted to disk",
         _saved_table and _saved_table[ "^FearDC.+" ] ~= nil, true )
+end
+
+----------------------------------------------------------------------
+-- 21b. NO seed-on-empty: when the .tbl EXISTS on disk but contains
+--      an empty patterns table, that is the operator's deliberate
+--      "I want zero patterns" state (e.g. they +delblocker'd all 6
+--      bundled defaults). onStart must leave it alone - silently
+--      re-seeding would undo the operator's intent. Per #81 follow-
+--      up feedback from Aybo.
+----------------------------------------------------------------------
+
+do
+    _saved_table = nil
+    _next_loaded = { }    -- file EXISTS, parses to empty table
+    _registered.onStart( )
+    local live = plugin.get_patterns_tbl( )
+    local count = 0
+    for _ in pairs( live ) do count = count + 1 end
+    eq( "empty .tbl exists: count stays at 0",        count,        0 )
+    eq( "empty .tbl exists: FearDC NOT re-injected",  live[ "^FearDC.+" ], nil )
+    eq( "empty .tbl exists: NOT persisted (no save)", _saved_table, nil )
 end
 
 ----------------------------------------------------------------------

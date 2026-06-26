@@ -606,12 +606,20 @@ unmanageable, flip `etc_clientblocker_report=false` and rely on
 the audit log alone.
 
 **Default blocklist** (`scripts/data/etc_clientblocker.tbl`):
-ships with 6 well-known cheat/mod clients pre-blocked
-(`CleanDC++`, `RSX++`, `CrZ++`, `SmVDC++`, `DC@fe++`,
-`FearDC`). These are universally-malicious clients across DC
-hubs - operators almost never want them. Remove individual
-entries via `+delblocker <pattern>` or edit the .tbl directly
-and `+reload`.
+when the .tbl file does NOT exist on disk, onStart seeds 6
+well-known cheat/mod clients into it (`CleanDC++`, `RSX++`,
+`CrZ++`, `SmVDC++`, `DC@fe++`, `FearDC`). These are universally-
+malicious clients across DC hubs - operators almost never want
+them. Remove individual entries via `+delblocker <N>` (row
+number from `+blocker` output) or `+delblocker <pattern>`.
+
+The defaults are only seeded ONCE, on first run when the .tbl
+file is missing. An operator who later `+delblocker`s every
+entry keeps an empty .tbl across reloads - no silent re-seed.
+To recover the bundled defaults after deliberately emptying
+the file: `rm scripts/data/etc_clientblocker.tbl` then `+reload`
+(or hub restart). To recover a single removed default: copy
+the line from `examples/data/etc_clientblocker.tbl.example`.
 
 **Extended example list** (`examples/data/etc_clientblocker.tbl.example`):
 ~40 additional patterns curated by Sopor over years of hub
