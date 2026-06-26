@@ -29,6 +29,17 @@
                 getter, NOT a direct export, to survive +reload
                 rebinds (#239 / #238 hazard avoided)
 
+        v0.11: by Aybo
+            - seed BUNDLED_DEFAULTS only when the .tbl file is
+              MISSING on disk (not just empty). An operator who
+              +delblocker'd all 6 bundled defaults intentionally
+              now keeps the empty .tbl across +reload cycles.
+              Recovery from the script-sync edge case (where
+              the .tbl already existed pre-update as an empty
+              stub) is a one-line `rm scripts/data/etc_clientblocker.tbl`
+              + +reload, or copy patterns from
+              examples/data/etc_clientblocker.tbl.example.
+
         v0.10: by Aybo
             - promoted from luadch-ng/scripts into core (#81)
             - replaces hardcoded inline `client_tbl` with a
@@ -56,7 +67,7 @@
 --------------
 
 local scriptname = "etc_clientblocker"
-local scriptversion = "0.10"
+local scriptversion = "0.11"
 
 local cmd_add  = "addblocker"
 local cmd_del  = "delblocker"
@@ -502,12 +513,13 @@ hub.setlistener( "onStart", { },
     function( )
         --// load
         local on_disk = util_load( patterns_file )
-        if on_disk == nil then
-            -- File missing or unreadable. opchat feed mirrors
-            -- etc_aliases / cmd_topic recovery shape.
+        local file_missing = ( on_disk == nil )
+        if file_missing then
+            -- File doesn't exist (or is unreadable). On the next
+            -- block of code we seed bundled defaults INTO it -
+            -- treat this as the canonical "first run" path, not
+            -- an error condition (no opchat feed).
             on_disk = { }
-            local opchat = hub_import( "bot_opchat" )
-            if opchat then opchat.feed( msg_err ) end
         end
         patterns_tbl = { }
         if type( on_disk ) == "table" then
@@ -518,18 +530,22 @@ hub.setlistener( "onStart", { },
             end
         end
 
-        -- Seed BUNDLED_DEFAULTS when the operator-data file is missing
-        -- or contains no patterns (covers fresh install + the
-        -- docker-compose script-sync case where scripts/*.lua get
-        -- replaced but scripts/data/ is preserved at its pre-update
-        -- state, which leaves a v0 empty-stub .tbl in place after the
-        -- v0.10 plugin lands). After this initial seed the .tbl is
-        -- non-empty on disk and subsequent +reload cycles use it
-        -- as-is - so an operator who explicitly empties the file
-        -- (zero patterns wanted) will see the defaults come back on
-        -- the next reload. That's the right trade-off: to keep zero
-        -- patterns, disable the plugin via cfg.scripts.
-        if next( patterns_tbl ) == nil then
+        -- Seed BUNDLED_DEFAULTS ONLY when the operator-data file is
+        -- MISSING on disk. We deliberately do NOT seed when the file
+        -- exists with an empty patterns table - that case is the
+        -- operator's explicit "I want zero patterns" state, and
+        -- silently re-injecting defaults on every +reload would
+        -- undo that intent.
+        --
+        -- Operators who lost their bundled defaults via a one-off
+        -- script-sync edge case (the .tbl already existed pre-update
+        -- as an empty stub) can recover by either:
+        --   - deleting scripts/data/etc_clientblocker.tbl on disk and
+        --     +reload (triggers the file-missing branch -> seed)
+        --   - or copying patterns out of
+        --     examples/data/etc_clientblocker.tbl.example into the
+        --     .tbl and +reload.
+        if file_missing then
             for k, v in pairs( BUNDLED_DEFAULTS ) do patterns_tbl[ k ] = v end
             util_save( patterns_tbl, "patterns", patterns_file )
         end
