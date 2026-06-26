@@ -606,6 +606,46 @@ do
 end
 
 ----------------------------------------------------------------------
+-- 22b. +delblocker by 1-based index from +blocker output. Operator
+--      should not need to retype `^FearDC.+` (with the easy-to-miss
+--      `^` anchor on the bundled defaults) - typing the row number
+--      from the +blocker list works just as well.
+----------------------------------------------------------------------
+
+do
+    -- Reset to a known state with 3 patterns. spairs sorts alpha so
+    -- the order is: "aaa" -> 1, "mmm" -> 2, "zzz" -> 3.
+    local tbl = plugin.get_patterns_tbl( )
+    for k in pairs( tbl ) do tbl[ k ] = nil end
+    tbl[ "aaa" ] = "aaa-reason"
+    tbl[ "mmm" ] = "mmm-reason"
+    tbl[ "zzz" ] = "zzz-reason"
+
+    local user, _, replied_of = fresh_user{ level = 80, nick = "op" }
+
+    -- Delete row 2 ("mmm") via index.
+    del_h( user, "delblocker", "2" )
+    eq( "delblocker by index 2: removed mmm", plugin.get_patterns_tbl( )[ "mmm" ], nil )
+    eq( "delblocker by index 2: aaa still there", plugin.get_patterns_tbl( )[ "aaa" ], "aaa-reason" )
+    eq( "delblocker by index 2: zzz still there", plugin.get_patterns_tbl( )[ "zzz" ], "zzz-reason" )
+
+    -- After delete, indices re-shift: 1 = aaa, 2 = zzz. Delete row 1.
+    del_h( user, "delblocker", "1" )
+    eq( "delblocker by index 1: removed aaa", plugin.get_patterns_tbl( )[ "aaa" ], nil )
+    eq( "delblocker by index 1: zzz still there", plugin.get_patterns_tbl( )[ "zzz" ], "zzz-reason" )
+
+    -- Out-of-range index falls through to literal-pattern not_found.
+    del_h( user, "delblocker", "99" )
+    eq( "delblocker by index 99: literal-fallback not_found in reply",
+        ( replied_of( ) or "" ):find( "No such pattern" ) ~= nil
+        or ( replied_of( ) or "" ):find( "99" ) ~= nil, true )
+
+    -- Literal pattern still works (post-fix, pattern "zzz" remains).
+    del_h( user, "delblocker", "zzz" )
+    eq( "delblocker literal: removed zzz", plugin.get_patterns_tbl( )[ "zzz" ], nil )
+end
+
+----------------------------------------------------------------------
 -- 23. +blocker uses DMSG (3-arg reply) so multi-line list output
 --     renders correctly across DC clients incl. AirDC++ (testhub
 --     feedback: BMSG path appeared empty in AirDC++).

@@ -5,8 +5,8 @@ return {
     help_desc_add   = "Blockiert alle Clients, deren AP+VE auf das Lua-Pattern matcht. Pattern ist das erste Whitespace-Token; alles danach ist der Kick-Grund (Default: etc_clientblocker_default_reason).",
 
     help_title_del  = "etc_clientblocker.lua - delblocker",
-    help_usage_del  = "[+!#]delblocker <Pattern>",
-    help_desc_del   = "Entfernt ein Client-Blocker-Pattern.",
+    help_usage_del  = "[+!#]delblocker <Pattern|N>",
+    help_desc_del   = "Entfernt ein Client-Blocker-Pattern - entweder per literalem Pattern ODER per 1-basierter Zeilennummer aus +blocker.",
 
     help_title_list = "etc_clientblocker.lua - blocker",
     help_usage_list = "[+!#]blocker",
@@ -21,7 +21,7 @@ return {
     msg_client_not_allowed = "Dein Client ist nicht erlaubt",
     msg_denied             = "Du darfst dieses Kommando nicht benutzen.",
     msg_usage_add          = "Benutzung: [+!#]addblocker <Pattern> [Grund]",
-    msg_usage_del          = "Benutzung: [+!#]delblocker <Pattern>",
+    msg_usage_del          = "Benutzung: [+!#]delblocker <Pattern|N>",
     msg_bad_pattern        = "Ungueltiges Lua-Pattern (leer, zu lang oder Compile-Fehler).",
     msg_pattern_exists     = "Pattern '%s' ist bereits konfiguriert. Erst +delblocker benutzen.",
     msg_no_such_pattern    = "Kein Pattern '%s' vorhanden.",
