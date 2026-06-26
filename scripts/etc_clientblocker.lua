@@ -137,6 +137,24 @@ local msg_report             = lang.msg_report             or "[ CLIENT BLOCKER 
 --[CODE]--
 ----------
 
+-- Bundled default cheat / mod client blocklist. Sourced here in
+-- the Lua module rather than in scripts/data/etc_clientblocker.tbl
+-- so a docker-compose script-sync onto an existing testhub (which
+-- copies scripts/*.lua but NOT scripts/data/) cannot silently lose
+-- the defaults. onStart seeds these into the operator-managed .tbl
+-- file when the file is missing OR empty - thereafter the .tbl is
+-- the single source of truth and operators control it via
+-- +addblocker / +delblocker / HTTP API.
+local BUNDLED_DEFAULTS = {
+    [ "^CleanDC%+%+.+" ]   = "CleanDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+    [ "^RSX%+%+.+" ]       = "RSX++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+    [ "^CrZ%+%+.+" ]       = "CrZ++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+    [ "^SmVDC%+%+.-$" ]    = "SmVDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+    [ "^DC@fe%+%+.-$" ]    = "Modified BCDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+    [ "^FearDC.+" ]        = "FearDC is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+}
+
+
 -- File-scope upvalue. onStart re-assigns this on every +reload,
 -- so the closures in the public return table (resolve /
 -- get_patterns_tbl) transparently see the new map. NEVER export
@@ -365,7 +383,12 @@ local on_listblocker = function( user, command, parameters )
         user:reply( msg_denied, hub_getbot( ) )
         return PROCESSED
     end
-    user:reply( format_list( ), hub_getbot( ) )
+    -- 3-arg user:reply -> DMSG (hub-to-user private message) so the
+    -- list shows in the operator's PM window, not main chat. Same
+    -- choice as cmd_help. AirDC++ also renders multi-line DMSG
+    -- correctly where the BMSG path appeared empty for some
+    -- clients (#81 testhub feedback).
+    user:reply( format_list( ), hub_getbot( ), hub_getbot( ) )
     return PROCESSED
 end
 
@@ -451,11 +474,9 @@ hub.setlistener( "onStart", { },
         --// load
         local on_disk = util_load( patterns_file )
         if on_disk == nil then
-            -- File missing or unreadable. Create an empty file and
-            -- continue. opchat feed mirrors etc_aliases / cmd_topic
-            -- recovery shape.
+            -- File missing or unreadable. opchat feed mirrors
+            -- etc_aliases / cmd_topic recovery shape.
             on_disk = { }
-            util_save( on_disk, "patterns", patterns_file )
             local opchat = hub_import( "bot_opchat" )
             if opchat then opchat.feed( msg_err ) end
         end
@@ -466,6 +487,22 @@ hub.setlistener( "onStart", { },
                     patterns_tbl[ k ] = v
                 end
             end
+        end
+
+        -- Seed BUNDLED_DEFAULTS when the operator-data file is missing
+        -- or contains no patterns (covers fresh install + the
+        -- docker-compose script-sync case where scripts/*.lua get
+        -- replaced but scripts/data/ is preserved at its pre-update
+        -- state, which leaves a v0 empty-stub .tbl in place after the
+        -- v0.10 plugin lands). After this initial seed the .tbl is
+        -- non-empty on disk and subsequent +reload cycles use it
+        -- as-is - so an operator who explicitly empties the file
+        -- (zero patterns wanted) will see the defaults come back on
+        -- the next reload. That's the right trade-off: to keep zero
+        -- patterns, disable the plugin via cfg.scripts.
+        if next( patterns_tbl ) == nil then
+            for k, v in pairs( BUNDLED_DEFAULTS ) do patterns_tbl[ k ] = v end
+            util_save( patterns_tbl, "patterns", patterns_file )
         end
 
         --// help, ucmd, hubcmd

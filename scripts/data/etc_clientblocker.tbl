@@ -1,23 +1,14 @@
 local patterns
 
--- Default cheat / mod client blocklist. Curated subset of the
--- community list compiled by Sopor over years of hub operation;
--- the full set (incl. legitimate-but-outdated DC++ / AirDC++ /
--- EiskaltDC++ version blocks) lives in
--- examples/data/etc_clientblocker.tbl.example - copy it over
--- this file if you want the broader policy. The bundled defaults
--- target only known cheat / abuse / spam clients that are
--- almost never legitimate in a community hub. Operators are
--- free to remove individual entries via `+delblocker <pattern>`
--- or by editing this file and running `+reload`.
+-- This file is auto-managed by scripts/etc_clientblocker.lua via
+-- +addblocker / +delblocker (or via the HTTP API). On a fresh install
+-- the plugin's onStart seeds it with the BUNDLED_DEFAULTS constant
+-- (CleanDC++, RSX++, CrZ++, SmVDC++, DC@fe++, FearDC) defined in the
+-- plugin source itself. After that this file is the single source of
+-- truth - hand-edit it if you must, then +reload.
 patterns = {
 
-    [ "^CleanDC%+%+.+" ]   = "CleanDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
-    [ "^RSX%+%+.+" ]       = "RSX++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
-    [ "^CrZ%+%+.+" ]       = "CrZ++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
-    [ "^SmVDC%+%+.-$" ]    = "SmVDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
-    [ "^DC@fe%+%+.-$" ]    = "Modified BCDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
-    [ "^FearDC.+" ]        = "FearDC is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+
 
 }
 
