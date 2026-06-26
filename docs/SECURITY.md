@@ -730,6 +730,30 @@ the binding ([`zlib_stream/zlib_stream.c`](../zlib_stream/zlib_stream.c)):
   a corrupted compressed stream is also surfaced as overflow; the
   hub closes rather than continuing on poisoned state.
 
+### Outbound HTTPS verification
+
+Plugins that make outbound HTTPS requests via
+[`core/http_client.lua`](../core/http_client.lua) (hublist
+announce, future external feed pulls, future proxy/VPN detection
+API calls) authenticate the remote against a bundled Mozilla CA
+root snapshot:
+
+| Aspect | Default |
+|---|---|
+| `verify` | `"peer"` (was `"none"` before Precursor 0b of the #78 arc) |
+| `cafile` | `certs/cacert.pem` (bundled, 121 trusted roots) |
+| Missing cafile behaviour | **Fail-closed** - request is rejected with a clear error rather than silently falling back to unauthenticated |
+| Operator opt-out | Pass `verify="none"` explicitly per call |
+
+The bundle's provenance, license, refresh recipe, and threat model
+live in [`docs/CACERT.md`](CACERT.md). Refresh quarterly or when
+the Mozilla NSS root store publishes a new release.
+
+The TLS protocol floor is held at TLS 1.2 (SSLv3 / TLS 1.0 / TLS
+1.1 disabled via LuaSec options) for outbound calls regardless of
+verify mode, so a downgrade attack cannot land on a broken
+protocol even when `verify="none"` is the operator's choice.
+
 ---
 
 ## 7. CVE / dependency tracking

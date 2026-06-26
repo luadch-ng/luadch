@@ -13,8 +13,11 @@
 ]]--
 
 -- `use` shim. The pure helpers only touch string/table/tonumber/etc;
--- socket/ssl/out are referenced at module load but not called by the
--- functions under test, so minimal stubs suffice.
+-- socket/ssl/out/io are referenced at module load but not called by
+-- the functions under test, so minimal stubs suffice. `io` is the
+-- real stdlib so the cafile-existence-probe (Precursor 0b of #78
+-- arc) inside the TLS-handshake branch works during smoke; the unit
+-- tests here never reach that branch.
 local _real = {
     type = type, tostring = tostring, tonumber = tonumber,
     pcall = pcall, pairs = pairs, ipairs = ipairs,
@@ -22,6 +25,7 @@ local _real = {
     socket = { gettime = function() return 0 end },
     ssl = {},
     out = { put = function() end, error = function() end },
+    io = io,
     coroutine = coroutine,
 }
 _G.use = function( name )
