@@ -1334,15 +1334,13 @@ local function plugins_toggle_handler( req )
     } }
 end
 
--- #262: cfg keys whose value MUST NOT leak through the HTTP API,
--- masked as the string "<redacted>" on GET and rejected with 403
--- on PUT. Sensitive credentials (bearer tokens) and file paths
--- that protect the at-rest encryption master key go here. Adding
--- a new sensitive key in the future = one-line append.
-local _config_denylist = {
-    http_api_tokens = true,
-    master_key_path = true,
-}
+-- #262 / Precursor 0c of #78 arc: cfg keys whose value MUST NOT
+-- leak through the HTTP API are masked as the string "<redacted>"
+-- on GET and rejected with 403 on PUT. The registry lives in
+-- core/secrets.lua (single source of truth across +showcfg, GET
+-- /v1/config, audit-body redaction). Future plugins register their
+-- own sensitive keys at onStart via `secrets.register(cfg_key)` -
+-- no edit to this file required.
 
 -- #262: apply-status classification - which keys take effect
 -- immediately on cfg.set vs need POST /v1/reload vs need a full
@@ -1403,7 +1401,7 @@ local _config_restart_required = {
     ssl_ports_ipv6   = true,
     http_port        = true,
     hub_listen       = true,
-    master_key_path  = true,    -- also in denylist; PUT 403 before this is reached
+    master_key_path  = true,    -- also in secrets registry; PUT 403 before this is reached
     log_path         = true,    -- log file handles opened at startup
     -- TLS context is constructed once when the SSL listener binds.
     -- Changing ssl_params / use_ssl after startup has no effect
@@ -1419,17 +1417,19 @@ local _classify_apply_status = function( key )
 end
 
 -- #262 GET /v1/config: read-scoped. Returns the full cfg snapshot
--- (every key registered in cfg_defaults.lua) with denylisted keys
--- masked as "<redacted>".
+-- (every key registered in cfg_defaults.lua) with sensitive keys
+-- masked as "<redacted>". The sensitive-key list lives in
+-- core/secrets.lua (Precursor 0c of #78 arc).
 local function config_get_handler( req )
     local cfg_mod = use "cfg"
     if type( cfg_mod.list_keys ) ~= "function" then
         return { status = 500, error = { code = "E_INTERNAL",
             message = "cfg.list_keys not available" } }
     end
+    local secrets_mod = use "secrets"
     local snapshot = { }
     for _, key in ipairs( cfg_mod.list_keys( ) ) do
-        if _config_denylist[ key ] then
+        if secrets_mod.is_secret_key( key ) then
             snapshot[ key ] = "<redacted>"
         else
             snapshot[ key ] = cfg_mod.get( key )
@@ -1449,9 +1449,10 @@ local function config_put_handler( req )
         return { status = 400, error = { code = "E_BAD_INPUT",
             message = "missing {key} path variable" } }
     end
-    if _config_denylist[ key ] then
+    local secrets_mod = use "secrets"
+    if secrets_mod.is_secret_key( key ) then
         return { status = 403, error = { code = "E_FORBIDDEN",
-            message = "cfg key '" .. key .. "' is sensitive (in API denylist); " ..
+            message = "cfg key '" .. key .. "' is sensitive (in secrets registry); " ..
                 "rotate / relocate via direct cfg.tbl edit + hub restart" } }
     end
     local cfg_mod = use "cfg"
@@ -1605,7 +1606,7 @@ register_core_endpoints = function( )
     -- #262 config management endpoints.
     register( "GET", "/v1/config", "read", config_get_handler, {
         plugin = "core",
-        description = "full cfg snapshot; sensitive keys (http_api_tokens, master_key_path) masked as <redacted>",
+        description = "full cfg snapshot; keys in the secrets registry (see core/secrets.lua) masked as <redacted>",
     } )
     register( "PUT", "/v1/config/{key}", "admin", config_put_handler, {
         plugin = "core",

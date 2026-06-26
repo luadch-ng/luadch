@@ -373,6 +373,80 @@ snapshots, `_normalize_str` for flat-table input). INF-derived
 strings are F-INF-2-clamped at parse time too, so this is
 defense-in-depth.
 
+### cfg-level secrets, env-var fallback, and HTTP API redaction
+
+Some cfg keys hold authentication material (HTTP API bearer tokens,
+future plugin API keys) or paths that protect at-rest encryption.
+These are tracked in a SINGLE registry at
+[`core/secrets.lua`](../core/secrets.lua) - the same module that
+`GET /v1/config` redaction consults and that plugin secrets-lookup
+helpers go through.
+
+**Registry semantics.** A cfg key registered via
+`secrets.register(cfg_key)` is treated as sensitive for the
+process lifetime:
+
+- `GET /v1/config` masks its value as `"<redacted>"`.
+- `PUT /v1/config/{key}` returns `403 E_FORBIDDEN` (rotate via
+  direct `cfg.tbl` edit + restart).
+- Future `+showcfg` / `+config show` cmds (when added) will
+  consult the same registry.
+
+Baseline registrations are seeded by `secrets.init()`:
+
+- `http_api_tokens` (HTTP API auth tokens, existed pre-arc).
+- `master_key_path` (cfg_secret encryption key path, existed
+  pre-arc).
+
+Plugins register their own sensitive keys at `onStart`:
+
+```lua
+local secrets = use "secrets"
+secrets.register( "etc_geoip_license_key" )
+secrets.register( "etc_proxydetect_api_key" )
+```
+
+`register()` is exposed to every plugin via `SANDBOX_GLOBALS` and
+takes effect for the process lifetime - the same trust assumption
+as §2 applies. A hostile plugin can hide a live cfg key from
+`GET /v1/config` by registering it, but the sandbox already grants
+worse capabilities (file I/O, network, hub state). The registry is
+defense-in-depth alongside the per-key chmod baseline above, not a
+plugin-trust boundary.
+
+**Env-var-first lookup.** Plugins that need an API key call
+`secrets.lookup(cfg_key)` instead of `cfg.get(cfg_key)`. The helper
+checks `LUADCH_<UPPER_CFG_KEY>` (e.g. `LUADCH_ETC_GEOIP_LICENSE_KEY`)
+first, then falls back to `cfg.get`. Empty strings in either
+location are treated as unset, so an accidentally blank env var
+does NOT mask a populated cfg value.
+
+Use cases:
+
+| Deployment | Where the key lives | Why |
+|---|---|---|
+| Docker / docker-compose | `environment:` section of the service | Survives container restarts; never written to disk; trivial rotation via `docker compose up -d` after a value change |
+| Bare-metal (Linux / Windows) | `cfg/cfg.tbl` (chmod 600 / icacls applied per the recipes above) | Stable across reboots; no env var to forget |
+| CI / staging | `LUADCH_*` env var injected by the orchestrator | Separation between code-config (cfg.tbl in repo or volume) and secrets (injected per environment) |
+
+Mixed deployments are allowed - any individual key can travel via
+env, via cfg, or both (env wins).
+
+**Why env-var-first and not encrypted-cfg.** The hub-itself already
+encrypts `cfg/user.tbl` (Phase 7c F-AUTH-1) but `cfg.tbl` itself is
+plain on disk with chmod 600. Encrypting individual cfg keys
+introduces an at-rest-secrets-management problem that the existing
+master-key path already solves at the user.tbl scope. The env-var
+fallback gives Docker operators a path that does not touch disk at
+all (env vars live in `/proc/<pid>/environ`, readable only by the
+process owner), and bare-metal operators a path that mirrors how
+they already manage `cfg.tbl` (chmod 600 + backup separation).
+
+**Process-environ leak surface.** `os.getenv` reads from the
+process environment, which Linux exposes via `/proc/<pid>/environ`
+to the process owner. Run the hub under its own dedicated user;
+the per-OS hardening recipes above already cover this.
+
 ---
 
 ## 5. Network-level defenses

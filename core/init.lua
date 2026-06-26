@@ -80,6 +80,13 @@ _core = {    -- luadch core, order is important
     -- secret.init() from cfg.init() after _settings is loaded so
     -- the cfg-side path override works on first boot.
     "cfg",
+    -- core/secrets.lua (Precursor 0c of #78 arc): sensitive-key
+    -- registry + env-var-first cfg lookup. Loaded AFTER cfg so the
+    -- init() baseline registrations and the lookup fallback can
+    -- consult cfg.get; loaded BEFORE everything that holds
+    -- sensitive cfg keys (http_router /v1/config redaction, future
+    -- etc_geoip / etc_proxydetect plugins).
+    "secrets",
     "out",
     -- cert_bootstrap MUST come after cfg + out (it reads cfg.get and
     -- writes via out.put) and BEFORE hub (hub.init() binds the TLS
