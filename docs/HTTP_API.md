@@ -1045,12 +1045,10 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 
 | Method | Path | Scope | Plugin | Status |
 |---|---|---|---|---|
-| DELETE | `/v1/users/{sid}` | admin | `cmd_disconnect` | **migrated (Phase 2 PR-1)** [^http-disconnect-1] |
+| DELETE | `/v1/users/{sid}` | admin | `cmd_disconnect` | **migrated (Phase 2 PR-1)** |
 | POST | `/v1/users/{sid}/redirect` | admin | `cmd_redirect` | **migrated (Phase 2 PR-2)** [^http-redirect-1] |
 | POST | `/v1/users/{sid}/gag` | admin | `cmd_gag` | **migrated (Phase 2 PR-3)** [^http-gag-1] |
 | DELETE | `/v1/users/{sid}/gag` | admin | `cmd_gag` | **migrated (Phase 2 PR-3)** [^http-gag-2] |
-
-[^http-disconnect-1]: Body `{reason: string optional (max 256), tl: integer optional (-1..86400, default `cmd_disconnect_default_tl`)}`. The `tl` field maps to the ADC `TL` time-left flag on the kick: -1 = client should not auto-reconnect, 0 = immediate retry allowed, N = client should wait N seconds. Schema validation rejects out-of-range values at the router layer; longer cooldowns belong in `+ban` / `POST /v1/bans`. Returns 200 with the §7.1.1 envelope plus `data: {reason, tl}` where `tl` is the effective value used (cfg default or operator override). Emits `user.kick` audit event with `meta: {tl}`. #343.
 
 [^http-redirect-1]: Body `{url: string?}`, URL scheme locked to `adc://` / `adcs://`. The ADC-side level-hierarchy guard (operator's `permission[level]` must be ≥ target's level) does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate. If the body has no `url` field, the cfg key `cmd_redirect_url` is used as the default. Body URL strings undergo control-byte sanitisation before reaching the `RD` field of the outbound IQUI; an admin operator with a leaked token can still redirect any user, by design - issue admin tokens accordingly.
 

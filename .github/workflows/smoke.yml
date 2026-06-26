@@ -126,11 +126,6 @@ jobs:
       - name: Run etc_clientblocker unit test
         run: lua5.4 tests/unit/etc_clientblocker_test.lua
 
-      # #343 cmd_disconnect TL parser: optional TL<N> token between
-      # NICK and REASON. Pure helper, no hub state needed.
-      - name: Run cmd_disconnect TL parser unit test
-        run: lua5.4 tests/unit/cmd_disconnect_tl_test.lua
-
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -231,10 +226,6 @@ jobs:
       - name: Run etc_clientblocker unit test
         shell: msys2 {0}
         run: lua tests/unit/etc_clientblocker_test.lua
-
-      - name: Run cmd_disconnect TL parser unit test
-        shell: msys2 {0}
-        run: lua tests/unit/cmd_disconnect_tl_test.lua
 
       - name: Configure
         shell: msys2 {0}

@@ -1,19 +1,18 @@
 ﻿return {
 
     help_title = "cmd_disconnect.lua",
-    help_usage = "[+!#]disconnect <NICK> [TL<SEKUNDEN>] <GRUND>",
-    help_desc = "Disconnected einen User. Optional TL<SEKUNDEN> setzt das ADC time-left Feld: -1 = nicht automatisch reconnect, 0 = sofort wieder, N = warte N Sekunden (Default aus cfg).",
+    help_usage = "[+!#]disconnect <NICK> <GRUND>",
+    help_desc = "Disconnected einen User",
 
     user_msg = "[ DISCONNECT ]--> Du wurdest disconnected von: %s  |  Grund: %s",
     report_msg = "[ DISCONNECT ]--> User  %s  wurde disconnected von  %s  |  Grund: %s",
 
-    msg_usage = "Gebrauch: [+!#]disconnect <NICK> [TL<SEKUNDEN>] <GRUND>",
+    msg_usage = "Gebrauch: [+!#]disconnect <NICK> <GRUND>",
     msg_denied1 = "Du bist nicht befugt diesen Befehl zu nutzen.",
     msg_denied2 = "Du kannst keinen disconnecten der ein höheres Level hat als du.",
     msg_denied3 = "Du kannst dich nicht selbst disconnecten.",
     msg_denied4 = "Der User ist offline.",
     msg_bot = "Fehler: User ist ein Bot.",
-    msg_bad_tl = "Ungültiger TL-Wert. Muss eine Ganzzahl zwischen -1 und 86400 sein (-1 = permanent, 0 = sofort, N = warte N Sekunden).",
 
     ucmd_target = "Username",
     ucmd_reason = "Begründung",

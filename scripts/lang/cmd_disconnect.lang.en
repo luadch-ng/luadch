@@ -1,19 +1,18 @@
 ﻿return {
 
     help_title = "cmd_disconnect.lua",
-    help_usage = "[+!#]disconnect <NICK> [TL<SECONDS>] <REASON>",
-    help_desc = "Disconnects a user. Optional TL<SECONDS> sets the ADC time-left field: -1 = don't auto-reconnect, 0 = immediate retry, N = wait N seconds (default from cfg).",
+    help_usage = "[+!#]disconnect <NICK> <REASON>",
+    help_desc = "Disconnects a user",
 
     user_msg = "[ DISCONNECT ]--> You were disconnected by: %s  |  reason: %s",
     report_msg = "[ DISCONNECT ]--> User  %s  was disconnected by  %s  |  reason: %s",
 
-    msg_usage = "Usage: [+!#]disconnect <NICK> [TL<SECONDS>] <REASON>",
+    msg_usage = "Usage: [+!#]disconnect <NICK> <REASON>",
     msg_denied1 = "You are not allowed to use this command.",
     msg_denied2 = "You can't disconnect superior users.",
     msg_denied3 = "You can't disconnect yourself.",
     msg_denied4 = "User is offline.",
     msg_bot = "Error: User is a bot.",
-    msg_bad_tl = "Invalid TL value. Must be an integer between -1 and 86400 (-1 = permanent, 0 = immediate, N = wait N seconds).",
 
     ucmd_target = "Username",
     ucmd_reason = "Reason",
