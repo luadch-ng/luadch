@@ -34,6 +34,11 @@ makefile    text eol=lf
 *.yaml      text eol=lf
 *.json      text eol=lf
 
+# PEM bundles (certs/cacert.pem, future operator-supplied bundles): LF.
+# Openssl tolerates CRLF, but cross-platform consistency keeps sha256sum
+# stable across Windows + Linux checkouts.
+*.pem       text eol=lf
+
 # Windows-specific build files stay CRLF in the working tree so cmd.exe and
 # the Windows native tools handle them as expected.
 *.bat       text eol=crlf
