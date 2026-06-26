@@ -19,15 +19,22 @@
 ]]--
 
 ----------------------------------------------------------------------
--- `use` shim. secrets.lua only needs cfg via use("cfg") inside
--- lookup() at call time, plus the module captures `os` / standard
--- libs at module load via local bindings.
+-- `use` shim. secrets.lua follows the core-module pattern: every
+-- stdlib / library it touches comes via use("X") under init.lua's
+-- restricted env. The shim hands back the real stdlib values for
+-- type / pairs / tostring / string / table / os; cfg is mocked.
 ----------------------------------------------------------------------
 
 local _cfg_store = { }
 
-local mocks = {
-    cfg = {
+local _real = {
+    type     = type,
+    pairs    = pairs,
+    tostring = tostring,
+    string   = string,
+    table    = table,
+    os       = os,
+    cfg      = {
         get = function( key )
             return _cfg_store[ key ]
         end,
@@ -35,7 +42,7 @@ local mocks = {
 }
 
 _G.use = function( name )
-    local m = mocks[ name ]
+    local m = _real[ name ]
     if m == nil then
         error( "secrets_test shim missing dep: use \"" .. tostring( name ) .. "\"" )
     end

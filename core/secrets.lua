@@ -42,13 +42,17 @@
 
 ]]--
 
-local type        = type
-local pairs       = pairs
-local tostring    = tostring
-local string      = string
-local table       = table
-local os          = os
-local use         = use
+local use = use
+
+-- Core modules run under init.lua's restricted env (only `use` is
+-- in scope). Everything else - stdlib functions, libraries - must
+-- be pulled in via `use`. Same pattern as core/util.lua + core/audit.lua.
+local type        = use "type"
+local pairs       = use "pairs"
+local tostring    = use "tostring"
+local string      = use "string"
+local table       = use "table"
+local os          = use "os"
 
 local _registry = { }
 
