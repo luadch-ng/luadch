@@ -119,6 +119,13 @@ jobs:
       - name: Run audit unit test
         run: lua5.4 tests/unit/audit_test.lua
 
+      # #81 etc_clientblocker: HTTP API surface + ADC hub-cmd handlers
+      # + onConnect check_clients listener. Stubbed user/cfg/hub/util/
+      # audit; verifies the level-exempt branch, F-INF-1d nil-VE guard,
+      # +reload semantic, and audit fire shape on add/remove/kick.
+      - name: Run etc_clientblocker unit test
+        run: lua5.4 tests/unit/etc_clientblocker_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -215,6 +222,10 @@ jobs:
       - name: Run audit unit test
         shell: msys2 {0}
         run: lua tests/unit/audit_test.lua
+
+      - name: Run etc_clientblocker unit test
+        shell: msys2 {0}
+        run: lua tests/unit/etc_clientblocker_test.lua
 
       - name: Configure
         shell: msys2 {0}

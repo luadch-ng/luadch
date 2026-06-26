@@ -1,0 +1,36 @@
+return {
+
+    help_title_add  = "etc_clientblocker.lua - addblocker",
+    help_usage_add  = "[+!#]addblocker <Pattern> [Grund]",
+    help_desc_add   = "Blockiert alle Clients, deren AP+VE auf das Lua-Pattern matcht. Pattern ist das erste Whitespace-Token; alles danach ist der Kick-Grund (Default: etc_clientblocker_default_reason).",
+
+    help_title_del  = "etc_clientblocker.lua - delblocker",
+    help_usage_del  = "[+!#]delblocker <Pattern|N>",
+    help_desc_del   = "Entfernt ein Client-Blocker-Pattern - entweder per literalem Pattern ODER per 1-basierter Zeilennummer aus +blocker.",
+
+    help_title_list = "etc_clientblocker.lua - blocker",
+    help_usage_list = "[+!#]blocker",
+    help_desc_list  = "Listet die konfigurierten Client-Blocker-Pattern auf.",
+
+    ucmd_menu_add    = { "Hub", "Client Blocker", "Pattern hinzufuegen" },
+    ucmd_menu_del    = { "Hub", "Client Blocker", "Pattern entfernen" },
+    ucmd_menu_list   = { "Hub", "Client Blocker", "Pattern auflisten" },
+    ucmd_popup_pat    = "Lua-Pattern (z.B. AirDC%+%+%s2):",
+    ucmd_popup_reason = "Kick-Grund (optional):",
+
+    msg_client_not_allowed = "Dein Client ist nicht erlaubt",
+    msg_denied             = "Du darfst dieses Kommando nicht benutzen.",
+    msg_usage_add          = "Benutzung: [+!#]addblocker <Pattern> [Grund]",
+    msg_usage_del          = "Benutzung: [+!#]delblocker <Pattern|N>",
+    msg_bad_pattern        = "Ungueltiges Lua-Pattern (leer, zu lang oder Compile-Fehler).",
+    msg_pattern_exists     = "Pattern '%s' ist bereits konfiguriert. Erst +delblocker benutzen.",
+    msg_no_such_pattern    = "Kein Pattern '%s' vorhanden.",
+    msg_added              = "%s hat Client-Blocker-Pattern '%s' hinzugefuegt (Grund: %s).",
+    msg_deleted            = "%s hat Client-Blocker-Pattern '%s' entfernt.",
+    msg_list_header        = "\n=== CLIENT BLOCKER ===",
+    msg_list_footer        = "=== ENDE ===\n",
+    msg_list_empty         = "(keine Pattern konfiguriert)",
+    msg_err                = "etc_clientblocker.lua: Fehler: Datenbank-Datei (scripts/data/etc_clientblocker.tbl) defekt oder fehlt, neue Datei wurde angelegt.",
+    msg_report             = "[ CLIENT BLOCKER ]--> Benutzer %s mit IP %s nutzt %s und ist hier nicht erlaubt. Matching Pattern: %s",
+
+}

@@ -199,6 +199,11 @@ return { -- the settings are a lua table, do not tough this!
         [ 100 ] = true,  -- hubowner
     },
 
+    usr_nick_prefix_report = true,  -- on a prefix-kick fire etc_report.send with nick+IP+reason (boolean)
+    usr_nick_prefix_report_hubbot = false,  -- send the report as a hubbot PM (boolean)
+    usr_nick_prefix_report_opchat = true,  -- send the report into op-chat (boolean)
+    usr_nick_prefix_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
     ---------------------------------------------------------------------------------------------------------------------------------
     --// usr_desc_prefix.lua settings | this script adds a prefix to the description of a user
 
@@ -959,6 +964,40 @@ return { -- the settings are a lua table, do not tough this!
     etc_auditlog_http_lines_max = 1000,  -- GET /v1/log/audit max lines (integer)
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_clientblocker.lua settings | block clients by AP/VE pattern in BINF (#81)
+
+    etc_clientblocker_oplevel = 80,  -- min level to run `+blocker add / del` (integer)
+    etc_clientblocker_default_reason = "Your client is not allowed",  -- fallback kick reason when an operator adds a pattern without a custom one (string)
+    etc_clientblocker_max_pattern_len = 200,  -- hard cap on pattern length to bound string.find runtime (integer)
+
+    etc_clientblocker_report = true,  -- on every kick, fire etc_report.send with nick+ip+version+pattern so staff see it in chat (boolean)
+    etc_clientblocker_report_hubbot = false,  -- send the report as a hubbot PM to operators at or above etc_clientblocker_llevel (boolean)
+    etc_clientblocker_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_clientblocker_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
+    etc_clientblocker_check_levels = {  -- which levels the BINF check applies to (table of integer -> boolean)
+
+        -- Operators (60+) are exempt by default so an operator who
+        -- adds a pattern matching their own client does not self-
+        -- lockout. HUBOWNER (100) stays in scope deliberately - if
+        -- you really want to test from a blocked client, flip it
+        -- here and +reload. Level 55 (SBOT) is exempt: bots have no
+        -- BINF VE/AP to check against and should never be a kick
+        -- target.
+        [ 0 ]   = true,   -- UNREG
+        [ 10 ]  = true,   -- GUEST
+        [ 20 ]  = true,   -- REG
+        [ 30 ]  = true,   -- VIP
+        [ 40 ]  = true,   -- SVIP
+        [ 50 ]  = true,   -- SERVER
+        [ 55 ]  = false,  -- SBOT
+        [ 60 ]  = false,  -- OPERATOR
+        [ 70 ]  = false,  -- SUPERVISOR
+        [ 80 ]  = false,  -- ADMIN
+        [ 100 ] = true,   -- HUBOWNER
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_log_cleaner.lua settings | this script adds a command to clean log files
 
     etc_log_cleaner_minlevel = 100,  -- min level to use this command? (integer)
@@ -1373,6 +1412,7 @@ return { -- the settings are a lua table, do not tough this!
 
         "usr_nick_length.lua",
         "hub_inf_manager.lua",
+        { "etc_clientblocker.lua", enabled = true },  -- #81 client AP/VE blocklist. API-toggleable (#261). Must sit AFTER hub_inf_manager so structural BINF rejects (forbidden flags / identity spoofing) happen first; client-policy kicks then run on already-validated INFs.
         { "hub_runtime.lua", enabled = true },  -- using report import; API-toggleable (#261)
         { "bot_regchat.lua", enabled = true },  -- API-toggleable (#261)
         { "bot_session_chat.lua", enabled = true },  -- API-toggleable (#261)

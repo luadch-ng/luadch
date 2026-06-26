@@ -50,6 +50,18 @@ local activate = cfg.get( "usr_nick_prefix_activate" )
 local prefix_table = cfg.get( "usr_nick_prefix_prefix_table" )
 local permission = cfg.get( "usr_nick_prefix_permission" )
 
+local scriptlang = cfg.get( "language" )
+local lang, lang_err = cfg.loadlanguage( scriptlang, scriptname ); lang = lang or { }; lang_err = lang_err and hub.debug( lang_err )
+
+local report = hub.import( "etc_report" )
+local report_activate = cfg.get( "usr_nick_prefix_report" )
+local report_hubbot   = cfg.get( "usr_nick_prefix_report_hubbot" )
+local report_opchat   = cfg.get( "usr_nick_prefix_report_opchat" )
+local report_llevel   = cfg.get( "usr_nick_prefix_llevel" )
+
+--// msgs
+local report_msg = lang.report_msg or "[ NICK PREFIX ]--> User: %s | IP: %s | was kicked. Reason: %s"
+
 
 ----------
 --[CODE]--
@@ -112,8 +124,17 @@ hub.setlistener( "onConnect", { },
             local prefix = hub.escapeto( prefix_table[ user:level() ] ) or default
             local bol, err = user:updatenick( prefix .. user:nick(), true )
             if not bol then
-                -- disable to prevent spam; remember: never fire listenter X inside listener X; will cause infinite loop
-                --scripts.firelistener( "onFailedAuth", user:nick( ), user:ip( ), user:cid( ), "Nick prefix failed: " .. err )
+                -- onFailedAuth must NOT be fired from inside onConnect
+                -- (causes infinite recursion if any listener in the
+                -- chain re-enters onConnect). report.send is safe -
+                -- it just feeds a message to opchat / hubbot, no
+                -- listener re-entry.
+                if report then
+                    local msg = utf.format( report_msg,
+                        user:nick() or "?", user:ip() or "?", err or "?" )
+                    report.send( report_activate, report_hubbot, report_opchat,
+                        report_llevel, msg )
+                end
                 user:kill( "ISTA 220 " .. hub.escapeto( err ) .. "\n", "TL300" )
                 return PROCESSED
             end

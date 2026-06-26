@@ -67,7 +67,7 @@ local report_level = cfg.get( "etc_dhtblocker_report_level" )
 local ban = hub.import( "cmd_ban" )
 
 --// msgs
-local report_msg = lang.report_msg or "%s were banned for %s minutes because of active DHT function."
+local report_msg = lang.report_msg or "[ DHT BLOCKER ]--> User: %s | IP: %s | was banned for %s minutes because of active DHT function."
 local msg_reason = lang.msg_reason or "Active DHT function"
 
 
@@ -86,7 +86,7 @@ local check_dht = function( user )
     if block_level[ user:level() ] and ( dht1 or dht2 ) then
         local bantime = block_time * 60
         ban.add( nil, user, bantime, msg_reason, "DHT BLOCKER" )
-        local msg_out = utf.format( report_msg, user:nick(), block_time )
+        local msg_out = utf.format( report_msg, user:nick(), user:ip() or "?", block_time )
         report.send( report_activate, report_tohubbot, report_toopchat, report_level, msg_out )
         return PROCESSED
     end

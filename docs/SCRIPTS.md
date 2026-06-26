@@ -523,6 +523,123 @@ side: `audit_log_max_reason_chars` (1000),
 `audit_log_max_meta_value_chars` (1000) - applied at `audit.build`
 time so both disk and `/v1/events` payloads stay bounded.
 
+### etc_clientblocker
+
+Block clients by Lua-pattern match against the BINF `AP+VE` field
+(`user:version()` returns the concatenated `<AP> <VE>` form). Closes
+[#81](https://github.com/luadch-ng/luadch/issues/81). Promoted into
+core from the `luadch-ng/scripts` companion repo (basis: pulsar
+v0.2, GPLv3).
+
+**Commands:**
+- `+addblocker <pattern> [reason]` - add a pattern. First whitespace-
+  token is the pattern; everything after it is the kick reason
+  (defaults to `etc_clientblocker_default_reason`).
+- `+delblocker <pattern|N>` - remove a pattern by literal pattern OR by 1-based row number from the `+blocker` list output (so operators don't need to retype the `^anchor.+` form of the bundled defaults).
+- `+blocker` - list configured patterns.
+
+**Storage:** `scripts/data/etc_clientblocker.tbl`, flat
+`{ [pattern] = reason }`. The plugin auto-creates an empty file at
+onStart if the file is missing.
+
+**Listener-chain placement:** MUST sit AFTER `hub_inf_manager.lua`
+in `cfg.scripts`. The structural BINF validator (forbidden flags /
+identity-spoof kill / I4/I6 strip) is a hard precondition for the
+client-policy match; running the policy filter on un-validated INFs
+would be a layering inversion. `examples/cfg/cfg.tbl` ships them in
+the right order.
+
+**Operator self-lockout footgun.** The default
+`etc_clientblocker_check_levels` table exempts OPERATOR (60),
+SUPERVISOR (70) and ADMIN (80); HUBOWNER (100) stays in scope
+deliberately. If you add a pattern that matches your own client
+from a HUBOWNER session, flip `[100]` to `false` first, otherwise
+the next `+reload` will kick you on the next connect.
+
+**Pattern validation at edit time.** `+addblocker` / `POST
+/v1/clientblocker` reject patterns that are empty, exceed
+`etc_clientblocker_max_pattern_len` (default 200), contain
+URL-unsafe `/`, `?`, `#` or `&` (the DELETE endpoint uses the
+pattern as a path-var and the router does not percent-decode -
+those four chars would silently 404), or fail a
+`pcall(string.find, "", pat)` compile probe. This fails loud at
+add time rather than silently at the next onConnect (the pcall
+guard around the actual match call is belt-and-suspenders).
+All other Lua-pattern punctuation (`%`, `+`, `.`, `(`, `)`,
+`[`, `]`, `*`, `-`, `^`, `$`) is allowed.
+
+**Audit events:** `client.block.add`, `client.block.remove`,
+`client.block.kick`. The kick event's `meta` carries `{pattern,
+version}` so post-mortem can reconstruct which rule fired and what
+the offending VE actually was.
+
+**Op-chat / hubbot report on kick.** When
+`etc_clientblocker_report=true` (default) the plugin fires
+`etc_report.send` with a human-readable banner
+`[ CLIENT BLOCKER ]--> The user <nick> with IP <ip> is running
+<version> and is not allowed in this hub. Matching pattern: <pat>`
+so staff see kicks live in op-chat without tailing the audit log.
+The audit log carries the same fields structured for forensics;
+the report is for operational awareness. Sub-toggles
+`etc_clientblocker_report_opchat` (default true) and
+`etc_clientblocker_report_hubbot` (default false) match the
+sibling-plugin convention.
+
+Flood-control note: the report fires synchronously on every kick.
+Op-chat flood protection relies on the upstream per-IP / per-CID
+connect rate-limit in `core/ratelimit.lua` (Phase 7); a determined
+attacker who throttles connections below the limit can sustain
+~1 kick/sec/IP. If your hub sees this and op-chat noise becomes
+unmanageable, flip `etc_clientblocker_report=false` and rely on
+the audit log alone.
+
+**Default blocklist** (`scripts/data/etc_clientblocker.tbl`):
+when the .tbl file does NOT exist on disk, onStart seeds 6
+well-known cheat/mod clients into it (`CleanDC++`, `RSX++`,
+`CrZ++`, `SmVDC++`, `DC@fe++`, `FearDC`). These are universally-
+malicious clients across DC hubs - operators almost never want
+them. Remove individual entries via `+delblocker <N>` (row
+number from `+blocker` output) or `+delblocker <pattern>`.
+
+The defaults are only seeded ONCE, on first run when the .tbl
+file is missing. An operator who later `+delblocker`s every
+entry keeps an empty .tbl across reloads - no silent re-seed.
+To recover the bundled defaults after deliberately emptying
+the file: `rm scripts/data/etc_clientblocker.tbl` then `+reload`
+(or hub restart). To recover a single removed default: copy
+the line from `examples/data/etc_clientblocker.tbl.example`.
+
+**Extended example list** (`examples/data/etc_clientblocker.tbl.example`):
+~40 additional patterns curated by Sopor over years of hub
+operation - blocks outdated stable releases of DC++ (0.0xx-0.8xx),
+AirDC++ (1.0-4.29 + Web Client 0.x-2.14b + nano), EiskaltDC++ (<2.4.1),
+ApexDC++ (<1.6.4), ncdc (<1.18), Jucy (<0.86), plus legacy mods
+(StrgDC++, IceDC++, PDC++, PWDC++). Copy this file to
+`scripts/data/etc_clientblocker.tbl` and `+reload` to adopt the
+broader policy.
+
+**HTTP API:**
+- `GET /v1/clientblocker` (read scope) - list patterns
+- `POST /v1/clientblocker` (admin scope) - add pattern; body
+  `{pattern, reason?}`
+- `DELETE /v1/clientblocker/{pattern}` (admin scope) - remove
+  pattern (path-encoded; the router decodes the path var)
+
+**F-INF-1d nil-VE guard** (Phase 8a): a client that did not send
+a `VE` field at BINF has nothing to match against. The check
+skips silently rather than crashing; matches the "no rule
+applies" semantic for any other missing input.
+
+**Config:** `etc_clientblocker_oplevel` (write floor for the ADC
+cmd; default 80), `etc_clientblocker_check_levels` (per-level
+boolean table; level 55 (SBOT) + 60/70/80 exempt by default),
+`etc_clientblocker_default_reason`
+(`"Your client is not allowed"`),
+`etc_clientblocker_max_pattern_len` (200),
+`etc_clientblocker_report` (true), `etc_clientblocker_report_opchat`
+(true), `etc_clientblocker_report_hubbot` (false),
+`etc_clientblocker_llevel` (60).
+
 ### etc_keyprint
 
 Automatically extract and cache hub certificate keyprint (SHA256) for

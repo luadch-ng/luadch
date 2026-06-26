@@ -1,0 +1,147 @@
+local patterns
+
+-- =====================================================================
+-- etc_clientblocker.tbl.example
+--
+-- Extended client blocklist curated by Sopor (luadch community
+-- operator). Imported from his etc_clientblocker.lua v0.4 (2026,
+-- multi-year production hub). Goes BEYOND the bundled
+-- scripts/data/etc_clientblocker.tbl (which only carries the
+-- universally-malicious cheat/mod clients) and additionally blocks
+-- outdated stable releases of otherwise-legitimate clients
+-- (DC++, AirDC++, EiskaltDC++, ApexDC++, ncdc, Jucy, ...) plus
+-- legacy DC++ mods (StrgDC++, IceDC++, PDC++, PWDC++).
+--
+-- To use: copy this file to scripts/data/etc_clientblocker.tbl
+-- and run `+reload`. Operators can then prune individual entries
+-- with `+delblocker <pattern>` or add custom rules with
+-- `+addblocker <pattern> [reason]`.
+--
+-- Two Sopor-isms were normalised on import for clarity:
+--   - `%w` (Lua's word-character class) was used as if it were
+--     a literal "w" to match "AirDC++w" (Web Client). The class
+--     matches any letter/digit so the original was over-permissive
+--     (would also match e.g. "AirDC++Q"). Switched to literal `w`.
+--   - `%n` was technically equivalent to literal "n" (Lua 5.4
+--     treats `%X` for non-class X as the literal byte X) but
+--     reads as if it were a class - normalised to literal `n`
+--     for the same readability reason that drove the `%w` fix.
+--
+-- Reason strings include Swedish translations for Sopor's hub
+-- (kept verbatim - operators of non-SE hubs can re-edit via
+-- `+addblocker` after re-import).
+--
+-- License: GPLv3 (matches the parent plugin). Original author:
+-- pulsar + Sopor maintenance.
+-- =====================================================================
+
+patterns = {
+
+    -- DC++ 0.000 - 0.799
+    [ "^%+%+%s0%.[0-7][0-9][0-9]$" ] = "You are using an old version of DC++. Please update and reconnect!",
+
+    -- DC++ 0.800 - 0.879
+    [ "^%+%+%s0%.8[0-7][0-9]$" ]     = "You are using an old version of DC++. Please update and reconnect!",
+
+    -- AirDC++ 1.00 - 3.99 (all alpha, beta, stable)
+    [ "^AirDC%+%+%s[1-3]%.[0-9][0-9][ab]?.-" ] = "You are using an old version of AirDC++. Please update and reconnect! (File / Update check)",
+
+    -- AirDC++ 4.00 - 4.09 (all alpha, beta, stable)
+    [ "^AirDC%+%+%s4%.0[0-9][ab]?.-" ] = "You are using an old version of AirDC++. Please update and reconnect! (File / Update check)",
+
+    -- AirDC++ 4.10 - 4.19 (all alpha, beta, stable)
+    [ "^AirDC%+%+%s4%.1[0-9][ab]?.-" ] = "You are using an old ALPHA/BETA version of AirDC++. Please update and reconnect! (File / Update check)",
+
+    -- AirDC++ 4.20 - 4.29 (alpha + beta only)
+    [ "^AirDC%+%+%s4%.2[0-9][ab].-" ] = "You are using an old ALPHA/BETA version of AirDC++. Please update and reconnect! (File / Update check)",
+
+    -- AirDC++ 4.0 modified (Snoopy uses this exact string)
+    [ "^AirDC%+%+%s4%.0$" ] = "You are using a modified AirDC++. Download the unmodified release at https://github.com/airdcpp/airdcpp-windows/releases",
+
+    -- AirDC++ 3.00 - 4.99 stable but dirty (-d suffix)
+    [ "^AirDC%+%+%s[3-4]%.[0-9][0-9]%-d" ] = "You are using a modified AirDC++. Download the unmodified release at https://github.com/airdcpp/airdcpp-windows/releases",
+
+    -- AirDC++ Web Client all 0.x (beta + stable)
+    [ "^AirDC%+%+w%s0%..+" ]            = "You are using an old version of AirDC++ Web Client. Please update and reconnect!",
+
+    -- AirDC++ Web Client 1.0.0 - 1.9.9
+    [ "^AirDC%+%+w%s1%.[0-9]%.[0-9].-" ] = "You are using an old version of AirDC++ Web Client. Please update and reconnect!",
+
+    -- AirDC++ Web Client 2.0.0 - 2.9.9
+    [ "^AirDC%+%+w%s2%.[0-9]%.[0-9].-" ] = "You are using an old version of AirDC++ Web Client. Please update and reconnect!",
+
+    -- AirDC++ Web Client 2.10.x - 2.11.x
+    [ "^AirDC%+%+w%s2%.10%.[0-9].-" ]    = "You are using an old version of AirDC++ Web Client. Please update and reconnect!",
+    [ "^AirDC%+%+w%s2%.11%.[0-9].-" ]    = "You are using an old version of AirDC++ Web Client. Please update and reconnect!",
+    [ "^AirDC%+%+w%s2%.12%.0.-" ]        = "You are using an old version of AirDC++ Web Client. Please update and reconnect!",
+
+    -- AirDC++ Web Client 2.12.x - 2.14.0 beta
+    [ "^AirDC%+%+w%s2%.12%.[1-9]b.-" ]   = "You are using an old ALPHA/BETA version of AirDC++ Web Client. Please update and reconnect!",
+    [ "^AirDC%+%+w%s2%.13%.[0-9]b.-" ]   = "You are using an old ALPHA/BETA version of AirDC++ Web Client. Please update and reconnect!",
+    [ "^AirDC%+%+w%s2%.14%.0b.-" ]       = "You are using an old ALPHA/BETA version of AirDC++ Web Client. Please update and reconnect!",
+
+    -- AirDC++ nano (any version - deprecated). Literal `n`, not the
+    -- `%n` Sopor wrote (which would have been equivalent in Lua 5.4
+    -- but reads as if it were a character class).
+    [ "^AirDC%+%+n%s.-" ] = "AirDC++ nano is outdated. Please switch to AirDC++ Web Client and reconnect!",
+
+    -- AirDC++ unauthorized forks. Real AirDC++ has only three known
+    -- AP-suffix forms: no suffix (plain "AirDC++ X.YY"), "w" for the
+    -- Web Client, "n" for nano. Anything else - "AirDC++Q", "AirDC++3",
+    -- "AirDC++pirate", random one-off forks operators in the wild have
+    -- spotted - is by definition modified / unauthorised. The character
+    -- class `[^%snw]` matches anything that is NOT whitespace AND NOT
+    -- "n" AND NOT "w", which is the cleanest negative-list approach.
+    -- Verified to leave all three legitimate AirDC++ flavours alone
+    -- (see tests/unit/etc_clientblocker_test.lua "fork catchall" cases).
+    [ "^AirDC%+%+[^%snw]" ] = "Modified / unauthorised AirDC++ fork is not allowed in this hub. Please download the official AirDC++ from https://airdcpp.net",
+
+    -- ApexDC++ 0.x.x - 1.5.9
+    [ "^ApexDC%+%+%s[0-1]%.[0-5]%.[0-9]$" ] = "You are using an old version of ApexDC++. Please update and reconnect!",
+    -- ApexDC++ 1.5.10 - 1.5.14
+    [ "^ApexDC%+%+%s[0-1]%.[0-5]%.1[0-4]$" ] = "You are using an old version of ApexDC++. Please update and reconnect!",
+    -- ApexDC++ 1.6.0 - 1.6.4
+    [ "^ApexDC%+%+%s1%.6%.[0-4]$" ]          = "You are using an old version of ApexDC++. Please update and reconnect!",
+
+    -- Cheat / mod clients (also bundled by default - kept here for
+    -- single-file completeness if the operator copies this OVER
+    -- the bundled set).
+    [ "^CleanDC%+%+.+" ]   = "CleanDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+    [ "^RSX%+%+.+" ]       = "RSX++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+    [ "^CrZ%+%+.+" ]       = "CrZ++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+    [ "^SmVDC%+%+.-$" ]    = "SmVDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+    [ "^DC@fe%+%+.-$" ]    = "Modified BCDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+    [ "^FearDC.+" ]        = "FearDC is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+
+    -- ncdc all versions through 1.18.1 (current as of 2026 is 1.25)
+    [ "^ncdc%s0%.[1-9].-" ]   = "You are using an old version of ncdc. Please update and reconnect!",
+    [ "^ncdc%s1%.[0-9]$" ]    = "You are using an old version of ncdc. Please update and reconnect!",
+    [ "^ncdc%s1%.[0-9]%-.+" ] = "You are using an old version of ncdc. Please update and reconnect!",
+    [ "^ncdc%s1%.1[0-8].-" ]  = "You are using an old version of ncdc. Please update and reconnect!",
+
+    -- PDC++ all (private DC fork)
+    [ "^PDC%+%+.-" ] = "PDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+
+    -- PWDC++ all
+    [ "^PWDC%+%+.-" ] = "PWDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+
+    -- StrongDC++ all (StrgDC++ in BINF)
+    [ "^StrgDC%+%+.-" ] = "StrgDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+
+    -- IceDC++ all
+    [ "^IceDC%+%+.-" ] = "IceDC++ is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+
+    -- EiskaltDC++ up to 2.4.1 (current as of 2026 is 2.4.2)
+    [ "^EiskaltDC%+%+%s2%.[0-3]%." ]     = "You are using an old version of EiskaltDC++. Please update and reconnect!",
+    [ "^EiskaltDC%+%+%s2%.4%.[0-1]$" ] = "You are using an old version of EiskaltDC++. Please update and reconnect!",
+
+    -- [R]DC++ 0.xx
+    [ "^0%.[0-9][0-9]$" ] = "Your client is not allowed in this hub. Please switch to AirDC++ and reconnect!",
+
+    -- Jucy up to 0.86
+    [ "^UC V:0%.[0-7][0-9]$" ] = "You are using an old version of Jucy. Please update and reconnect!",
+    [ "^UC V:0%.8[0-6]$" ]     = "You are using an old version of Jucy. Please update and reconnect!",
+
+}
+
+return patterns

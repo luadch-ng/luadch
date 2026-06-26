@@ -108,8 +108,8 @@ local msg_notfound = lang.msg_notfound or "User not found."
 local msg_isbot = lang.msg_isbot or "User is a bot."
 local msg_block = lang.msg_block or "[ MSGMANAGER ]--> Block user: %s  |  Mode:  %s"
 local msg_unblock = lang.msg_unblock or "[ MSGMANAGER ]--> Unblock user:  %s"
-local msg_report_block = lang.msg_report_block or "[ MSGMANAGER ]--> User:  %s  |  has blocked user:  %s  |  mode:  %s"
-local msg_report_unblock = lang.msg_report_unblock or "[ MSGMANAGER ]--> User:  %s  |  has unblocked user:  %s"
+local msg_report_block = lang.msg_report_block or "[ MSGMANAGER ]--> User:  %s  |  has blocked user:  %s  |  IP:  %s  |  mode:  %s"
+local msg_report_unblock = lang.msg_report_unblock or "[ MSGMANAGER ]--> User:  %s  |  has unblocked user:  %s  |  IP:  %s"
 
 -- #301 PR-3: mode display words routed through lang. The msg_block /
 -- msg_report_block templates expect a mode token here; previously
@@ -243,7 +243,7 @@ is_online = function( user, target )
         if target:isbot() then
             return "bot"
         else
-            return target:firstnick(), target:nick(), target:level()
+            return target:firstnick(), target:nick(), target:level(), target:ip()
         end
     end
     return nil
@@ -301,7 +301,7 @@ onbmsg = function( user, command, parameters )
             user:reply( msg_denied, hub.getbot() )
             return PROCESSED
         end
-        local target_firstnick, target_nick, target_level = is_online( user, p3 )
+        local target_firstnick, target_nick, target_level, target_ip = is_online( user, p3 )
         if target_firstnick then
             if target_firstnick ~= "bot" then
                 if ( ( permission[ user_level ] or 0 ) < target_level ) then
@@ -313,7 +313,7 @@ onbmsg = function( user, command, parameters )
                     util.savetable( block_tbl, "block_tbl", block_file )
                     local msg = utf.format( msg_block, target_nick, msg_mode_main )
                     user:reply( msg, hub.getbot() )
-                    msg = utf.format( msg_report_block, user_nick, target_nick, msg_mode_main )
+                    msg = utf.format( msg_report_block, user_nick, target_nick, target_ip or "?", msg_mode_main )
                     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
                     audit.fire( audit.build( "msgmanager.block", user,
                         { nick = target_firstnick }, nil, { mode = "main" } ) )
@@ -337,7 +337,7 @@ onbmsg = function( user, command, parameters )
             user:reply( msg_denied, hub.getbot() )
             return PROCESSED
         end
-        local target_firstnick, target_nick, target_level = is_online( user, p3 )
+        local target_firstnick, target_nick, target_level, target_ip = is_online( user, p3 )
         if target_firstnick then
             if target_firstnick ~= "bot" then
                 if ( ( permission[ user_level ] or 0 ) < target_level ) then
@@ -349,7 +349,7 @@ onbmsg = function( user, command, parameters )
                     util.savetable( block_tbl, "block_tbl", block_file )
                     local msg = utf.format( msg_block, target_nick, msg_mode_pm )
                     user:reply( msg, hub.getbot() )
-                    msg = utf.format( msg_report_block, user_nick, target_nick, msg_mode_pm )
+                    msg = utf.format( msg_report_block, user_nick, target_nick, target_ip or "?", msg_mode_pm )
                     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
                     audit.fire( audit.build( "msgmanager.block", user,
                         { nick = target_firstnick }, nil, { mode = "pm" } ) )
@@ -373,7 +373,7 @@ onbmsg = function( user, command, parameters )
             user:reply( msg_denied, hub.getbot() )
             return PROCESSED
         end
-        local target_firstnick, target_nick, target_level = is_online( user, p3 )
+        local target_firstnick, target_nick, target_level, target_ip = is_online( user, p3 )
         if target_firstnick then
             if target_firstnick ~= "bot" then
                 if ( ( permission[ user_level ] or 0 ) < target_level ) then
@@ -385,7 +385,7 @@ onbmsg = function( user, command, parameters )
                     util.savetable( block_tbl, "block_tbl", block_file )
                     local msg = utf.format( msg_block, target_nick, msg_mode_both )
                     user:reply( msg, hub.getbot() )
-                    msg = utf.format( msg_report_block, user_nick, target_nick, msg_mode_both )
+                    msg = utf.format( msg_report_block, user_nick, target_nick, target_ip or "?", msg_mode_both )
                     report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
                     audit.fire( audit.build( "msgmanager.block", user,
                         { nick = target_firstnick }, nil, { mode = "both" } ) )
@@ -409,7 +409,7 @@ onbmsg = function( user, command, parameters )
             user:reply( msg_denied, hub.getbot() )
             return PROCESSED
         end
-        local target_firstnick, target_nick, target_level = is_online( user, p3 )
+        local target_firstnick, target_nick, target_level, target_ip = is_online( user, p3 )
         if target_firstnick then
             local found = false
             for k, v in pairs( block_tbl ) do
@@ -423,7 +423,7 @@ onbmsg = function( user, command, parameters )
                 util.savetable( block_tbl, "block_tbl", block_file )
                 local msg = utf.format( msg_unblock, target_nick )
                 user:reply( msg, hub.getbot() )
-                msg = utf.format( msg_report_unblock, user_nick, target_nick )
+                msg = utf.format( msg_report_unblock, user_nick, target_nick, target_ip or "?" )
                 report.send( report_activate, report_hubbot, report_opchat, llevel, msg )
                 audit.fire( audit.build( "msgmanager.unblock", user,
                     { nick = target_firstnick }, nil, nil ) )

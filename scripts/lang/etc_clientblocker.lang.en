@@ -1,0 +1,36 @@
+return {
+
+    help_title_add  = "etc_clientblocker.lua - addblocker",
+    help_usage_add  = "[+!#]addblocker <pattern> [reason]",
+    help_desc_add   = "Block all clients whose AP+VE matches the Lua pattern. Pattern is the first whitespace-token; everything after it is the kick reason (defaults to etc_clientblocker_default_reason).",
+
+    help_title_del  = "etc_clientblocker.lua - delblocker",
+    help_usage_del  = "[+!#]delblocker <pattern|N>",
+    help_desc_del   = "Remove a client-blocker pattern by literal pattern OR by 1-based row number from +blocker output.",
+
+    help_title_list = "etc_clientblocker.lua - blocker",
+    help_usage_list = "[+!#]blocker",
+    help_desc_list  = "List configured client-blocker patterns.",
+
+    ucmd_menu_add    = { "Hub", "Client Blocker", "add pattern" },
+    ucmd_menu_del    = { "Hub", "Client Blocker", "delete pattern" },
+    ucmd_menu_list   = { "Hub", "Client Blocker", "list patterns" },
+    ucmd_popup_pat    = "Lua pattern (e.g. AirDC%+%+%s2):",
+    ucmd_popup_reason = "Kick reason (optional):",
+
+    msg_client_not_allowed = "Your client is not allowed",
+    msg_denied             = "You are not allowed to use this command.",
+    msg_usage_add          = "Usage: [+!#]addblocker <pattern> [reason]",
+    msg_usage_del          = "Usage: [+!#]delblocker <pattern|N>",
+    msg_bad_pattern        = "Invalid Lua pattern (empty, too long, or fails compile).",
+    msg_pattern_exists     = "Pattern '%s' is already configured. Use +delblocker first.",
+    msg_no_such_pattern    = "No such pattern '%s'.",
+    msg_added              = "%s added client-blocker pattern '%s' (reason: %s).",
+    msg_deleted            = "%s removed client-blocker pattern '%s'.",
+    msg_list_header        = "\n=== CLIENT BLOCKER ===",
+    msg_list_footer        = "=== END ===\n",
+    msg_list_empty         = "(no patterns configured)",
+    msg_err                = "etc_clientblocker.lua: error: database file (scripts/data/etc_clientblocker.tbl) corrupt or missing, a new one was created.",
+    msg_report             = "[ CLIENT BLOCKER ]--> The user %s with IP %s is running %s and is not allowed in this hub. Matching pattern: %s",
+
+}
