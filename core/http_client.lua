@@ -31,10 +31,13 @@
       - Hard bounds: per-request deadline (timeout), response size
         cap, and a global in-flight cap so a buggy caller cannot
         spawn unbounded timer coroutines.
-      - TLS verification is the caller's choice via `verify`/`cafile`
-        (LuaSec has no default CA store). Default is "none": the
-        channel is then NOT authenticated - fine for POSTing public
-        data (a hub announcing its public address), NOT for secrets.
+      - TLS verification: default is verify="peer" against the bundled
+        Mozilla CA bundle at `certs/cacert.pem` (Precursor 0b of #78
+        arc). Callers can pass verify="none" to opt out (self-signed
+        endpoints, ephemeral test setups). When verify="peer" is in
+        effect and the resolved cafile is missing on disk the request
+        FAILS CLOSED with a clear error - we never silently downgrade
+        to unauthenticated.
 
     API:
       http_client.request{
@@ -44,8 +47,8 @@
           headers     = { ... },       -- optional extra request headers
           timeout     = 15,            -- seconds (default 15, clamped 1..120)
           max_response = 65536,        -- response byte cap (default 64 KiB)
-          verify      = "none",        -- "none" | "peer" (TLS only)
-          cafile      = nil,           -- CA bundle path when verify="peer"
+          verify      = "peer",        -- "peer" (default) | "none" (TLS only)
+          cafile      = "certs/cacert.pem",  -- CA bundle path; default = bundled
           on_complete = function( res ) end,  -- res = { status, headers, body }
           on_error    = function( err ) end,  -- err = string
       }
@@ -67,6 +70,7 @@ local table     = use "table"
 local socket    = use "socket"
 local ssl       = use "ssl"
 local out       = use "out"
+local io        = use "io"
 local coroutine = use "coroutine"
 
 local coroutine_create = coroutine.create
@@ -77,6 +81,7 @@ local string_len       = string.len
 local string_find      = string.find
 local table_concat     = table.concat
 local socket_gettime   = socket.gettime
+local io_open          = io.open
 local out_put          = out.put
 local out_error        = out.error
 
@@ -87,6 +92,15 @@ local MAX_TIMEOUT       = 120
 local DEFAULT_MAX_RESP  = 64 * 1024
 local MAX_RESP_CEIL     = 1024 * 1024   -- hard ceiling even if caller asks for more
 local MAX_INFLIGHT      = 16            -- global cap on concurrent requests
+
+-- // TLS defaults (Precursor 0b of #78 arc) //
+-- Bundled CA bundle ships at `<install>/certs/cacert.pem` (Mozilla
+-- snapshot extracted by curl.se from Firefox's NSS certdata.txt).
+-- Default verify mode flipped from "none" -> "peer" so outbound
+-- HTTPS authenticates the remote against trusted CAs out of the
+-- box; callers can still opt out explicitly with verify="none".
+local DEFAULT_VERIFY    = "peer"
+local DEFAULT_CAFILE    = "certs/cacert.pem"
 local READ_CHUNK        = 16 * 1024
 
 local _inflight = 0
@@ -242,12 +256,48 @@ local function drive( req )
         -- Floor at TLS 1.2: protocol="any" but disable SSLv3 / TLS 1.0
         -- / TLS 1.1 via options, so a downgrade to a broken protocol
         -- is not silently accepted even with verify="none".
+        --
+        -- Precursor 0b of #78 arc: default verify mode is "peer" with
+        -- the bundled Mozilla CA bundle at `certs/cacert.pem`. Callers
+        -- pass verify="none" explicitly to opt out (e.g. self-signed
+        -- internal endpoints). If verify resolves to "peer" but the
+        -- caller passed neither verify=none nor a cafile AND the
+        -- bundled file is missing on disk, we FAIL CLOSED with a clear
+        -- error rather than silently falling back to verify=none -
+        -- the whole point of bundling cacert.pem is to make verified
+        -- the default outcome.
+        -- Empty-string treated as unset; otherwise `cafile = ""`
+        -- silently lands a bogus path in resolved_cafile and the
+        -- probe below fails with an uninformative error message.
+        local caller_cafile = ( req.cafile and req.cafile ~= "" ) and req.cafile or nil
+        local resolved_verify = req.verify or DEFAULT_VERIFY
+        local resolved_cafile = caller_cafile or DEFAULT_CAFILE
+        if resolved_verify == "peer" then
+            local f = io_open( resolved_cafile, "r" )
+            if not f then
+                sock:close( )
+                local hint
+                if caller_cafile then
+                    -- Caller supplied an explicit path that is missing on disk.
+                    hint = "verify=peer; the supplied cafile path does not exist"
+                else
+                    -- No caller cafile -> we resolved to the bundled default.
+                    hint = "verify=peer; place Mozilla cacert.pem at the bundled path, " ..
+                        "pass cafile=<path> for a custom bundle, or " ..
+                        "pass verify=\"none\" to opt out of authentication"
+                end
+                return false, "cafile not found: " .. resolved_cafile .. " (" .. hint .. ")"
+            end
+            f:close( )
+        end
         local params = {
             mode     = "client",
             protocol = "any",
-            verify   = req.verify or "none",
+            verify   = resolved_verify,
             options  = { "all", "no_sslv3", "no_tlsv1", "no_tlsv1_1" },
-            cafile   = req.cafile,
+            -- LuaSec ignores cafile when verify="none"; drop it so the
+            -- params table reflects the actual security posture exactly.
+            cafile   = ( resolved_verify == "peer" ) and resolved_cafile or nil,
         }
         local wrapped
         wrapped, err = ssl.wrap( sock, params )
