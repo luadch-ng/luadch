@@ -23,7 +23,7 @@
 ]]--
 
 local _real = {
-    type = type, string = string, table = table,
+    type = type, ipairs = ipairs, string = string, table = table,
     tonumber = tonumber, tostring = tostring,
 }
 _G.use = function( n )

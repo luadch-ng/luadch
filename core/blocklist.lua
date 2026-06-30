@@ -83,9 +83,11 @@
 local use = use
 
 local type      = use "type"
+local next      = use "next"
 local pairs     = use "pairs"
 local ipairs    = use "ipairs"
 local tostring  = use "tostring"
+local tonumber  = use "tonumber"
 local string    = use "string"
 local table     = use "table"
 local math      = use "math"

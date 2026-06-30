@@ -53,6 +53,7 @@
 local use = use
 
 local type      = use "type"
+local ipairs    = use "ipairs"
 local string    = use "string"
 local table     = use "table"
 local tonumber  = use "tonumber"
