@@ -93,6 +93,20 @@ _core = {    -- luadch core, order is important
     -- listener, which would fail with "missing cert" if the cert was
     -- not yet generated). Closes #77.
     "cert_bootstrap",
+    -- core/sha256.lua (Precursor 0d of #78 arc): pure-Lua FIPS 180-4
+    -- SHA-256. Used by cacert_bootstrap below to compare runtime
+    -- ca-bundle.pem against the bundled source-of-truth. Self-test
+    -- runs at module load against NIST CAVP vectors; load failure
+    -- here aborts the boot LOUD which is exactly what we want for a
+    -- silent-corruption-class bug.
+    "sha256",
+    -- core/cacert_bootstrap.lua (Precursor 0d of #78 arc): reconcile
+    -- certs/ca-bundle.pem against lib/luadch/ca-bundle.pem on every
+    -- boot (install missing, warn on outdated, opt-in auto-update).
+    -- MUST come after cfg + out + sha256 (uses all three at init
+    -- time); ordering vs hub is irrelevant because the reconcile
+    -- runs at init-time, not at hub-loop time.
+    "cacert_bootstrap",
     --"doc",
     "ratelimit",
     "server",

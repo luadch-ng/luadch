@@ -133,6 +133,19 @@ jobs:
       - name: Run secrets unit test
         run: lua5.4 tests/unit/secrets_test.lua
 
+      # #78 Precursor 0d: core/sha256.lua pure-Lua FIPS 180-4. Verifies
+      # 8 canonical NIST vectors (empty / abc / message digest /
+      # alphabet / alphanumeric / 55-byte / 112-byte / 1M-char) plus
+      # the boundary scan around the 56-byte single-block padding edge.
+      - name: Run sha256 unit test
+        run: lua5.4 tests/unit/sha256_test.lua
+
+      # #78 Precursor 0d: core/cacert_bootstrap.lua reconcile_bundle
+      # decision-matrix (source-missing / installed / no-op / warned /
+      # auto-updated branches). Uses OS temp dir for file fixtures.
+      - name: Run cacert_bootstrap unit test
+        run: lua5.4 tests/unit/cacert_bootstrap_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -237,6 +250,14 @@ jobs:
       - name: Run secrets unit test
         shell: msys2 {0}
         run: lua tests/unit/secrets_test.lua
+
+      - name: Run sha256 unit test
+        shell: msys2 {0}
+        run: lua tests/unit/sha256_test.lua
+
+      - name: Run cacert_bootstrap unit test
+        shell: msys2 {0}
+        run: lua tests/unit/cacert_bootstrap_test.lua
 
       - name: Configure
         shell: msys2 {0}

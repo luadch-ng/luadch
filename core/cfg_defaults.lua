@@ -3822,6 +3822,33 @@ local defaults = {
             return types_boolean( value, nil, true )
         end
     },
+    -- #78 Precursor 0d: outbound-HTTPS CA bundle management.
+    --
+    -- `ca_bundle_path` is the runtime location of the trusted-CA
+    -- bundle - operator-overwriteable, the default for
+    -- http_client.cafile. `ca_bundle_source_path` is the immutable
+    -- system-path source-of-truth installed by CMake (NOT under any
+    -- volume-mounted directory), used by core/cacert_bootstrap.lua to
+    -- restore the runtime file when missing. `ca_bundle_auto_update`
+    -- defaults FALSE so the bootstrap leaves the operator-facing
+    -- file alone on SHA mismatch (an operator might run a custom
+    -- corporate-PKI bundle); flip TRUE for the "always pull the
+    -- latest from the install tree" preference. See docs/CACERT.md.
+    ca_bundle_path = { "certs/ca-bundle.pem",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    ca_bundle_source_path = { "lib/luadch/ca-bundle.pem",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    ca_bundle_auto_update = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
     -- #97 (default true since v3.1.4), flipped back to false in
     -- v3.2.x: with the #214 Gap 2 fix in place, kill_wrong_ips=false
     -- no longer broadcasts a client-claimed (potentially spoofed) IP

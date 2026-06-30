@@ -90,6 +90,14 @@ install(FILES basexx/basexx.lua      DESTINATION lib/basexx)
 install(FILES slaxml/slaxml.lua      DESTINATION lib/slaxml)
 install(FILES dkjson/dkjson.lua      DESTINATION lib/dkjson)
 
+# Bundled Mozilla CA root certificates (Precursor 0d of #78 arc).
+# Source-of-truth install: NOT under examples/, so Docker volume-
+# mounts on host ./certs/ do NOT overlay this file. cacert_bootstrap
+# copies it to certs/ca-bundle.pem on first boot when missing or
+# (with cfg ca_bundle_auto_update=true) when the runtime copy is
+# out of date. See docs/CACERT.md.
+install(FILES examples/certs/ca-bundle.pem DESTINATION lib/luadch)
+
 # Runtime trees
 install(DIRECTORY core/        DESTINATION core)
 install(DIRECTORY scripts/     DESTINATION scripts)

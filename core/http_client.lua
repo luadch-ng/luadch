@@ -32,8 +32,10 @@
         cap, and a global in-flight cap so a buggy caller cannot
         spawn unbounded timer coroutines.
       - TLS verification: default is verify="peer" against the bundled
-        Mozilla CA bundle at `certs/cacert.pem` (Precursor 0b of #78
-        arc). Callers can pass verify="none" to opt out (self-signed
+        Mozilla CA bundle at `certs/ca-bundle.pem` (Precursor 0b + 0d
+        of #78 arc - renamed from `certs/cacert.pem` to avoid the
+        path collision with cert_bootstrap.lua's inbound TLS cafile).
+        Callers can pass verify="none" to opt out (self-signed
         endpoints, ephemeral test setups). When verify="peer" is in
         effect and the resolved cafile is missing on disk the request
         FAILS CLOSED with a clear error - we never silently downgrade
@@ -48,7 +50,7 @@
           timeout     = 15,            -- seconds (default 15, clamped 1..120)
           max_response = 65536,        -- response byte cap (default 64 KiB)
           verify      = "peer",        -- "peer" (default) | "none" (TLS only)
-          cafile      = "certs/cacert.pem",  -- CA bundle path; default = bundled
+          cafile      = "certs/ca-bundle.pem", -- CA bundle path; default = bundled
           on_complete = function( res ) end,  -- res = { status, headers, body }
           on_error    = function( err ) end,  -- err = string
       }
@@ -93,14 +95,20 @@ local DEFAULT_MAX_RESP  = 64 * 1024
 local MAX_RESP_CEIL     = 1024 * 1024   -- hard ceiling even if caller asks for more
 local MAX_INFLIGHT      = 16            -- global cap on concurrent requests
 
--- // TLS defaults (Precursor 0b of #78 arc) //
--- Bundled CA bundle ships at `<install>/certs/cacert.pem` (Mozilla
+-- // TLS defaults (Precursor 0b + 0d of #78 arc) //
+-- Bundled CA bundle ships at `<install>/certs/ca-bundle.pem` (Mozilla
 -- snapshot extracted by curl.se from Firefox's NSS certdata.txt).
 -- Default verify mode flipped from "none" -> "peer" so outbound
 -- HTTPS authenticates the remote against trusted CAs out of the
 -- box; callers can still opt out explicitly with verify="none".
+--
+-- Renamed from `certs/cacert.pem` in Precursor 0d to avoid the path
+-- collision with cert_bootstrap.lua, which writes the self-signed
+-- TLS-listener cert AT THAT PATH as a satisfy-existence-check for
+-- ssl_params.cafile (the INBOUND mutual-TLS use case). Two roles,
+-- two paths now.
 local DEFAULT_VERIFY    = "peer"
-local DEFAULT_CAFILE    = "certs/cacert.pem"
+local DEFAULT_CAFILE    = "certs/ca-bundle.pem"
 local READ_CHUNK        = 16 * 1024
 
 local _inflight = 0
@@ -257,14 +265,15 @@ local function drive( req )
         -- / TLS 1.1 via options, so a downgrade to a broken protocol
         -- is not silently accepted even with verify="none".
         --
-        -- Precursor 0b of #78 arc: default verify mode is "peer" with
-        -- the bundled Mozilla CA bundle at `certs/cacert.pem`. Callers
+        -- Precursor 0b + 0d of #78 arc: default verify mode is "peer"
+        -- with the bundled Mozilla CA bundle at `certs/ca-bundle.pem`
+        -- (managed by core/cacert_bootstrap.lua at boot time). Callers
         -- pass verify="none" explicitly to opt out (e.g. self-signed
         -- internal endpoints). If verify resolves to "peer" but the
         -- caller passed neither verify=none nor a cafile AND the
         -- bundled file is missing on disk, we FAIL CLOSED with a clear
         -- error rather than silently falling back to verify=none -
-        -- the whole point of bundling cacert.pem is to make verified
+        -- the whole point of bundling the CA file is to make verified
         -- the default outcome.
         -- Empty-string treated as unset; otherwise `cafile = ""`
         -- silently lands a bogus path in resolved_cafile and the
@@ -282,7 +291,8 @@ local function drive( req )
                     hint = "verify=peer; the supplied cafile path does not exist"
                 else
                     -- No caller cafile -> we resolved to the bundled default.
-                    hint = "verify=peer; place Mozilla cacert.pem at the bundled path, " ..
+                    hint = "verify=peer; the bundled ca-bundle.pem is missing - " ..
+                        "let core/cacert_bootstrap restore it on next boot, " ..
                         "pass cafile=<path> for a custom bundle, or " ..
                         "pass verify=\"none\" to opt out of authentication"
                 end

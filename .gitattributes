@@ -34,9 +34,11 @@ makefile    text eol=lf
 *.yaml      text eol=lf
 *.json      text eol=lf
 
-# PEM bundles (certs/cacert.pem, future operator-supplied bundles): LF.
+# PEM bundles (certs/cacert.pem inbound, certs/ca-bundle.pem outbound,
+# future operator-supplied bundles): LF.
 # Openssl tolerates CRLF, but cross-platform consistency keeps sha256sum
-# stable across Windows + Linux checkouts.
+# stable across Windows + Linux checkouts. core/cacert_bootstrap.lua's
+# SHA-256 compare relies on this.
 *.pem       text eol=lf
 
 # Windows-specific build files stay CRLF in the working tree so cmd.exe and
