@@ -91,6 +91,7 @@ local tonumber  = use "tonumber"
 local string    = use "string"
 local table     = use "table"
 local math      = use "math"
+local io        = use "io"
 local socket    = use "socket"
 
 local string_byte    = string.byte
@@ -99,6 +100,7 @@ local string_lower   = string.lower
 local table_insert   = table.insert
 local table_remove   = table.remove
 local math_floor     = math.floor
+local io_open        = io.open
 local socket_gettime = socket.gettime
 
 local util    = use "util"
@@ -618,6 +620,16 @@ local function reload( )
     _rollup = { }
     _rollup_size = 0
     _last_flush_time = 0
+
+    -- Peek for file existence BEFORE util.loadtable so we avoid the
+    -- noisy `util.lua: function 'checkfile': error in cfg/blocklist.tbl:
+    -- No such file or directory` log line on a fresh install. The
+    -- empty-store branch IS the correct first-boot state; nothing to
+    -- seed (no bundled defaults). Operator-facing .tbl appears on the
+    -- first `+blocklist add` once Phase B lands.
+    local probe = io_open( _store_path, "r" )
+    if not probe then return end
+    probe:close( )
 
     local data, err = util_loadtable( _store_path )
     if not data then

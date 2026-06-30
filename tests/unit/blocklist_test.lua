@@ -70,6 +70,20 @@ local function _stub_use_factory( opts )
         if name == "out" then
             return { put = function( ) end, error = function( ) end }
         end
+        if name == "io" then
+            -- Existence probe stub: io.open(path,"r") succeeds iff the
+            -- stubbed `_disk` knows the path. Matches the real-hub
+            -- behaviour that on first boot the file is missing and
+            -- reload() must skip the load-from-disk branch quietly.
+            return {
+                open = function( path, _mode )
+                    if _disk[ path ] ~= nil then
+                        return { close = function( ) end }
+                    end
+                    return nil, "No such file or directory"
+                end,
+            }
+        end
         if name == "ipmatch" then
             return _G._loaded_ipmatch
         end
@@ -253,6 +267,36 @@ do
     eq( "post-reload v4 match", bl2.check_ip( "55.66.77.99" ), true )
     eq( "post-reload v6 match", bl2.check_ip( "2001:db8::1" ), true )
     eq( "post-reload non-match", bl2.check_ip( "1.2.3.4" ), false )
+end
+
+----------------------------------------------------------------------
+-- Fresh-install: reload() with no .tbl on disk is silent + clean
+-- (regression for the "util.lua: function 'checkfile': error in
+-- cfg/blocklist.tbl: No such file or directory" testhub finding).
+-- The io-stub returns nil for any path the _disk has never seen, so
+-- this exercises the same branch as a literal first-boot.
+----------------------------------------------------------------------
+
+reset_state{}
+do
+    local err_count = 0
+    -- Override the out stub so we can count error invocations during
+    -- this reload-from-empty scenario.
+    _G.use = function( name )
+        if name == "out" then
+            return {
+                put   = function( ) end,
+                error = function( ) err_count = err_count + 1 end,
+            }
+        end
+        return _stub_use_factory( )( name )
+    end
+    local bl_fresh = assert( loadfile( "core/blocklist.lua" ) )( )
+    bl_fresh.init( )
+    eq( "fresh-install reload emits no out.error",  err_count, 0 )
+    eq( "fresh-install reload leaves zero entries", bl_fresh.count( ).total, 0 )
+    -- Restore the standard stub for subsequent tests.
+    _G.use = _stub_use_factory( )
 end
 
 ----------------------------------------------------------------------
