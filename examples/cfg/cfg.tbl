@@ -998,6 +998,18 @@ return { -- the settings are a lua table, do not tough this!
     },
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_blocklist.lua settings | `+blocklist` admin CLI for the unified pre-handshake IP/CIDR blocklist (#78 Phase B)
+
+    etc_blocklist_oplevel = 80,  -- min level to run `+blocklist add / del / show / count / export / import` (integer)
+    etc_blocklist_show_limit = 200,  -- hard cap on rows in `+blocklist show` output to avoid wall-of-text DMSG (integer 1..10000)
+
+    etc_blocklist_report = true,  -- on every add / del / export / import, fire etc_report.send with the action summary so staff see it live (boolean)
+    etc_blocklist_report_hubbot = false,  -- send the report as a hubbot PM to operators at or above etc_blocklist_llevel (boolean)
+    etc_blocklist_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_blocklist_llevel = 60,  -- min level for the hubbot-PM report (integer)
+    etc_blocklist_import_min_level = 100,  -- min level to run `+blocklist import <path>` - JSONL files may carry entries added by higher-level masters; default 100 = master-only so a mid-level op cannot import + take ownership of master-tier entries (integer)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_log_cleaner.lua settings | this script adds a command to clean log files
 
     etc_log_cleaner_minlevel = 100,  -- min level to use this command? (integer)
@@ -1413,6 +1425,7 @@ return { -- the settings are a lua table, do not tough this!
         "usr_nick_length.lua",
         "hub_inf_manager.lua",
         { "etc_clientblocker.lua", enabled = true },  -- #81 client AP/VE blocklist. API-toggleable (#261). Must sit AFTER hub_inf_manager so structural BINF rejects (forbidden flags / identity spoofing) happen first; client-policy kicks then run on already-validated INFs.
+        { "etc_blocklist.lua", enabled = true },  -- #78 Phase B `+blocklist` admin CLI for the unified pre-handshake IP/CIDR blocklist (engine = core/blocklist.lua, Phase A). API-toggleable (#261). Manages MANUAL entries; Phase D/E/F plugins (geoip / external feeds / proxydetect) will push auto-feed entries into the same store.
         { "hub_runtime.lua", enabled = true },  -- using report import; API-toggleable (#261)
         { "bot_regchat.lua", enabled = true },  -- API-toggleable (#261)
         { "bot_session_chat.lua", enabled = true },  -- API-toggleable (#261)

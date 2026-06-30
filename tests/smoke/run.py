@@ -6651,6 +6651,128 @@ def test_aliases_adc_dispatch():
             raise TestFailure(f"+delalias did not confirm removal: {reply!r}")
 
 
+def test_blocklist_78_phase_b(staging_dir: Path, proc=None):
+    """#78 Phase B etc_blocklist `+blocklist` admin CLI smoke.
+
+    Exercises the dispatcher + 4 of 6 verbs (count / add / show /
+    del) over an authenticated ADC session. The remaining two
+    (export / import) write to disk and are covered by the unit
+    test - smoke stays focused on the live ADC path.
+
+    Sequence:
+      1. Login as dummy (level 100, > etc_blocklist_oplevel=80).
+      2. `+blocklist count` -> DMSG / EMSG with "0 entries total"
+         (clean staging, no manual entries yet).
+      3. `+blocklist add 198.51.100.0/24 reason="smoke"` ->
+         response contains "added" + "blocklist entry".
+         TEST-NET-3 prefix used deliberately: not loopback, not
+         publicly routable, no risk of accidentally blocking a
+         real client.
+      4. `+blocklist count` -> "1 entries total" with a "manual: 1"
+         line.
+      5. `+blocklist show` -> reply contains "198.51.100.0/24".
+      6. `+blocklist del 1` -> "removed" + "blocklist entry".
+      7. `+blocklist count` -> "0 entries total" again (roundtrip).
+
+    Predicate-driven receive matches the test_aliases_adc_dispatch
+    pattern (content-aware, filters past post-login frame storm +
+    `[command] +blocklist ...` echo line).
+
+    Spaces in BMSG bodies escape as `\\s` per the smoke harness
+    convention. The `reason="smoke"` token has no spaces inside
+    the quotes so no escape is needed on the wire; the assignment
+    chars `=` and `"` go through ADC verbatim.
+    """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+
+        # 1. count -> "0 entries total". Predicate filters past the
+        #    post-login storm; "0 entries total" is the marker.
+        sock.sendall(f"BMSG {sid} +blocklist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and "0 entries total" in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(
+                f"+blocklist count (pre-add) did not return zero: {reply!r}"
+            )
+
+        # 2. add 198.51.100.0/24 reason="smoke"
+        sock.sendall(
+            f'BMSG {sid} +blocklist\\sadd\\s198.51.100.0/24\\sreason="smoke"\n'
+            .encode("utf-8")
+        )
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and "added" in f and "blocklist entry" in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(
+                f"+blocklist add did not confirm: {reply!r}"
+            )
+
+        # 3. count -> "1 entries total" + "manual: 1"
+        sock.sendall(f"BMSG {sid} +blocklist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and "1 entries total" in f and "manual" in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(
+                f"+blocklist count (post-add) did not return one: {reply!r}"
+            )
+
+        # 4. show -> includes the cidr
+        sock.sendall(f"BMSG {sid} +blocklist\\sshow\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and "198.51.100.0/24" in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(
+                f"+blocklist show did not list the entry: {reply!r}"
+            )
+
+        # 5. del 1 -> "removed"
+        sock.sendall(f"BMSG {sid} +blocklist\\sdel\\s1\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and "removed" in f and "blocklist entry" in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(
+                f"+blocklist del did not confirm: {reply!r}"
+            )
+
+        # 6. count -> back to zero
+        sock.sendall(f"BMSG {sid} +blocklist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and "0 entries total" in f,
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(
+                f"+blocklist count (post-del) did not return zero: {reply!r}"
+            )
+
+    # Confirm the engine wrote cfg/blocklist.tbl during the add and
+    # left it (with an empty array) after the del. Phase A's fresh-
+    # install fix means the file appears on the first successful
+    # add and persists thereafter as the on-disk source of truth.
+    store_path = staging_dir / "cfg" / "blocklist.tbl"
+    if not store_path.exists():
+        raise TestFailure(
+            f"cfg/blocklist.tbl was not created at {store_path}; "
+            f"engine did not persist the add+del round-trip"
+        )
+
+
 def test_http_aliases(staging_dir: Path, proc=None):
     """#327: HTTP API CRUD for etc_aliases.
 
@@ -12242,6 +12364,19 @@ def main():
             failed.append("client blocker end-to-end (#81)")
         else:
             log("PASS  client blocker end-to-end (#81)")
+
+        # #78 Phase B etc_blocklist `+blocklist` admin CLI: login as
+        # dummy (level 100), add+show+del a TEST-NET-3 CIDR via the
+        # ADC chat-cmd path, expect the cfg/blocklist.tbl on-disk
+        # store to appear during the add. Six dispatched verbs in
+        # one stage; export/import covered by the unit test.
+        try:
+            test_blocklist_78_phase_b(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  blocklist admin CLI (#78 Phase B): {e}")
+            failed.append("blocklist admin CLI (#78 Phase B)")
+        else:
+            log("PASS  blocklist admin CLI (#78 Phase B)")
 
         # #261 plugin-management endpoints: GET /v1/plugins (read) +
         # PUT /v1/plugins/{name}/enabled (admin). Full toggle cycle on

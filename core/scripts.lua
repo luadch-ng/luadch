@@ -245,6 +245,13 @@ local SANDBOX_GLOBALS = {
     -- webhook tokens) call `secrets.lookup(cfg_key)` so Docker
     -- operators can set keys via env vars instead of cfg.tbl.
     "secrets",
+    -- core/blocklist.lua (#78 Phase A): unified pre-handshake
+    -- IP/CIDR blocklist engine. Phase B's etc_blocklist.lua and
+    -- Phase D/E/F's auto-feed plugins call blocklist.add /
+    -- .remove / .list / .count to manage entries; plugins NEVER
+    -- hold a direct reference to the engine's _entries array
+    -- (trust contract documented in the engine header).
+    "blocklist",
     "unicode",
     -- read-only program constants (PROGRAM_NAME / VERSION / FORK /
     -- COPYRIGHT / CONFIG_PATH). Static strings, no capability; lets

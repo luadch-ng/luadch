@@ -330,6 +330,7 @@ local function _persist_one( e )
         stealth      = e.stealth and true or false,
         reason       = e.reason or "",
         by_nick      = e.by_nick or "",
+        by_level     = e.by_level,
         expires_at   = e.expires_at,
         created_at   = e.created_at,
         meta         = e.meta,
@@ -415,6 +416,13 @@ local function _make_entry( cidr, opts )
         stealth      = stealth and true or false,
         reason       = opts.reason or "",
         by_nick      = opts.by_nick or "",
+        -- by_level is the operator's level at add time. Stored so
+        -- Phase B / Phase C can apply the [[reference-online-offline-
+        -- hierarchy-divergence]] rule on `+blocklist del`: a level-60
+        -- operator cannot remove an entry added by a level-80 master.
+        -- nil for auto-feeds (geoip / external / proxydetect) where
+        -- the concept doesn't apply.
+        by_level     = tonumber( opts.by_level ),
         expires_at   = opts.expires_at,
         created_at   = math_floor( now ),
         meta         = opts.meta,
@@ -595,6 +603,7 @@ local function list( filter_spec )
                 stealth    = e.stealth,
                 reason     = e.reason,
                 by_nick    = e.by_nick,
+                by_level   = e.by_level,
                 expires_at = e.expires_at,
                 created_at = e.created_at,
                 meta       = meta_copy,
@@ -658,6 +667,7 @@ local function reload( )
                 stealth      = row.stealth and true or false,
                 reason       = row.reason or "",
                 by_nick      = row.by_nick or "",
+                by_level     = tonumber( row.by_level ),
                 expires_at   = row.expires_at,
                 created_at   = row.created_at,
                 meta         = row.meta,

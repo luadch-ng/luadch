@@ -3930,6 +3930,60 @@ local defaults = {
             return value >= 60 and value <= 86400
         end
     },
+    -- #78 Phase B: `+blocklist` admin plugin (etc_blocklist.lua).
+    -- Operator-facing chat command + JSONL export/import. The
+    -- engine in core/blocklist.lua is independent; these keys
+    -- only gate the plugin surface.
+    etc_blocklist_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Hard cap on rows returned by `+blocklist show`. Operator can
+    -- still filter via `+blocklist show <source>` to narrow further.
+    -- Cap exists so a 10k-row geoip-populated store doesn't dump a
+    -- ten-thousand-line wall of text into one DMSG.
+    etc_blocklist_show_limit = { 200,
+        function( value )
+            if not types_number( value, nil, true ) then return false end
+            return value >= 1 and value <= 10000
+        end
+    },
+    -- Opchat report toggles, same shape as etc_clientblocker. Add /
+    -- remove / export / import events get a one-liner to the
+    -- op-chat so all staff see the action live; the audit log
+    -- carries the structured event for forensics.
+    etc_blocklist_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Minimum level to RUN `+blocklist import <path>`. JSONL files
+    -- can contain entries originally added by higher-level masters;
+    -- without a level guard a mid-level operator could import +
+    -- thereby take ownership of entries another master added.
+    -- Default 100 = master-only; lower if your hub trusts every
+    -- operator at `etc_blocklist_oplevel` with arbitrary imports.
+    etc_blocklist_import_min_level = { 100,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
     -- Per-IP parallel-socket cap. Connection refused at accept time.
     -- Default 16 accommodates small-office NAT / CGNAT deployments
     -- where many users share one public IP. Lower for tighter hubs.
