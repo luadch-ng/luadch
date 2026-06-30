@@ -741,8 +741,9 @@ root snapshot:
 | Aspect | Default |
 |---|---|
 | `verify` | `"peer"` (was `"none"` before Precursor 0b of the #78 arc) |
-| `cafile` | `certs/cacert.pem` (bundled, 121 trusted roots) |
+| `cafile` | `certs/ca-bundle.pem` (bundled, 121 trusted roots; renamed from `cacert.pem` in Precursor 0d to avoid the path collision with `cert_bootstrap.lua`'s inbound TLS cafile) |
 | Missing cafile behaviour | **Fail-closed** - request is rejected with a clear error rather than silently falling back to unauthenticated |
+| First-boot / upgrade | `cacert_bootstrap.lua` copies the bundled file from `lib/luadch/ca-bundle.pem` (immutable system path) into the operator-facing path on first boot; SHA-256 mismatch logs WARN and leaves the operator-managed copy alone unless `ca_bundle_auto_update = true` |
 | Operator opt-out | Pass `verify="none"` explicitly per call |
 
 The bundle's provenance, license, refresh recipe, and threat model
