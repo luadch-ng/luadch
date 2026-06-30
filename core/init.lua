@@ -108,6 +108,17 @@ _core = {    -- luadch core, order is important
     -- runs at init-time, not at hub-loop time.
     "cacert_bootstrap",
     --"doc",
+    -- core/ipmatch.lua (Phase A of #78 arc): pure-Lua IPv4/IPv6
+    -- + CIDR parse + prefix-match primitives. No deps beyond
+    -- stdlib; load order is just before its consumer blocklist.
+    "ipmatch",
+    -- core/blocklist.lua (Phase A of #78 arc): unified pre-handshake
+    -- IP/CIDR blocklist (in-memory bucketed cache + cfg/blocklist.tbl
+    -- persistent store + decision API). Loaded BEFORE ratelimit +
+    -- server because server.lua captures `blocklist.check_ip` at
+    -- module load for the accept-time stealth hook. init() reads
+    -- cfg + reloads the store + registers a cfg-reload listener.
+    "blocklist",
     "ratelimit",
     "server",
     "adc",
