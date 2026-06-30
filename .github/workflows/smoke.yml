@@ -146,6 +146,21 @@ jobs:
       - name: Run cacert_bootstrap unit test
         run: lua5.4 tests/unit/cacert_bootstrap_test.lua
 
+      # #78 Phase A: core/ipmatch.lua pure-Lua IPv4/IPv6/CIDR
+      # primitives. 67 checks across v4 + v6 parse / normalize /
+      # match / CIDR boundary edge cases.
+      - name: Run ipmatch unit test
+        run: lua5.4 tests/unit/ipmatch_test.lua
+
+      # #78 Phase A: core/blocklist.lua unified pre-handshake
+      # blocklist engine. 48 checks: add/remove round-trip,
+      # bucket-routed match (v4 + v6), priority order
+      # (manual > geoip > external), stealth-flag plumbing,
+      # expires_at TTL, reload-from-disk cache rebuild, persistence
+      # round-trip via stubbed util.savetable/loadtable.
+      - name: Run blocklist unit test
+        run: lua5.4 tests/unit/blocklist_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -258,6 +273,14 @@ jobs:
       - name: Run cacert_bootstrap unit test
         shell: msys2 {0}
         run: lua tests/unit/cacert_bootstrap_test.lua
+
+      - name: Run ipmatch unit test
+        shell: msys2 {0}
+        run: lua tests/unit/ipmatch_test.lua
+
+      - name: Run blocklist unit test
+        shell: msys2 {0}
+        run: lua tests/unit/blocklist_test.lua
 
       - name: Configure
         shell: msys2 {0}

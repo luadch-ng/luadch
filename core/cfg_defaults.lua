@@ -3897,6 +3897,39 @@ local defaults = {
             return types_number( value, nil, true )
         end
     },
+    -- #78 Phase A: unified pre-handshake IP/CIDR blocklist. The
+    -- engine + store ship enabled-by-default but the store is
+    -- empty - zero overhead until operators add entries via
+    -- Phase B's `+blocklist` cmd or Phase D/E/F's auto-feeds.
+    -- See core/blocklist.lua + docs/BLOCKLIST.md (Phase B+).
+    blocklist_enabled = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    blocklist_store_path = { "cfg/blocklist.tbl",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    -- Per-rule stealth opt-in (default visible-kick), per locked
+    -- arc decision: most operators want clear log feedback;
+    -- stealth is for the rare "Tor exit pollutes the log" case.
+    blocklist_stealth_default = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    -- Aggregated-log rollup window in seconds. Per-IP attempt
+    -- counters flush as a single line at this cadence. Default
+    -- 3600 = once-per-hour. Range 60..86400 (one-minute lower
+    -- bound so the rollup is not also a high-rate log spammer).
+    blocklist_aggregated_log_window_sec = { 3600,
+        function( value )
+            if not types_number( value, nil, true ) then return false end
+            return value >= 60 and value <= 86400
+        end
+    },
     -- Per-IP parallel-socket cap. Connection refused at accept time.
     -- Default 16 accommodates small-office NAT / CGNAT deployments
     -- where many users share one public IP. Lower for tighter hubs.
