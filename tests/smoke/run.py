@@ -6651,6 +6651,113 @@ def test_aliases_adc_dispatch():
             raise TestFailure(f"+delalias did not confirm removal: {reply!r}")
 
 
+def test_blocklist_78_phase_b():
+    """#78 Phase B etc_blocklist `+blocklist` admin CLI smoke.
+
+    Exercises the dispatcher + 4 of 6 verbs (count / add / show /
+    del) over an authenticated ADC session. The remaining two
+    (export / import) write to disk and are covered by the unit
+    test - smoke stays focused on the live ADC path.
+
+    Sequence:
+      1. Login as dummy (level 100, > etc_blocklist_oplevel=80).
+      2. `+blocklist count` -> reply with "0 entries total".
+      3. `+blocklist add 198.51.100.0/24 reason="smoke"` ->
+         reply contains "added" + "blocklist entry". TEST-NET-3
+         prefix (not loopback, not routable) so a smoke-run cannot
+         accidentally block a real IP.
+      4. `+blocklist count` -> "1 entries total" + "manual".
+      5. `+blocklist show` -> reply contains "198.51.100.0/24".
+      6. `+blocklist del 1` -> "removed" + "blocklist entry".
+      7. `+blocklist count` -> "0 entries total" again (roundtrip).
+
+    Registered in the initial TESTS list rather than the staging-
+    runner block so the test runs BEFORE `_switch_to_tier_mode`
+    injects `ratelimit_tiers = { strict = { msg_burst = 2 } }`
+    for level 100. Under that overlay, dummy can send only 2
+    BMSGs per burst; our 6-BMSG roundtrip would starve the token
+    bucket and stall from step 3 onward. Keeping the test in the
+    default-cfg phase avoids the rate-limit interaction entirely.
+
+    Frames arrive with ADC space-escapes (`\\s` for space). The
+    `_dcontains` predicate helper decodes that once so per-step
+    predicates read as plain English content.
+    """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
+    def _dcontains(f, substr):
+        return substr in f.replace("\\s", " ")
+
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+
+        # 1. count -> "0 entries total"
+        sock.sendall(f"BMSG {sid} +blocklist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and _dcontains(f, "0 entries total"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist count (pre-add) did not return zero: {reply!r}")
+
+        # 2. add TEST-NET-3 CIDR
+        sock.sendall(
+            f'BMSG {sid} +blocklist\\sadd\\s198.51.100.0/24\\sreason="smoke"\n'
+            .encode("utf-8")
+        )
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "added")
+                and _dcontains(f, "blocklist entry"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist add did not confirm: {reply!r}")
+
+        # 3. count -> "1 entries total" + "manual"
+        sock.sendall(f"BMSG {sid} +blocklist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "1 entries total")
+                and _dcontains(f, "manual"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist count (post-add) did not return one: {reply!r}")
+
+        # 4. show -> includes the cidr
+        sock.sendall(f"BMSG {sid} +blocklist\\sshow\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and _dcontains(f, "198.51.100.0/24"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist show did not list the entry: {reply!r}")
+
+        # 5. del 1 -> "removed"
+        sock.sendall(f"BMSG {sid} +blocklist\\sdel\\s1\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "removed")
+                and _dcontains(f, "blocklist entry"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist del did not confirm: {reply!r}")
+
+        # 6. count -> back to zero
+        sock.sendall(f"BMSG {sid} +blocklist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and _dcontains(f, "0 entries total"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist count (post-del) did not return zero: {reply!r}")
+
+
 def test_http_aliases(staging_dir: Path, proc=None):
     """#327: HTTP API CRUD for etc_aliases.
 
@@ -11540,6 +11647,7 @@ TESTS = [
     ("TLS ADC full login (dummy/test)", test_full_login_tls),
     ("+cmd routing (post-login +help)", test_command_routing),
     ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
+    ("blocklist admin CLI (#78 Phase B)", test_blocklist_78_phase_b),
     ("S1: fragmented frame reassembled (phase8-io)", test_s1_fragmented_frame_reassembled),
     ("S1: two frames in one segment (phase8-io)", test_s1_two_frames_one_segment),
     ("literal [+!#] bracket hint + no-arg-echo (#137)", test_literal_bracket_command_hint),

@@ -523,6 +523,87 @@ side: `audit_log_max_reason_chars` (1000),
 `audit_log_max_meta_value_chars` (1000) - applied at `audit.build`
 time so both disk and `/v1/events` payloads stay bounded.
 
+### etc_blocklist
+
+Operator-facing chat command for the unified pre-handshake
+IP/CIDR blocklist. Engine is `core/blocklist.lua` (#78 Phase A);
+this plugin (#78 Phase B) ships the `+blocklist` admin CLI with
+six verbs.
+
+**Commands** (all require `etc_blocklist_oplevel`, default 80):
+
+- `+blocklist show [source]` - list active entries; optional
+  filter by source (`manual`, `geoip`, `external`, `proxycheck`,
+  `vpnapi`, `ipqs`). Output capped at `etc_blocklist_show_limit`
+  rows (default 200) to keep a single DMSG readable on
+  geoip-populated stores.
+- `+blocklist add <cidr|ip> [stealth] [reason="..."] [expires=YYYY-MM-DD]` -
+  add a CIDR (or single IP, treated as `/32` for v4 or `/128`
+  for v6). `stealth` is a literal positional flag; `reason` and
+  `expires` are key=value pairs with quoted-string values. The
+  engine REJECTS host-bits-set CIDRs (`1.2.3.4/24` -> use
+  `1.2.3.0/24` instead); the error surfaces back to the operator.
+- `+blocklist del <id>` - remove an entry by numeric id from the
+  `+blocklist show` output. A level-N operator CANNOT remove an
+  entry added by a level-(N+) master (hierarchy guard via the
+  entry's `by_level` field, captured at add time).
+- `+blocklist count` - `{total, by_source}` summary.
+- `+blocklist export` - write
+  `cfg/blocklist-export-YYYYMMDD.jsonl` with all manual entries
+  (auto-feeds are skipped; they re-fetch themselves). One JSON
+  object per line, encoded with dkjson.
+- `+blocklist import <path>` - read JSONL from the supplied
+  path. Every string field is run through
+  `util.strip_control_bytes` before insertion. Invalid rows
+  (bad JSON, missing cidr) are counted as `errors`; rows whose
+  cidr the engine rejects are counted as `skipped`. Importing
+  attributes all rows to the importing operator's
+  nick + level - the original `by_*` fields in the file are
+  preserved as audit metadata in the imported row only.
+
+**Auto-feed entries.** Phase D (`etc_geoip`), Phase E
+(`etc_blocklist_feeds`), and Phase F (`etc_proxydetect`) plugins
+will push entries into the same store with their respective
+source tags. An operator at or above the master level can
+remove any source via `+blocklist del`, but the matching
+auto-feed will re-add the entry on the next refresh cycle - the
+correct path is to disable / reconfigure the feed plugin, not
+hand-delete its rows. Manual entries (`source=manual`) are
+operator-owned and survive any feed refresh.
+
+**Audit fires:** `blocklist.add` (cidr / source / stealth /
+expires / id), `blocklist.remove` (id / cidr / source),
+`blocklist.export` (path / count), `blocklist.import` (path /
+added / skipped / errors). The accept-time TCP drop on a
+matched IP fires NO per-attempt audit; aggregated rollup lines
+land in the hub log on the
+`blocklist_aggregated_log_window_sec` cadence (default 3600s).
+
+**Storage and reload.** The engine writes
+`cfg/blocklist.tbl` on every successful add / remove. The file
+appears on the first successful `+blocklist add` (no empty stub
+on fresh install). `+reload` re-snapshots the cfg keys
+(`blocklist_enabled`, `blocklist_stealth_default`,
+`blocklist_aggregated_log_window_sec`) and re-reads the .tbl.
+
+**Tradeoffs.** This plugin only ships the admin CLI; the HTTP
+API surface (`GET / POST / DELETE /v1/blocklist`) lands in Phase
+C. JSONL export/import is the cross-hub sync path until then.
+Importing the same file twice creates duplicate entries (no
+dedup on cidr alone, since (cidr, source) is the engine's
+identity tuple); operators rely on the `+blocklist show` id +
+manual `+blocklist del` for cleanup.
+
+**Upgrading from a pre-Phase-B hub.** `cfg.scripts` is
+replace-not-merge - an operator with a `cfg.tbl` predating this
+plugin must add the line `{ "etc_blocklist.lua", enabled = true },`
+to their `cfg.scripts` block (next to `etc_clientblocker.lua`
+is the canonical position) and run `+reload`. The example file
+at `examples/cfg/cfg.tbl` shows the placement. The new cfg
+keys (`etc_blocklist_oplevel`, `etc_blocklist_import_min_level`,
+etc.) all have safe defaults via `core/cfg_defaults.lua` so
+omitting them from `cfg.tbl` is fine.
+
 ### etc_clientblocker
 
 Block clients by Lua-pattern match against the BINF `AP+VE` field
