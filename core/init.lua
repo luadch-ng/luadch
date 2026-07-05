@@ -113,7 +113,7 @@ _core = {    -- luadch core, order is important
     -- stdlib; load order is just before its consumer blocklist.
     "ipmatch",
     -- core/blocklist.lua (Phase A of #78 arc): unified pre-handshake
-    -- IP/CIDR blocklist (in-memory bucketed cache + cfg/blocklist.tbl
+    -- IP/CIDR blocklist (in-memory bucketed cache + scripts/data/etc_blocklist.tbl
     -- persistent store + decision API). Loaded BEFORE ratelimit +
     -- server because server.lua captures `blocklist.check_ip` at
     -- module load for the accept-time stealth hook. init() reads
