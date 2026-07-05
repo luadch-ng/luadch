@@ -309,11 +309,14 @@ open a fresh issue here that references the upstream one in its body.
   network-supplied bytes) follow the DEVELOPMENT.md §5 checklist: bounds-check
   every read, bound total WORK not just depth, pcall-wrap so corrupt input
   degrades to `(nil, err)` on boot paths, cap sizes before RAM reads.
-- **No point-in-time numbers in this file.** Line counts, issue counts, test
-  counts, percentages rot within weeks and then poison every session that
-  loads this file. Link the source of truth (`wc -l`, `gh issue list`, CI)
-  instead. Dated status lines are allowed only in §5 "In flight" with the
-  tracker as the declared source of truth.
+- **No live point-in-time numbers in this file.** Counts that keep changing -
+  current module line counts, open-issue counts, "N tests today", percentages -
+  rot within weeks and then poison every session that loads this file. Link the
+  source of truth (`wc -l`, `gh issue list`, CI) instead. Two exemptions, because
+  they do NOT drift: (a) frozen historical facts about a CLOSED phase (e.g. "24
+  findings / 22 closed" in the §5 table); (b) release/version/"verified-on"
+  markers (e.g. "latest release v3.1.9", the deps-table verified date). A live
+  status line (like §5 "In flight") must name the tracker as its source of truth.
 
 ### Tooling gotchas (these have already burned us)
 

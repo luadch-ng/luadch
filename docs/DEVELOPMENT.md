@@ -111,7 +111,7 @@ The conventions below are either not in it or are easy to get wrong:
 - **Plugin state path:** persistent tables go to `scripts/data/<plugin>.tbl`
   (via `util.savetable` / `util.loadtable`). Operator-facing artifacts
   (exports, backups) go to `cfg/`. This matches `cmd_ban`, `etc_clientblocker`,
-  `etc_blacklist`, `etc_blocklist`.
+  `etc_blocklist` (all under `scripts/data/`).
 - **Never export a mutable table across `+reload` (getter idiom).** `hub.import`
   shallow-copies the export table, so any consumer holding a direct reference
   goes stale the moment your plugin rebinds the local (e.g. `bans = {}` in a
