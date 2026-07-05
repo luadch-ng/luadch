@@ -193,13 +193,39 @@ file matching the `language` cfg key. Loading happens via
 [`cfg.loadlanguage()`](../core/cfg.lua) and the plugin reads keys
 via the returned table.
 
+Worked example. The `.lang.en` file returns a table:
+
+```lua
+-- scripts/lang/etc_my_plugin.lang.en
+return {
+    ["etc_my_plugin_msg_done"] = "Done.",
+    ["etc_my_plugin_err_denied"] = "You are not allowed to do that.",
+}
+```
+
+The plugin loads it once at scope top and reads each key with an
+in-source fallback (the pattern every bundled plugin uses, e.g.
+`scripts/etc_aliases.lua`):
+
+```lua
+local scriptname = "etc_my_plugin"
+local scriptlang = cfg.get( "language" )                  -- the active language, e.g. "en"
+local lang       = cfg.loadlanguage( scriptlang, scriptname ) or { }
+local msg_done   = lang.etc_my_plugin_msg_done or "Done."  -- fallback if the key is missing
+```
+
+Ship every operator-visible string this way in BOTH `.lang.en` and
+`.lang.de` (all-or-nothing), and keep DC jargon (Hub, Slot, Share, OP,
+Kick, Ban, Nick, PM) in English in both files.
+
 ### 3.6 Plugin state persistence
 
 Plugins that need to persist data across hub restarts write
-[`util.savetable`](#52-util) calls to files under `cfg/` (mutable
-operator state) or alongside the plugin under `scripts/<name>.tbl`
-(plugin-private state). The `cfg/` location travels with operator
-backups; `scripts/` does not.
+[`util.savetable`](#52-util) calls to `scripts/data/<name>.tbl`
+(plugin-private state - the repo-wide convention, matching `cmd_ban`,
+`etc_clientblocker`, `etc_blocklist`). Operator-facing artifacts
+(exports, backups a human is meant to copy) go under `cfg/`, which
+travels with operator config backups.
 
 ---
 
@@ -724,7 +750,7 @@ report.send( true, true, true, 60, "something happened" )
 ### 7.5 Plugin state file
 
 ```lua
-local state_path = "scripts/etc_my_plugin.tbl"
+local state_path = "scripts/data/etc_my_plugin.tbl"
 
 -- Load at startup
 local state = util.loadtable( state_path ) or { counter = 0 }
@@ -837,6 +863,29 @@ these, the user must reconnect.
 from any external source (file, network, OS environment), validate
 before passing to ADC-frame-bound APIs - the hub assumes UTF-8 and
 will not gracefully degrade.
+
+### 10.8 Never export a mutable table reference across `+reload`
+
+`hub.import` shallow-copies your plugin's export table, so a consumer
+that captured a direct reference to one of your tables keeps pointing at
+the OLD table the moment you rebind the local - which happens on every
+`+reload`/`onStart` reinit and on in-place resets like `bans = { }`. The
+consumer then reads stale/empty state with no error. This bit two
+plugins ([#238](https://github.com/luadch-ng/luadch/issues/238),
+[#239](https://github.com/luadch-ng/luadch/issues/239)).
+
+Two safe patterns:
+
+```lua
+-- (a) mutate in place - never rebind the local the consumer captured
+for k in pairs( state ) do state[ k ] = nil end   -- clear, don't reassign
+
+-- (b) export a getter, so callers always read the live table
+return { get_state = function( ) return state end }   -- not `state = state`
+```
+
+See the [`scripts/etc_aliases.lua`](../scripts/etc_aliases.lua) header
+for a worked reference.
 
 ---
 
