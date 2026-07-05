@@ -217,10 +217,10 @@ end
 
 do
     local r = must_open( "MaxMind-DB-test-ipv4-28.mmdb" )
-    eq( "ipv4-28 1.1.1.1",  r:lookup( "1.1.1.1" ) and r:lookup( "1.1.1.1" ).ip, "1.1.1.1" )
-    eq( "ipv4-28 1.1.1.2",  r:lookup( "1.1.1.2" ) and r:lookup( "1.1.1.2" ).ip, "1.1.1.2" )
-    eq( "ipv4-28 1.1.1.3 (/31 shares .2)", r:lookup( "1.1.1.3" ) and r:lookup( "1.1.1.3" ).ip, "1.1.1.2" )
-    eq( "ipv4-28 1.1.1.16", r:lookup( "1.1.1.16" ) and r:lookup( "1.1.1.16" ).ip, "1.1.1.16" )
+    local a = r:lookup( "1.1.1.1" );  eq( "ipv4-28 1.1.1.1", a and a.ip, "1.1.1.1" )
+    local b = r:lookup( "1.1.1.2" );  eq( "ipv4-28 1.1.1.2", b and b.ip, "1.1.1.2" )
+    local c = r:lookup( "1.1.1.3" );  eq( "ipv4-28 1.1.1.3 (/31 shares .2)", c and c.ip, "1.1.1.2" )
+    local d = r:lookup( "1.1.1.16" ); eq( "ipv4-28 1.1.1.16", d and d.ip, "1.1.1.16" )
 
     local miss, err = r:lookup( "2.2.2.2" )
     falsy( "ipv4-28 2.2.2.2 clean miss (nil)", miss )
@@ -234,7 +234,7 @@ do
     truthy( "ipv4-28 v6 lookup returns err", v6err )
 
     -- dot-call ergonomics.
-    eq( "ipv4-28 dot-call", r.lookup( "1.1.1.1" ) and r.lookup( "1.1.1.1" ).ip, "1.1.1.1" )
+    local dot = r.lookup( "1.1.1.1" ); eq( "ipv4-28 dot-call", dot and dot.ip, "1.1.1.1" )
 end
 
 ----------------------------------------------------------------------
@@ -243,8 +243,8 @@ end
 
 do
     local r = must_open( "MaxMind-DB-test-ipv6-32.mmdb" )
-    eq( "ipv6-32 ::1:ffff:ffff", r:lookup( "::1:ffff:ffff" ) and r:lookup( "::1:ffff:ffff" ).ip, "::1:ffff:ffff" )
-    eq( "ipv6-32 ::2:0:1 (/122 net ::2:0:0)", r:lookup( "::2:0:1" ) and r:lookup( "::2:0:1" ).ip, "::2:0:0" )
+    local a = r:lookup( "::1:ffff:ffff" ); eq( "ipv6-32 ::1:ffff:ffff", a and a.ip, "::1:ffff:ffff" )
+    local b = r:lookup( "::2:0:1" );       eq( "ipv6-32 ::2:0:1 (/122 net ::2:0:0)", b and b.ip, "::2:0:0" )
 
     -- v4-in-v6 traversal reaches the ::/96 subtree; this DB has no v4
     -- data there, so a clean miss (and, critically, no crash in the
@@ -273,9 +273,12 @@ do
     end
 
     -- IPv4 lookups against the v6 tree (the common GeoIP case).
-    eq( "country 81.2.69.160 (v4) GB",  r:lookup( "81.2.69.160" ) and r:lookup( "81.2.69.160" ).country.iso_code, "GB" )
-    eq( "country 89.160.20.128 (v4) SE", r:lookup( "89.160.20.128" ) and r:lookup( "89.160.20.128" ).country.iso_code, "SE" )
-    eq( "country 2001:218::1 (v6) JP",  r:lookup( "2001:218::1" ) and r:lookup( "2001:218::1" ).country.iso_code, "JP" )
+    local se = r:lookup( "89.160.20.128" )
+    local us_v4 = r:lookup( "81.2.69.160" )
+    local jp = r:lookup( "2001:218::1" )
+    eq( "country 81.2.69.160 (v4) GB",   us_v4 and us_v4.country.iso_code, "GB" )
+    eq( "country 89.160.20.128 (v4) SE", se and se.country.iso_code, "SE" )
+    eq( "country 2001:218::1 (v6) JP",   jp and jp.country.iso_code, "JP" )
 
     falsy( "country 10.0.0.1 miss",  r:lookup( "10.0.0.1" ) )
     falsy( "country 214.0.0.0 miss", r:lookup( "214.0.0.0" ) )
@@ -292,6 +295,119 @@ do
     local res, err = r:lookup( "1.1.1.1" )
     falsy( "post-close lookup nil", res )
     truthy( "post-close lookup err", err )
+end
+
+----------------------------------------------------------------------
+-- Adversarial / corrupt-input hardening. These craft raw bytes (a tiny
+-- MMDB encoder local to the test) and assert mmdb.open degrades to a
+-- clean (nil, err) - it runs on the hub boot / refresh path, so a
+-- crash / hang / OOM / broken-reader here would take down the hub.
+----------------------------------------------------------------------
+
+do
+    local MARKER = "\xab\xcd\xef" .. "MaxMind.com"
+
+    local _seq = 0
+    local _tmp = { }
+    local function write_temp( bytes )
+        _seq = _seq + 1
+        local dir = os.getenv( "TMPDIR" ) or os.getenv( "TEMP" ) or os.getenv( "TMP" ) or "."
+        local path = dir .. "/mmdb_test_" .. _seq .. ".bin"
+        local f = assert( io.open( path, "wb" ), "cannot open temp file " .. path )
+        f:write( bytes ); f:close( )
+        _tmp[ #_tmp + 1 ] = path
+        return path
+    end
+
+    -- Minimal MMDB data-format encoders (test-only; the reader is
+    -- validated against MaxMind's real files above - these just build
+    -- hostile shapes).
+    local function be_bytes( n, width )
+        local t = { }
+        for i = width, 1, -1 do t[ i ] = string.char( n & 0xff ); n = n >> 8 end
+        return table.concat( t )
+    end
+    local function uint_field( n, width )        -- extended uint64, `width` bytes
+        return string.char( width, 0x02 ) .. be_bytes( n, width )
+    end
+    local function str_field( s )                -- utf8 string (len < 29)
+        return string.char( 0x40 | #s ) .. s
+    end
+    local function array_header( size )          -- extended array (type 11 -> ext byte 4)
+        if size < 29 then
+            return string.char( size, 0x04 )
+        elseif size < 285 then
+            return string.char( 29, 0x04, size - 29 )
+        else
+            local v = size - 285
+            return string.char( 30, 0x04, ( v >> 8 ) & 0xff, v & 0xff )
+        end
+    end
+    local function meta_map( node_count, nc_width, record_size, ip_version )
+        return string.char( 0xE0 | 3 )           -- map, 3 entries
+            .. str_field( "node_count" )  .. uint_field( node_count, nc_width )
+            .. str_field( "record_size" ) .. uint_field( record_size, 1 )
+            .. str_field( "ip_version" )  .. uint_field( ip_version, 1 )
+    end
+
+    -- Zero-byte file.
+    do
+        local zr, zerr = mmdb.open( write_temp( "" ) )
+        falsy( "open(zero-byte) nil", zr ); truthy( "open(zero-byte) err", zerr )
+    end
+
+    -- Non-MMDB bytes (no marker).
+    do
+        local nr, nerr = mmdb.open( write_temp( "not an mmdb file at all" ) )
+        falsy( "open(no-marker) nil", nr ); truthy( "open(no-marker) err", nerr )
+    end
+
+    -- Truncated: node_count small enough to pass the size bound but
+    -- node_count * node_size overshoots the file -> data_section_start >
+    -- #data must reject cleanly (not build a reader over a phantom tree).
+    do
+        local buf = MARKER .. meta_map( 30, 1, 32, 6 )   -- tree would be 240 bytes; file ~60
+        local tr, terr = mmdb.open( write_temp( buf ) )
+        falsy( "open(truncated tree) nil", tr ); truthy( "open(truncated tree) err", terr )
+    end
+
+    -- F2 regression: a hostile node_count near 2^61 makes node_count *
+    -- node_size (x8) overflow 64-bit and wrap search_tree_size negative,
+    -- which slipped past the truncation check and yielded a BROKEN
+    -- reader (open returned a truthy object) pre-fix. Post-fix the
+    -- node_count > #data guard rejects it. This assertion FAILS on the
+    -- unpatched reader (which returned a reader) and PASSES patched.
+    do
+        local buf = MARKER .. meta_map( 1 << 61, 8, 32, 6 )
+        local orr, oerr = mmdb.open( write_temp( buf ) )
+        falsy( "open(node_count overflow) returns nil (F2)", orr )
+        truthy( "open(node_count overflow) err", oerr )
+    end
+
+    -- F1 regression: decode-amplification bomb. A top array of K
+    -- pointer elements all pointing at one shared inner array of N tiny
+    -- elements is K*N decode ops at shallow (constant) depth, so the
+    -- depth guard never fires. Only the total-op budget stops it. The
+    -- bomb lives in the metadata region (decoded at open() before
+    -- validation), pointer base = metadata start. Unpatched, open()
+    -- fully decodes ~1.6M nodes and then fails validation with a
+    -- "node_count invalid" error (no "budget" text) -> the budget
+    -- assertion below FAILS pre-fix and PASSES patched.
+    do
+        local K, N = 400, 4000                   -- 1.6M ops > MAX_DECODE_OPS (1e6)
+        local top = array_header( K )
+        local inner_off = #top + K * 2           -- ss=0 pointer is 2 bytes each
+        assert( inner_off <= 0x7ff, "test bomb inner offset must fit ss=0 pointer" )
+        local ptr = string.char( 0x20 | ( ( inner_off >> 8 ) & 0x7 ), inner_off & 0xff )
+        local bomb = top .. string.rep( ptr, K )
+                  .. array_header( N ) .. string.rep( "\xA0", N )
+        local br, berr = mmdb.open( write_temp( MARKER .. bomb ) )
+        falsy( "open(amplification bomb) nil", br )
+        truthy( "open(amplification bomb) err", berr )
+        truthy( "open(amplification bomb) hits op budget (F1)", berr and berr:find( "budget" ) )
+    end
+
+    for _, p in ipairs( _tmp ) do os.remove( p ) end
 end
 
 ----------------------------------------------------------------------

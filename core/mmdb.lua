@@ -79,11 +79,9 @@
 local use = use
 
 local type          = use "type"
-local tonumber      = use "tonumber"
 local tostring      = use "tostring"
 local error         = use "error"
 local pcall         = use "pcall"
-local setmetatable  = use "setmetatable"
 local string        = use "string"
 local table         = use "table"
 local io            = use "io"
@@ -109,7 +107,17 @@ local MAX_FILE_SIZE       = 16 * 1024 * 1024
 local METADATA_MARKER     = "\xab\xcd\xef" .. "MaxMind.com"
 local METADATA_MAX_SIZE   = 128 * 1024        -- metadata lives in the last 128 KiB
 local DATA_SEPARATOR_SIZE = 16                 -- 16 zero bytes between tree + data
-local MAX_DECODE_DEPTH    = 512                -- guards pointer cycles + hostile nesting
+local MAX_DECODE_DEPTH    = 512                -- guards deep nesting (C-stack overflow)
+-- Total decoded-node budget for one top-level decode (the metadata
+-- map, or one data record). The depth guard alone does NOT bound work:
+-- a wide-shallow structure - many pointers all re-decoding one shared
+-- big array, or a single map/array whose size-escape claims millions
+-- of entries - runs O(entries) at constant depth. Without a budget a
+-- ~5 KB crafted file drives millions of decodes + table allocations
+-- and freezes the single-threaded hub (pcall does not contain a hang /
+-- OOM). 1e6 is ~1000x above any real Country / ASN record or metadata
+-- map, so it never trips on a legitimate file.
+local MAX_DECODE_OPS      = 1000000
 local ZERO12              = string_rep( "\0", 12 )   -- v4-in-v6 ::/96 prefix
 
 -- Data-section type tags (top 3 bits of the control byte). Extended
@@ -184,7 +192,20 @@ end
 
 local _decode    -- forward declaration (recurses on maps / arrays / pointers)
 
+-- Cumulative decoded-node counter for the CURRENT top-level decode.
+-- Reset to 0 by each top-level caller (metadata decode + record
+-- resolve) before descending. Safe as module state because the hub is
+-- single-threaded and _decode never yields, so two decodes cannot
+-- interleave; a decode that errors out just leaves a stale value that
+-- the next reset clears.
+local _decode_ops = 0
+
 _decode = function( data, offset, pbase, depth )
+    _decode_ops = _decode_ops + 1
+    if _decode_ops > MAX_DECODE_OPS then
+        error( "mmdb: decode op budget exceeded (" .. MAX_DECODE_OPS ..
+               ") - hostile / corrupt file?" )
+    end
     if depth > MAX_DECODE_DEPTH then
         error( "mmdb: decode nesting/pointer depth exceeded " .. MAX_DECODE_DEPTH )
     end
@@ -285,9 +306,14 @@ _decode = function( data, offset, pbase, depth )
         -- No payload bytes: the size field IS the value (0 / 1).
         return ( size ~= 0 ), offset
     elseif typ == T_DOUBLE then
+        -- Size MUST be 8: string.unpack reads a fixed 8 bytes, so a
+        -- forged size would desync the decode stream (offset advances
+        -- by `size`, not by 8) and shift every following field.
+        if size ~= 8 then error( "mmdb: double with size " .. size .. " (expected 8)" ) end
         _need( data, offset, size )
         return ( string_unpack( ">d", data, offset + 1 ) ), offset + size
     elseif typ == T_FLOAT then
+        if size ~= 4 then error( "mmdb: float with size " .. size .. " (expected 4)" ) end
         _need( data, offset, size )
         return ( string_unpack( ">f", data, offset + 1 ) ), offset + size
     elseif typ == T_BYTES then
@@ -334,6 +360,7 @@ local function _build_reader( data )
         error( "no MaxMind metadata marker found (not an MMDB file?)" )
     end
 
+    _decode_ops = 0
     local metadata = _decode( data, meta_start, meta_start, 0 )
     if type( metadata ) ~= "table" then
         error( "metadata is not a map" )
@@ -344,6 +371,16 @@ local function _build_reader( data )
     local ip_version  = metadata.ip_version
     if type( node_count ) ~= "number" or node_count < 0 or node_count ~= ( node_count // 1 ) then
         error( "metadata node_count invalid: " .. tostring( node_count ) )
+    end
+    -- Upper-bound node_count by the file size BEFORE multiplying. A
+    -- node is at least 6 bytes, so a valid node_count is <= #data / 6;
+    -- rejecting node_count > #data both catches an absurd value and
+    -- prevents node_count * node_size from overflowing 64-bit (which
+    -- would wrap search_tree_size negative and slip past the
+    -- truncation check below, yielding a broken reader).
+    if node_count > #data then
+        error( "metadata node_count (" .. node_count ..
+               ") exceeds file size (" .. #data .. ")" )
     end
     if record_size ~= 24 and record_size ~= 28 and record_size ~= 32 then
         error( "unsupported record_size: " .. tostring( record_size ) )
@@ -409,6 +446,7 @@ local function _build_reader( data )
             return nil
         end
         local data_offset = node - node_count + search_tree_size
+        _decode_ops = 0
         return ( _decode( data, data_offset, data_section_start, 0 ) )
     end
 
@@ -435,16 +473,16 @@ local function _build_reader( data )
         end
         if reader._closed then return nil, "mmdb: reader is closed" end
         if type( ip ) ~= "string" then
-            return nil, "mmdb:lookup: ip must be a string"
+            return nil, "mmdb.lookup: ip must be a string"
         end
         local fam, bytes_or_err = ipmatch_parse_ip( ip )
         if not fam then
-            return nil, "mmdb:lookup: " .. tostring( bytes_or_err )
+            return nil, "mmdb.lookup: " .. tostring( bytes_or_err )
         end
         local bytes = bytes_or_err
         if ip_version == 4 then
             if fam ~= 4 then
-                return nil, "mmdb:lookup: cannot look up IPv6 in an IPv4 database"
+                return nil, "mmdb.lookup: cannot look up IPv6 in an IPv4 database"
             end
         elseif fam == 4 then
             -- v4-in-v6 tree: MaxMind embeds IPv4 at ::/96, so a
@@ -455,7 +493,7 @@ local function _build_reader( data )
         end
         local ok, result = pcall( lookup_bytes, bytes )
         if not ok then
-            return nil, "mmdb:lookup: decode error: " .. tostring( result )
+            return nil, "mmdb.lookup: decode error: " .. tostring( result )
         end
         return result    -- table on hit, nil on clean miss
     end

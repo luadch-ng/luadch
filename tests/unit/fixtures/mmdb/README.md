@@ -8,8 +8,10 @@ same bug" trap that a hand-rolled fixture would risk.
 
 ## Provenance
 
-Vendored from `github.com/maxmind/MaxMind-DB`, directory `test-data/`
-(commit `main`, fetched 2026-07-05). Downloaded verbatim, unmodified.
+Vendored from `github.com/maxmind/MaxMind-DB`, directory `test-data/`,
+at commit `16e5535a80d9f31fdc1981b44cf995daf089ac62` (main HEAD,
+fetched 2026-07-05). Downloaded verbatim, unmodified; byte-identity is
+pinned by the SHA-256 list below regardless of upstream branch moves.
 
 | File | ip_version | record_size | Purpose |
 |---|---|---|---|
