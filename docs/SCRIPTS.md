@@ -580,10 +580,14 @@ land in the hub log on the
 `blocklist_aggregated_log_window_sec` cadence (default 3600s).
 
 **Storage and reload.** The engine writes
-`cfg/blocklist.tbl` on every successful add / remove. The file
-appears on the first successful `+blocklist add` (no empty stub
-on fresh install). `+reload` re-snapshots the cfg keys
-(`blocklist_enabled`, `blocklist_stealth_default`,
+`scripts/data/etc_blocklist.tbl` on every successful add /
+remove. The file appears on the first successful `+blocklist
+add` (no empty stub on fresh install). The path is configurable
+via `blocklist_store_path` cfg key; `scripts/data/` matches the
+convention used by sibling plugins (`cmd_ban_bans.tbl`,
+`etc_clientblocker.tbl`, `etc_blacklist.tbl`) so operators find
+all plugin-owned state in one place. `+reload` re-snapshots the
+cfg keys (`blocklist_enabled`, `blocklist_stealth_default`,
 `blocklist_aggregated_log_window_sec`) and re-reads the .tbl.
 
 **Tradeoffs.** This plugin only ships the admin CLI; the HTTP
@@ -603,6 +607,13 @@ at `examples/cfg/cfg.tbl` shows the placement. The new cfg
 keys (`etc_blocklist_oplevel`, `etc_blocklist_import_min_level`,
 etc.) all have safe defaults via `core/cfg_defaults.lua` so
 omitting them from `cfg.tbl` is fine.
+
+Operators who ran the very first Phase-B build (`v0.01`) and
+already have data at the old `cfg/blocklist.tbl` path from that
+window: move the file to `scripts/data/etc_blocklist.tbl` (or
+set `blocklist_store_path = "cfg/blocklist.tbl"` in `cfg.tbl`
+to pin the old location). No auto-migration is provided; the
+old-path window was small.
 
 ### etc_clientblocker
 

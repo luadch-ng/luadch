@@ -142,7 +142,7 @@ end
 ----------------------------------------------------------------------
 
 local _enabled = true
-local _store_path = "cfg/blocklist.tbl"
+local _store_path = "scripts/data/etc_blocklist.tbl"
 local _stealth_default = false
 local _log_window = 3600
 local _rollup_cap = 10000
@@ -631,7 +631,7 @@ local function reload( )
     _last_flush_time = 0
 
     -- Peek for file existence BEFORE util.loadtable so we avoid the
-    -- noisy `util.lua: function 'checkfile': error in cfg/blocklist.tbl:
+    -- noisy `util.lua: function 'checkfile': error in scripts/data/etc_blocklist.tbl:
     -- No such file or directory` log line on a fresh install. The
     -- empty-store branch IS the correct first-boot state; nothing to
     -- seed (no bundled defaults). Operator-facing .tbl appears on the

@@ -3907,7 +3907,7 @@ local defaults = {
             return types_boolean( value, nil, true )
         end
     },
-    blocklist_store_path = { "cfg/blocklist.tbl",
+    blocklist_store_path = { "scripts/data/etc_blocklist.tbl",
         function( value )
             return types_utf8( value, nil, true )
         end
