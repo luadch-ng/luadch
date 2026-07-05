@@ -99,9 +99,11 @@ cmake --install build
 cd build/install/luadch && ./luadch
 ```
 
-Then connect with an ADC client (e.g. AirDC++) to `adc://127.0.0.1:5000`,
-log in as `dummy` / `test`, and read [CONFIGURATION.md](docs/CONFIGURATION.md)
-for first-run steps. Windows users: see the Windows section of
+Fresh installs are TLS-only (the cert is auto-generated on first boot).
+Connect with an ADC client (e.g. AirDC++) to `adcs://127.0.0.1:5001`, log
+in as `dummy` / `test`, and read [CONFIGURATION.md](docs/CONFIGURATION.md)
+for first-run steps (including keyprint pinning and enabling a plain
+`adc://` port if you want one). Windows users: see the Windows section of
 [BUILDING.md](docs/BUILDING.md).
 
 ## License

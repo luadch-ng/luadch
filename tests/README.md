@@ -1,13 +1,15 @@
 # luadch tests
 
-Smoke tests that prove a freshly-built hub starts, binds its ports,
-speaks ADC over plain and TLS, and loads all bundled plugins without
-errors.
+Two test layers: a protocol-level **smoke** harness that proves a
+freshly-built hub starts, binds its ports, speaks ADC over plain and TLS,
+and loads all bundled plugins without errors; and a pure-Lua **unit**
+suite for modules that can be exercised standalone.
 
-The suite is part of the **Phase 6** modernisation work
-(see [`docs/phases/`](../docs/phases/) and CLAUDE.md §5). It exists to
-catch regressions when we refactor `core/cfg.lua`, `core/hub.lua`, and
-the path-anchoring logic later in Phase 6.
+The smoke harness started as Phase 6 modernisation work and is now the
+permanent regression floor: it runs on every push and PR, and both layers
+run in CI on Linux AND Windows (`.github/workflows/smoke.yml`). Authoring
+guidance (unit-harness contract, the regression-fail-pre-fix recipe, smoke
+gotchas) lives in [`../docs/DEVELOPMENT.md`](../docs/DEVELOPMENT.md) §4.
 
 ## Layout
 
@@ -33,7 +35,7 @@ tests/
 - **Hub binds plain + TLS ports.** The hub successfully starts and
   accepts TCP connections on both the plain and TLS test ports within
   the start timeout. Implicit coverage: `core/init.lua` runs to
-  completion, the listener setup in `core/hub.lua` works, all 66
+  completion, the listener setup in `core/hub.lua` works, all
   bundled scripts load (a script error during start would either
   prevent listener registration or surface in the log).
 - **Plain ADC handshake.** The harness opens a TCP socket to the
@@ -97,25 +99,26 @@ does not matter there.
 
 ## Unit tests (`tests/unit/`)
 
-Pure-byte core modules with no socket/global dependencies can be
-loaded standalone by stubbing the `use "X"` sandbox shim. Currently:
+Pure-Lua modules (and plugins) with no socket dependency are exercised
+standalone by stubbing the `use "X"` sandbox shim, `loadfile`-ing the
+module from the repo root, and counting assertions with a tiny
+`eq`/`truthy` harness. Each `tests/unit/<name>_test.lua` runs on its own:
 
 ```sh
 # any Lua 5.4 interpreter, from repo root:
-lua tests/unit/iostream_test.lua
+lua tests/unit/iostream_test.lua      # exit 0 = all pass, 1 = a failure
 ```
 
-Exit `0` = all pass, `1` = a failure. `iostream_test.lua` is the
-durable regression for the Phase 8 framing pipeline (S1 framer parity
-+ S2 passthrough / composition / `prepend` ordering).
+**These run in CI on BOTH platforms.** `.github/workflows/smoke.yml` runs
+the whole `tests/unit/*_test.lua` set on the Linux leg (`lua5.4`) and the
+Windows leg (msys2 `lua`) before the build+smoke step. When you add a unit
+test you MUST add a step for it to both legs, or it is silent
+non-coverage. (The one exception is `adclib_unescape_test.lua`, which
+needs the built C module and so runs on the Linux leg only, after install,
+with `LD_LIBRARY_PATH=.`.)
 
-**Not yet wired into CI:** `.github/workflows/smoke.yml` is Python and
-the CMake build does not emit a standalone `lua` interpreter. The
-*neutral* path is already CI-guarded transitively (a 1-stage pipeline
-is byte-identical to the S1 framer, so the S1 protocol smoke tests
-would break on a framing regression). Wiring this file into CI is an
-explicit gate before Phase 8 S4 - see
-[`docs/phases/PHASE_8_IO.md`](../docs/phases/PHASE_8_IO.md).
+The unit-test authoring contract + the regression-fail-pre-fix recipe are
+in [`../docs/DEVELOPMENT.md`](../docs/DEVELOPMENT.md) §4.
 
 ## Limitations
 
