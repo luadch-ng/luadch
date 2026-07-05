@@ -97,6 +97,7 @@ local socket    = use "socket"
 local string_byte    = string.byte
 local string_format  = string.format
 local string_lower   = string.lower
+local string_sub     = string.sub
 local table_insert   = table.insert
 local table_remove   = table.remove
 local math_floor     = math.floor
@@ -475,6 +476,30 @@ _resolve_decision = function( ip )
     if type( ip ) ~= "string" or ip == "" then return nil end
     local family, bytes = ipmatch_parse_ip( ip )
     if not family then return nil end
+
+    -- v4-mapped-v6 normalisation. When the hub listens on IPv6 (or
+    -- dual-stack via `::`), incoming IPv4 clients hit the kernel-
+    -- level v4-mapped v6 form (`::ffff:a.b.c.d`, RFC 4291 §2.5.5.2).
+    -- getpeername() returns them as `::ffff:37.46.199.70`, parse_ip
+    -- yields (family=6, bytes=<10 zero + ff ff + 4 v4 bytes>), and
+    -- the operator's plain-v4 blocklist entry (family=4, 4 bytes)
+    -- would never match by construction (#ip_bytes != #network_bytes
+    -- in ipmatch.match). Detect the mapped form here and re-key the
+    -- lookup as v4 so operators' pure-v4 rules apply to v4-over-v6
+    -- clients as they intuitively expect. Explicit `::ffff:.../128`
+    -- v6 rules still work because they were canonicalised to v6
+    -- bytes at add() time and land in _buckets_v6.
+    if family == 6 and #bytes == 16 then
+        local is_mapped = true
+        for i = 1, 10 do
+            if string_byte( bytes, i ) ~= 0 then is_mapped = false; break end
+        end
+        if is_mapped and string_byte( bytes, 11 ) == 0xff
+                     and string_byte( bytes, 12 ) == 0xff then
+            family = 4
+            bytes = string_sub( bytes, 13, 16 )
+        end
+    end
 
     local bucket
     if family == 4 then

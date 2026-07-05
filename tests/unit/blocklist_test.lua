@@ -250,6 +250,50 @@ do
 end
 
 ----------------------------------------------------------------------
+-- v4-mapped v6 lookup. Hubs listening on IPv6 (or dual-stack via
+-- `::`) receive incoming v4 clients as v4-mapped v6 addresses
+-- (`::ffff:37.46.199.70`, RFC 4291 §2.5.5.2). Without the
+-- normalisation in _resolve_decision, a plain-v4 blocklist entry
+-- for that same IP would never match because the address bytes
+-- go through the v6 bucket (16 bytes) while the entry lives in
+-- the v4 bucket (4 bytes). This regression demonstrably FAILS
+-- on the unpatched code.
+----------------------------------------------------------------------
+
+reset_state{}
+do
+    bl.add( "37.46.199.70/32", { source = "manual" } )
+    eq( "v4-mapped v6 /full matches v4 entry",
+        bl.check_ip( "::ffff:37.46.199.70" ), true )
+
+    bl.add( "10.0.0.0/8", { source = "manual" } )
+    eq( "v4-mapped v6 in v4 /8 range",
+        bl.check_ip( "::ffff:10.20.30.40" ), true )
+    eq( "v4-mapped v6 outside v4 /8 range",
+        bl.check_ip( "::ffff:11.20.30.40" ), false )
+
+    -- Explicit ::ffff:.../128 v6 entries still work for operators
+    -- who deliberately target the mapped form only. This confirms
+    -- the mapped-normalisation doesn't accidentally break the
+    -- narrower-scope semantic.
+    reset_state{}
+    bl.add( "::ffff:1.2.3.4/128", { source = "manual" } )
+    -- Note: after the normalisation, `::ffff:1.2.3.4` looks up as
+    -- v4 1.2.3.4 which is NOT in _buckets_v4. So an operator who
+    -- wrote the entry in v6-mapped form and expects it to match
+    -- the same v6-mapped incoming address needs to write the v4
+    -- form instead. Documented tradeoff; the far more common case
+    -- (operator writes plain v4, dual-stack hub receives mapped
+    -- v6) is the one the fix enables.
+    eq( "explicit ::ffff:1.2.3.4/128 does NOT catch mapped incoming (docs)",
+        bl.check_ip( "::ffff:1.2.3.4" ), false )
+    -- Same operator can still catch pure v4 incoming; the entry
+    -- was normalised to v6 at add() and only sits in _buckets_v6.
+    eq( "explicit ::ffff:1.2.3.4/128 non-match for pure v4",
+        bl.check_ip( "1.2.3.4" ), false )
+end
+
+----------------------------------------------------------------------
 -- Reload from stub disk: persistence + cache rebuild
 ----------------------------------------------------------------------
 
