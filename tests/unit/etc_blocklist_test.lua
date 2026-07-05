@@ -94,7 +94,7 @@ _G.blocklist = {
 -- Stub the remaining sandbox globals the plugin reads.
 ----------------------------------------------------------------------
 
-local _registered = { onStart = nil, hub = { } }
+local _registered = { onStart = nil, hub = { }, http = { } }
 local _audit_fired = { }
 local _reports_sent = { }
 
@@ -121,6 +121,33 @@ _G.hub = {
             }
         end
         return nil
+    end,
+    http_register = function( method, path, scope, handler, meta )
+        _registered.http[ method .. " " .. path ] = {
+            handler = handler, scope = scope, meta = meta,
+        }
+    end,
+}
+
+-- Minimal http_filter stub: pass rows through unchanged, empty
+-- pagination. Real filter/sort logic is tested elsewhere; the
+-- plugin's HTTP-handler shape is what we care about here.
+_G.http_filter = {
+    apply = function( query, spec, rows )
+        -- Basic source-filter emulation so a downstream test can
+        -- verify the query flows through the handler; real
+        -- routing lives in core/http_filter.lua and its own
+        -- tests.
+        if query and query.source and query.source ~= "" then
+            local filtered = { }
+            for _, e in ipairs( rows ) do
+                if e.source == query.source then
+                    filtered[ #filtered + 1 ] = e
+                end
+            end
+            rows = filtered
+        end
+        return true, rows, { total = #rows, limit = 100, offset = 0 }, nil
     end,
 }
 
@@ -586,6 +613,189 @@ do
     _registered.hub.blocklist( low_user, nil, "show" )
     truthy( "dispatch: under oplevel -> denied",
         replied and replied:find( "not allowed", 1, true ) )
+end
+
+----------------------------------------------------------------------
+-- Phase C HTTP API surface: registered endpoints + handler shapes
+----------------------------------------------------------------------
+
+do
+    truthy( "http: GET /v1/blocklist registered",
+        _registered.http[ "GET /v1/blocklist" ] )
+    truthy( "http: GET /v1/blocklist/counts registered",
+        _registered.http[ "GET /v1/blocklist/counts" ] )
+    truthy( "http: POST /v1/blocklist registered",
+        _registered.http[ "POST /v1/blocklist" ] )
+    truthy( "http: DELETE /v1/blocklist/{id} registered",
+        _registered.http[ "DELETE /v1/blocklist/{id}" ] )
+
+    eq( "http: GET list scope=read",
+        _registered.http[ "GET /v1/blocklist" ].scope, "read" )
+    eq( "http: GET counts scope=read",
+        _registered.http[ "GET /v1/blocklist/counts" ].scope, "read" )
+    eq( "http: POST scope=admin",
+        _registered.http[ "POST /v1/blocklist" ].scope, "admin" )
+    eq( "http: DELETE scope=admin",
+        _registered.http[ "DELETE /v1/blocklist/{id}" ].scope, "admin" )
+
+    -- POST request_schema has correct field types (min/max, not
+    -- minimum/maximum - #277 catch)
+    local post_schema = _registered.http[ "POST /v1/blocklist" ].meta.request_schema
+    eq( "http: POST cidr type",     post_schema.cidr.type,       "string" )
+    eq( "http: POST cidr required", post_schema.cidr.required,   true    )
+    eq( "http: POST cidr max_length", post_schema.cidr.max_length, 45    )
+    eq( "http: POST stealth type",  post_schema.stealth.type,    "boolean" )
+    eq( "http: POST source type",   post_schema.source.type,     "string" )
+    truthy( "http: POST source has enum", post_schema.source.enum )
+    eq( "http: POST expires_at type", post_schema.expires_at.type, "integer" )
+    eq( "http: POST expires_at min",  post_schema.expires_at.min,  0 )
+end
+
+----------------------------------------------------------------------
+-- http_handler_get_counts: 200 + total + by_source
+----------------------------------------------------------------------
+
+do
+    _entries = { }; _next_id = 1
+    plugin._do_add_entry( "10.0.0.0/8",  { }, "a", 100 )
+    plugin._do_add_entry( "172.16.0.0/12", { }, "a", 100 )
+
+    local resp = plugin._http_handler_get_counts{ }
+    eq( "counts: 200", resp.status, 200 )
+    eq( "counts: total=2", resp.data.total, 2 )
+    eq( "counts: by_source.manual=2", resp.data.by_source.manual, 2 )
+end
+
+----------------------------------------------------------------------
+-- http_handler_list_entries: 200 + raw_body wire
+----------------------------------------------------------------------
+
+do
+    _entries = { }; _next_id = 1
+    plugin._do_add_entry( "10.0.0.0/8", { source = "manual" }, "a", 100 )
+    -- Direct engine call so we can set a non-manual source without
+    -- going through the ADC path (which forces source=manual).
+    _G.blocklist.add( "192.0.2.0/24", { source = "geoip",
+        by_nick = "geoip-plugin", by_level = 100 } )
+
+    local resp = plugin._http_handler_list_entries{ query = { } }
+    eq( "list: 200", resp.status, 200 )
+    truthy( "list: raw_body is string", type( resp.raw_body ) == "string" )
+    eq( "list: content_type json",
+        resp.content_type, "application/json; charset=utf-8" )
+
+    -- Filter emulation via stub: source=geoip yields 1 row.
+    local resp2 = plugin._http_handler_list_entries{ query = { source = "geoip" } }
+    eq( "list: 200 with filter", resp2.status, 200 )
+end
+
+----------------------------------------------------------------------
+-- http_handler_create_entry: happy + bad + source enum + expires_at
+----------------------------------------------------------------------
+
+do
+    _entries = { }; _next_id = 1
+
+    -- Happy path with all fields
+    local resp = plugin._http_handler_create_entry{
+        body = { cidr = "203.0.113.0/24", source = "external",
+                 stealth = true, reason = "feed test",
+                 expires_at = 2000000000 },
+        token_label = "smoke-token",
+    }
+    eq( "create: 201", resp.status, 201 )
+    eq( "create: action=added", resp.data.action, "added" )
+    eq( "create: cidr echoed", resp.data.cidr, "203.0.113.0/24" )
+    eq( "create: source echoed", resp.data.source, "external" )
+    eq( "create: engine entry source", _entries[ 1 ].source, "external" )
+    eq( "create: engine entry stealth", _entries[ 1 ].stealth, true )
+    eq( "create: engine entry by_nick", _entries[ 1 ].by_nick, "smoke-token" )
+    eq( "create: engine entry by_level=100 (HTTP master)",
+        _entries[ 1 ].by_level, 100 )
+    eq( "create: engine entry expires_at",
+        _entries[ 1 ].expires_at, 2000000000 )
+
+    -- Missing cidr
+    local resp2 = plugin._http_handler_create_entry{
+        body = { }, token_label = "t",
+    }
+    eq( "create: missing cidr -> 400", resp2.status, 400 )
+    eq( "create: E_BAD_INPUT code", resp2.error.code, "E_BAD_INPUT" )
+
+    -- Bad cidr (engine rejects)
+    local resp3 = plugin._http_handler_create_entry{
+        body = { cidr = "INVALIDcidr" }, token_label = "t",
+    }
+    eq( "create: bad cidr -> 400", resp3.status, 400 )
+end
+
+----------------------------------------------------------------------
+-- http_handler_delete_entry: happy + not_found + bad id
+----------------------------------------------------------------------
+
+do
+    _entries = { }; _next_id = 1
+    plugin._http_handler_create_entry{
+        body = { cidr = "10.0.0.0/8", reason = "test" },
+        token_label = "smoke-token",
+    }
+    local target_id = _entries[ 1 ].id
+
+    local resp = plugin._http_handler_delete_entry{
+        path_vars = { id = tostring( target_id ) },
+        token_label = "smoke-token",
+    }
+    eq( "delete: 200",         resp.status, 200 )
+    eq( "delete: action=removed", resp.data.action, "removed" )
+    eq( "delete: id echoed",   resp.data.id, target_id )
+    eq( "delete: engine now empty", #_entries, 0 )
+
+    -- not_found (delete same id twice)
+    local resp2 = plugin._http_handler_delete_entry{
+        path_vars = { id = tostring( target_id ) },
+        token_label = "smoke-token",
+    }
+    eq( "delete: not_found -> 404", resp2.status, 404 )
+    eq( "delete: E_NOT_FOUND code", resp2.error.code, "E_NOT_FOUND" )
+
+    -- bad id
+    local resp3 = plugin._http_handler_delete_entry{
+        path_vars = { id = "abc" }, token_label = "t",
+    }
+    eq( "delete: bad id -> 400", resp3.status, 400 )
+
+    -- HTTP master-level bypasses ADC hierarchy: entry added by
+    -- level 100 master can be removed by HTTP admin token even
+    -- though the token has no operator level.
+    _entries = { }; _next_id = 1
+    _G.blocklist.add( "1.2.3.0/24", {
+        source = "manual", by_nick = "the_owner", by_level = 100 } )
+    local resp4 = plugin._http_handler_delete_entry{
+        path_vars = { id = tostring( _entries[ 1 ].id ) },
+        token_label = "http-worker",
+    }
+    eq( "delete: HTTP bypasses hierarchy on level-100 entry",
+        resp4.status, 200 )
+end
+
+----------------------------------------------------------------------
+-- Source enum stability
+----------------------------------------------------------------------
+
+do
+    local enum = plugin._SOURCE_ENUM
+    truthy( "enum: manual present", enum[ 1 ] == "manual" )
+    -- Must contain every source phase D/E/F will emit; adding a
+    -- new source to core/blocklist.lua's _SOURCE_PRIORITY without
+    -- updating this enum would silently produce 400 E_BAD_INPUT
+    -- on POST. Regression guards the wire schema.
+    local as_set = { }
+    for _, s in ipairs( enum ) do as_set[ s ] = true end
+    truthy( "enum: has geoip",       as_set.geoip )
+    truthy( "enum: has external",    as_set.external )
+    truthy( "enum: has proxycheck",  as_set.proxycheck )
+    truthy( "enum: has ipqs",        as_set.ipqs )
+    truthy( "enum: has vpnapi",      as_set.vpnapi )
 end
 
 ----------------------------------------------------------------------

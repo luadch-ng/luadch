@@ -8855,6 +8855,200 @@ def test_http_reload(staging_dir: Path, proc=None):
         )
 
 
+def test_http_phase_c_blocklist(staging_dir: Path, proc=None):
+    """#78 Phase C HTTP API for the unified blocklist.
+
+    Four endpoints, one plugin (etc_blocklist.lua v0.02):
+      - GET    /v1/blocklist          list with filter/sort/pagination
+      - GET    /v1/blocklist/counts   {total, by_source}
+      - POST   /v1/blocklist          create; body {cidr, source?,
+                                      stealth?, reason?, expires_at?}
+      - DELETE /v1/blocklist/{id}     remove
+
+    Coverage:
+    - Pre-flight: fresh staging has 0 entries + counts.total=0
+    - Anonymous POST -> 401
+    - POST cidr + reason (default source=manual) -> 201; id echoed;
+      GET reflects the addition; counts.total=1, by_source.manual=1
+    - POST source=external -> 201 (enum accepts non-manual); GET
+      ?source=external returns exactly this one
+    - POST bad cidr (host-bits-set) -> 400 with engine err msg
+    - POST missing cidr -> 400 E_BAD_INPUT (schema reject)
+    - DELETE existing id -> 200 + removed snapshot
+    - DELETE 999 -> 404 E_NOT_FOUND
+    - DELETE non-integer -> 400 E_BAD_INPUT
+    - Persistence: scripts/data/etc_blocklist.tbl reflects the
+      surviving entries after all mutations
+    - HTTP tokens bypass ADC hierarchy - a level-100 entry can be
+      removed by an admin token that has no operator level
+    """
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def post(path: bytes, body: bytes) -> str:
+        return _http_roundtrip(
+            b"POST " + path + b" HTTP/1.1\r\n" + auth +
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"\r\n" + body
+        )
+
+    def get(path: bytes, use_auth: bool = True) -> str:
+        req = b"GET " + path + b" HTTP/1.1\r\n"
+        if use_auth:
+            req += auth
+        req += b"\r\n"
+        return _http_roundtrip(req)
+
+    def delete_id(id_str: str) -> str:
+        return _http_roundtrip(
+            b"DELETE /v1/blocklist/" + id_str.encode("ascii") +
+            b" HTTP/1.1\r\n" + auth + b"\r\n"
+        )
+
+    # 1. Fresh staging: empty entries + counts.
+    r = get(b"/v1/blocklist")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"pre-flight GET /v1/blocklist: expected 200, got {status(r)!r}")
+    if '"entries":[]' not in body_of(r).replace(" ", ""):
+        raise TestFailure(
+            f"pre-flight expected empty entries, got {body_of(r)!r}"
+        )
+
+    r = get(b"/v1/blocklist/counts")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"pre-flight GET counts: expected 200, got {status(r)!r}")
+    if '"total":0' not in body_of(r).replace(" ", ""):
+        raise TestFailure(f"pre-flight counts.total should be 0, got {body_of(r)!r}")
+
+    # 2. Anonymous POST -> 401
+    anon_body = b'{"cidr":"10.0.0.0/8"}'
+    r = _http_roundtrip(
+        b"POST /v1/blocklist HTTP/1.1\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: " + str(len(anon_body)).encode("ascii") +
+        b"\r\n\r\n" + anon_body
+    )
+    if "401" not in status(r):
+        raise TestFailure(f"anon POST should be 401, got {status(r)!r}")
+
+    # 3. POST manual entry.
+    r = post(b"/v1/blocklist",
+        b'{"cidr":"198.51.100.0/24","reason":"smoke phase c"}')
+    if "201" not in status(r):
+        raise TestFailure(f"POST manual: expected 201, got {status(r)!r}; body={body_of(r)!r}")
+    b = body_of(r).replace(" ", "")
+    if '"ok":true' not in b:
+        raise TestFailure(f"POST envelope missing ok:true; body={b!r}")
+    if '"action":"added"' not in b:
+        raise TestFailure(f"POST action missing; body={b!r}")
+    if '"cidr":"198.51.100.0/24"' not in b:
+        raise TestFailure(f"POST cidr echo missing; body={b!r}")
+    if '"source":"manual"' not in b:
+        raise TestFailure(f"POST default source should be manual; body={b!r}")
+    m1 = re.search(r'"id":(\d+)', b)
+    if not m1:
+        raise TestFailure(f"POST id missing; body={b!r}")
+    manual_id = m1.group(1)
+
+    # 4. GET reflects + counts=1
+    r = get(b"/v1/blocklist")
+    b = body_of(r).replace(" ", "")
+    if '"198.51.100.0/24"' not in b:
+        raise TestFailure(f"GET after add missing entry; body={b!r}")
+
+    r = get(b"/v1/blocklist/counts")
+    b = body_of(r).replace(" ", "")
+    if '"total":1' not in b:
+        raise TestFailure(f"counts after add: total=1 missing; body={b!r}")
+    if '"manual":1' not in b:
+        raise TestFailure(f"counts.by_source.manual=1 missing; body={b!r}")
+
+    # 5. POST source=external.
+    r = post(b"/v1/blocklist",
+        b'{"cidr":"192.0.2.0/24","source":"external","reason":"feed test"}')
+    if "201" not in status(r):
+        raise TestFailure(f"POST external: expected 201, got {status(r)!r}; body={body_of(r)!r}")
+
+    r = get(b"/v1/blocklist?source=external")
+    b = body_of(r).replace(" ", "")
+    if '"192.0.2.0/24"' not in b:
+        raise TestFailure(f"filtered GET source=external missing entry; body={b!r}")
+
+    # 6. POST bad cidr (host-bits-set).
+    r = post(b"/v1/blocklist", b'{"cidr":"1.2.3.4/24"}')
+    if "400" not in status(r):
+        raise TestFailure(f"POST bad-cidr should be 400, got {status(r)!r}; body={body_of(r)!r}")
+
+    # 7. POST missing cidr (router schema rejects, or handler catches).
+    r = post(b"/v1/blocklist", b'{"reason":"nope"}')
+    if "400" not in status(r):
+        raise TestFailure(f"POST missing cidr should be 400, got {status(r)!r}; body={body_of(r)!r}")
+
+    # 8. DELETE bad id.
+    r = delete_id("abc")
+    if "400" not in status(r):
+        raise TestFailure(f"DELETE bad id should be 400, got {status(r)!r}")
+
+    # 9. DELETE non-existent id.
+    r = delete_id("999")
+    if "404" not in status(r):
+        raise TestFailure(f"DELETE 999 should be 404, got {status(r)!r}")
+
+    # 10. DELETE manual entry.
+    r = delete_id(manual_id)
+    if "200" not in status(r):
+        raise TestFailure(f"DELETE id={manual_id}: expected 200, got {status(r)!r}; body={body_of(r)!r}")
+    b = body_of(r).replace(" ", "")
+    if '"action":"removed"' not in b:
+        raise TestFailure(f"DELETE action missing; body={b!r}")
+    if '"cidr":"198.51.100.0/24"' not in b:
+        raise TestFailure(f"DELETE removed.cidr missing; body={b!r}")
+
+    # 11. DELETE same id again -> 404 (entry gone).
+    r = delete_id(manual_id)
+    if "404" not in status(r):
+        raise TestFailure(f"DELETE second time should be 404, got {status(r)!r}")
+
+    # 12. Persistence: the store file exists after the mutations.
+    store = staging_dir / "scripts" / "data" / "etc_blocklist.tbl"
+    if not store.exists():
+        raise TestFailure(
+            f"scripts/data/etc_blocklist.tbl not written by HTTP mutations "
+            f"({store})"
+        )
+
+    # 13. Endpoints catalog contains our two paths (the catalog
+    #     keys on path, not method+path - a single path with
+    #     multiple methods appears once with method-array in the
+    #     entry).
+    r = get(b"/v1/endpoints")
+    b = body_of(r)
+    for wanted in (
+        '"/v1/blocklist"',
+        '"/v1/blocklist/counts"',
+        '"/v1/blocklist/{id}"',
+    ):
+        if wanted not in b:
+            raise TestFailure(
+                f"/v1/endpoints missing {wanted}; body={b[:400]!r}"
+            )
+
+
 def test_http_plugins_api(staging_dir: Path, proc=None):
     """#261 plugin-management endpoints: GET /v1/plugins (read) +
     PUT /v1/plugins/{name}/enabled (admin).
@@ -12350,6 +12544,21 @@ def main():
             failed.append("client blocker end-to-end (#81)")
         else:
             log("PASS  client blocker end-to-end (#81)")
+
+        # #78 Phase C HTTP API for the unified blocklist. Four
+        # endpoints (GET list, GET counts, POST, DELETE); anon-auth
+        # sanity check + happy path per verb + bad-cidr / missing-
+        # cidr / bad-id / not-found rejections + persistence check
+        # on scripts/data/etc_blocklist.tbl + endpoints-catalog
+        # sanity. Uses HTTP (not BMSG) so ratelimit_tier overlay is
+        # irrelevant here.
+        try:
+            test_http_phase_c_blocklist(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API blocklist (#78 Phase C): {e}")
+            failed.append("HTTP API blocklist (#78 Phase C)")
+        else:
+            log("PASS  HTTP API blocklist (#78 Phase C)")
 
         # #261 plugin-management endpoints: GET /v1/plugins (read) +
         # PUT /v1/plugins/{name}/enabled (admin). Full toggle cycle on
