@@ -119,6 +119,14 @@ _core = {    -- luadch core, order is important
     -- module load for the accept-time stealth hook. init() reads
     -- cfg + reloads the store + registers a cfg-reload listener.
     "blocklist",
+    -- core/mmdb.lua (Phase D1 of #78 arc): pure-Lua MaxMind DB reader
+    -- (GeoLite2 Country / ASN). Passive library - no init(), opens no
+    -- files at load. Loaded AFTER ipmatch (uses it to parse lookup
+    -- addresses); position among the post-ipmatch modules is otherwise
+    -- irrelevant. The Phase D2 plugin (etc_geoip) is its only
+    -- consumer; registered here so it loads under the restricted env
+    -- and is reachable as a core module.
+    "mmdb",
     "ratelimit",
     "server",
     "adc",

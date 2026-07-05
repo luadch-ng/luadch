@@ -47,6 +47,10 @@ makefile    text eol=lf
 *.cmd       text eol=crlf
 
 # Binary assets: never line-ending-converted.
+# *.mmdb are MaxMind DB test fixtures (tests/unit/fixtures/mmdb/): the
+# pure-Lua reader parses raw bytes, so EOL normalization would corrupt
+# them and break the offsets the format depends on.
+*.mmdb      binary
 *.png       binary
 *.jpg       binary
 *.jpeg      binary

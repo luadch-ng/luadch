@@ -161,6 +161,14 @@ jobs:
       - name: Run blocklist unit test
         run: lua5.4 tests/unit/blocklist_test.lua
 
+      # #78 Phase D1: core/mmdb.lua pure-Lua MaxMind DB reader. 75
+      # checks against MaxMind's canonical test databases (all three
+      # record sizes 24/28/32, both IP families, v4-in-v6 embedding,
+      # every data-section type, realistic Country schema) with
+      # expected values from the reference maxminddb reader.
+      - name: Run mmdb unit test
+        run: lua5.4 tests/unit/mmdb_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -281,6 +289,11 @@ jobs:
       - name: Run blocklist unit test
         shell: msys2 {0}
         run: lua tests/unit/blocklist_test.lua
+
+      # #78 Phase D1: pure-Lua MaxMind DB reader (see Linux job note).
+      - name: Run mmdb unit test
+        shell: msys2 {0}
+        run: lua tests/unit/mmdb_test.lua
 
       - name: Configure
         shell: msys2 {0}
