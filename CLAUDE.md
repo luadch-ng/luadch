@@ -1,8 +1,10 @@
 # CLAUDE.md
 
 Context for Claude Code (and any AI assistant) working on luadch. Read this before
-making changes — it captures the working agreement, architecture, and modernization plan
-that span sessions.
+making changes — it captures the working agreement, architecture map, and roadmap
+that span sessions. Engineering how-to (core-module authoring, testing contract,
+security checklists, Definition of Done) lives in
+[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
 User communication is in **German**; all written artifacts (this file, code, comments,
 commits, PRs, issues) stay in **English** so other contributors can read them.
@@ -57,7 +59,11 @@ These rules are set by the maintainer and apply to every change.
     - **Consistency** - did similar code paths drift apart? Did naming get inconsistent?
     - **Code quality** - readability, dead code, duplication, function length.
     - **Build & smoke test** - both Linux and Windows builds succeed, hub starts, a
-      test client (`adc://127.0.0.1:5000`) can connect.
+      test client (`adcs://127.0.0.1:5001`) can connect.
+    - **Docs currency** - this file and the affected `docs/*.md` were updated in the
+      same PR whenever architecture, conventions, module layout, or defaults changed.
+      A stale CLAUDE.md poisons every future session's context; treat doc drift as a
+      review-blocking defect, not cosmetics.
 12. **Fix-then-advance.** Anything found in the review must be fixed before the next
     phase begins or the release is cut. No "we'll get back to it." If something is
     genuinely out of scope, open a tracking issue and link it from the phase summary.
@@ -69,31 +75,36 @@ When uncertain whether a change fits the current phase, **stop and ask the maint
 ## 2. Project overview
 
 luadch is a DC++ **ADC** hub server written in Lua with a thin C launcher
-(`hub/hub.c`, 209 lines) that embeds the Lua interpreter and hands off to
-`core/init.lua`.
+(`hub/hub.c`) that embeds the Lua interpreter and hands off to `core/init.lua`.
 
 - **Current source version:** `v3.2.0-dev` on `master`, `PROGRAM_NAME = "Luadch-NG"`
   (see `core/const.lua`). The 3.1.x maintenance line keeps `PROGRAM_NAME = "Luadch"`.
 - **Latest release:** `v3.1.9` (2026-05-13, on `release/3.1.x`)
 - **Status:** the Phase 1-7 modernisation programme is content-complete; work is now
   3.2.x feature development (Phase 8+) plus 3.1.x security-only maintenance (see §8).
-- **Open issues:** ~12 (as of 2026-05-15) - check `gh issue list` for the live count.
+- **Open issues:** check `gh issue list --repo luadch-ng/luadch` (never trust a
+  count written into a doc).
+- **Testing:** a pure-Lua unit suite (`tests/unit/*_test.lua`) plus a protocol-level
+  smoke harness (`tests/smoke/run.py`) run in CI on Linux AND Windows on every push
+  and PR (`.github/workflows/smoke.yml`). See [`tests/README.md`](tests/README.md)
+  and [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 - **License:** GPLv3.0
 
 The repo bundles all runtime dependencies as source - there is no external package
 manager. This is intentional (the project ships as a self-contained build) but means
 dependency updates are manual.
 
-### Bundled dependencies (verified 2026-05-03)
+### Bundled dependencies (verified 2026-07-05; a dependency bump MUST update this table)
 
 | Component   | Bundled version | Path           | Notes                                |
 |-------------|-----------------|----------------|--------------------------------------|
-| Lua         | **5.4.7**       | `lua/`         | bumped from 5.1.5 in Phase 3         |
-| LuaSec      | **1.3.2**       | `luasec/`      | TLS support, links against OpenSSL — Phase 4 bump candidate |
-| LuaSocket   | **3.1.0**       | `luasocket/`   | TCP/UDP, IPv6 capable — Phase 4 bump candidate |
+| Lua         | **5.4.8**       | `lua/`         | bumped from 5.1.5 in Phase 3; check `lua/src/lua.h` |
+| LuaSec      | **1.3.2**       | `luasec/`      | TLS support, links against OpenSSL; upstream-blocked for OpenSSL-3 API (Phase 4, #3) |
+| LuaSocket   | **3.1.0**       | `luasocket/`   | TCP/UDP, IPv6 capable                |
 | basexx      | (no version)    | `basexx/`      | Pure Lua, base32/64 encoding         |
 | unicode     | shim            | `slnunicode/unicode.lua` | ~40-line Lua shim that replaces the unmaintained slnunicode C module; uses `string.X` and Lua 5.4 builtin `utf8` |
 | adclib      | (no version)    | `adclib/`      | C module: ADC hashing & escaping     |
+| zlib_stream | (own binding)   | `zlib_stream/` | C binding for ZLIF stream compression (Phase 8 S4b); links the **system** zlib (`find_package(ZLIB REQUIRED)`) - the one dependency NOT bundled |
 
 ---
 
@@ -102,45 +113,51 @@ dependency updates are manual.
 ### Boot sequence
 
 ```
-hub/hub.c           ── lua_open(), register C functions, load core/init.lua
-  └─ core/init.lua  ── sandboxed env, load libs + core modules in order
-       └─ core/hub.lua      ── hub.loop() — main event loop
-            └─ core/server.lua ── select() loop over sockets, SSL wrap
+hub/hub.c           ── luaL_newstate(), register C functions, load core/init.lua
+  └─ core/init.lua  ── restricted env, load libs + _core modules in order
+       └─ core/hub.lua          ── hub.loop() — main event loop
+            ├─ core/server.lua  ── select() loop over sockets, SSL wrap
+            └─ core/hub_dispatch.lua ── per-command ADC dispatch (most
+                                        listener events fire from here)
 ```
 
-### Core modules (line counts)
+### Core modules (grouped by subsystem)
 
-| Module               | LOC  | Responsibility                                       |
-|----------------------|------|------------------------------------------------------|
-| `core/const.lua`     |   21 | Program name, version, config paths                  |
-| `core/hci.lua`       |    9 | Stub (purpose unclear — flag for review)             |
-| `core/test.lua`      |   14 | Stubbed; **no active test suite**                    |
-| `core/mem.lua`       |   32 | GC trigger                                           |
-| `core/signal.lua`    |   41 | Timers / start time                                  |
-| `core/out.lua`       |   99 | Logging, error output, listener registry             |
-| `core/types.lua`     |  159 | ADC protocol type validation                         |
-| `core/init.lua`      |  209 | Bootstrap: env, module load order, restart loop      |
-| `core/scripts.lua`   |  263 | Plugin loader, sandbox, hook registry                |
-| `core/doc.lua`       |  308 | Auto-doc generation (currently disabled)             |
-| `core/util.lua`      |  686 | File I/O, encoding, UTF-8, table helpers             |
-| `core/adc.lua`       |  926 | ADC protocol: parse, escape, format                  |
-| `core/server.lua`    |  989 | Network: select loop, SSL, coroutines                |
-| `core/hub.lua`       | 2239 | **Hot path** — login, messaging, commands, listeners |
-| `core/cfg.lua`       | 3688 | **Largest** — config + user.tbl + language           |
-| `hub/hub.c`          |  209 | C launcher, signal handling                          |
+No line counts here on purpose - they bit-rot. Run `wc -l core/*.lua` for
+current sizes. `core/init.lua`'s `_core` array is the authoritative load
+order (its inline comments explain each ordering constraint).
+
+| Subsystem | Modules | Responsibility |
+|---|---|---|
+| Boot + config | `init`, `const`, `cfg`, `cfg_defaults`, `cfg_users`, `cfg_lang`, `cfg_secret`, `secrets` | Restricted env + module loader; program constants; settings/user.tbl/language handling; AES-256-GCM at-rest crypto; env-var-first secret lookup |
+| Network + ADC | `server`, `iostream`, `adc`, `hub`, `hub_dispatch`, `hub_user_object`, `hub_bot_object`, `hbri`, `ratelimit`, `blocklist`, `ipmatch` | select() loop + SSL; framing pipeline; ADC parse/escape/format; main loop + login; command dispatch; user/bot objects; dual-stack secondary-IP verification; DoS limits; pre-handshake IP/CIDR blocklist; IP/CIDR primitives |
+| HTTP API | `http`, `http_router`, `http_client`, `http_filter`, `http_events`, `util_http` | Inbound HTTP/JSON API + router + auth; non-blocking OUTBOUND client; filter/sort/paginate helper; deferred-event endpoints; plugin endpoint helper |
+| Crypto + boot trust | `sha256`, `cert_bootstrap`, `cacert_bootstrap` | Pure-Lua SHA-256; first-boot TLS-cert auto-gen (#77); CA-bundle reconciliation |
+| Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `bloom`, `doc` (disabled), `hci` (stub) | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader; bloom filter; dormant |
+
+Two hard ceilings (both enforced by review, not tooling):
+
+- **1500 lines per code module** (Phase 6). If a module needs more, split it.
+- **`core/hub.lua` main chunk is AT Lua's 200-locals cap.** Any new top-level
+  `local` fails the build. Use lazy `use "X"` at call sites instead; treat
+  hub.lua file-scope locals as frozen.
 
 ### Plugin / hook model
 
 Plugin scripts live in `scripts/` and are loaded via `core/scripts.lua` into a
-sandboxed environment. They register listeners on lifecycle events:
+whitelist sandbox (no `use`, no raw `io`/`os` - see
+[`docs/PLUGIN_API.md`](docs/PLUGIN_API.md) §2). A plugin only loads if it is
+whitelisted in `cfg.scripts`; array order = listener-chain order.
 
-- `onStart` — script init
-- `onLogin` — user finished login
-- `onFailedAuth` — auth failure
-- `onBroadcast` — main-chat message
-- `onReg` / `onDelreg` — registration changes
-- `onError` — script error
-- `onExit` — hub shutdown
+Listener events (full set; semantics in
+[`docs/PLUGIN_API.md`](docs/PLUGIN_API.md) §4):
+
+- Lifecycle: `onStart`, `onExit`, `onError`, `onShutdown`, `onTimer`
+- Connection/login: `onIncoming`, `onConnect`, `onLogin`, `onLogout`, `onFailedAuth`
+- Protocol traffic: `onInf`, `onBroadcast`, `onPrivateMessage`, `onConnectToMe`,
+  `onRevConnectToMe`, `onNatTraversal`, `onNatTraversalReply`, `onSearch`,
+  `onSearchResult`
+- Registration/audit: `onReg`, `onDelreg`, `onAudit`
 
 Plugins use the `hub` table API: `hub.getuser(nick)`, `hub.broadcast(msg)`,
 `hub.setlistener(event, id, func)`, plus `cfg.get(key)`, `utf.sub()`, etc.
@@ -169,199 +186,66 @@ setup, first-time login walkthrough:** see [`docs/BUILDING.md`](docs/BUILDING.md
 
 ### First-time login
 
+Fresh installs are **TLS-only**: `tcp_ports = {}` (no plain listener),
+`ssl_ports = {5001}` on both IPv4 and IPv6 (`core/cfg_defaults.lua`). The TLS
+certificate is **auto-generated on first boot** by `core/cert_bootstrap.lua`
+(#77) - no manual cert step. `examples/certs/make_cert.{sh,bat}` exist only
+for manual regeneration.
+
 ```
 Nick:     dummy
 Password: test
-Address:  adc://127.0.0.1:5000      (plain)
-          adcs://127.0.0.1:5001     (TLS, after running certs/make_cert.{sh,bat})
+Address:  adcs://127.0.0.1:5001    (TLS; production clients should pin the
+                                    keyprint: adcs://host:5001/?kp=SHA256/...)
 ```
+
+Plain `adc://` requires explicitly enabling `tcp_ports` in `cfg/cfg.tbl`.
 
 After login: `+reg <yournick> 100`, then `+delreg dummy`, then `+reload`.
 
 ---
 
-## 5. Modernization roadmap
+## 5. Roadmap
 
-Each phase ends with the §1.4 review gate. We do not start Phase N+1 until Phase N
-is reviewed and clean.
+### Modernisation programme (Phases 1-7): CLOSED
 
-### Phase 1 — Foundation (current)
+Content-complete since v3.1.8. One journal per phase in
+[`docs/phases/`](docs/phases/) carries the full narrative; this table is only
+the index. Do not re-plan closed phases.
 
-**Goal:** Reproducible builds on Linux and Windows, smoke test passes, baseline
-documented.
+| Phase | Outcome (one line) | Journal |
+|---|---|---|
+| 1 - Foundation | Reproducible Linux + Windows builds, smoke baseline documented | [`PHASE_1.md`](docs/phases/PHASE_1.md) |
+| 2 - Quick wins | `.gitattributes`, `lua_open` -> `luaL_newstate`, reproducible Windows toolchain | [`PHASE_2.md`](docs/phases/PHASE_2.md) |
+| 3 - Lua 5.4 | Interpreter 5.1.5 -> 5.4, `_ENV` sandbox migration, C-API updates | [`PHASE_3.md`](docs/phases/PHASE_3.md) |
+| 4 - Dependency audit | Closed audit-only; LuaSec OpenSSL-3 API stays upstream-blocked (#3) | [`PHASE_4.md`](docs/phases/PHASE_4.md) |
+| Interlude 1 | Upstream bug triage round 1 (6 fixed, 3 audited-already-fixed) | [`INTERLUDE_UPSTREAM_TRIAGE.md`](docs/phases/INTERLUDE_UPSTREAM_TRIAGE.md) |
+| 5 - CMake build | Single three-step CMake pipeline for Linux/Windows/ARM | [`PHASE_5.md`](docs/phases/PHASE_5.md) |
+| 6 - Refactor + tests | cfg/hub split, 1500-line ceiling, smoke harness + CI | [`PHASE_6.md`](docs/phases/PHASE_6.md) |
+| 7 - Security audit | 24 findings / 22 closed; ratelimit, at-rest crypto, sandboxed loaders, `docs/SECURITY.md` | [`PHASE_7.md`](docs/phases/PHASE_7.md), [`PHASE_7_FINDINGS.md`](docs/phases/PHASE_7_FINDINGS.md) |
+| Interlude 2 | Upstream triage rounds 2 + 3 | [`INTERLUDE_UPSTREAM_TRIAGE_2.md`](docs/phases/INTERLUDE_UPSTREAM_TRIAGE_2.md) |
 
-- [ ] Verify Linux build from clean checkout
-- [ ] Verify Windows MinGW build from clean checkout (note: hardcoded paths)
-- [ ] Smoke-test: hub starts, dummy login works on plain + TLS
-- [ ] Document any deviations from this CLAUDE.md
-- [ ] Capture exact toolchain versions used
+### Phase 8+ - feature development (current era)
 
-**Out of scope for Phase 1:** changing any `.lua` or `.c` file. This phase is
-"observe and document," not "modify."
+Each Phase-8+ item gets its own tracker issue, scope, and §1a.6 review gate.
+The strict "one phase at a time" discipline (§1b) still applies. Active
+engineering journals: [`PHASE_8_IO.md`](docs/phases/PHASE_8_IO.md) (IO/framing
+rework), [`PHASE_8A.md`](docs/phases/PHASE_8A.md) (ADC input-validation
+audit), [`PHASE_8B_DUAL_STACK.md`](docs/phases/PHASE_8B_DUAL_STACK.md)
+(dual-stack + HBRI).
 
-**Review gate:** Both builds produce a working hub. Build instructions in this file
-match reality. No code changed yet.
+Shipped feature arcs so far (closed trackers, details in the issues): HTTP
+API #82, audit log #84, real HBRI #214, registered-users API family #236,
+subsystem managers #249, client blocker #81, aliases #327.
 
-### Phase 2 — Quick wins (no breaking changes)
+**In flight (status 2026-07-05 - the tracker is the source of truth):**
+unified blocklist arc [#78](https://github.com/luadch-ng/luadch/issues/78) -
+Precursors + Phases A/B/C + D1 (`core/mmdb.lua`) merged; paused before Phase
+D2 (`scripts/etc_geoip.lua`). Phase E closes #79, Phase F closes #352.
 
-**Goal:** Pick off small, low-risk issues that improve consistency without changing
-behavior. Includes a minimal Windows-build hardening (ENV-var paths) so the existing
-toolchain is reproducible. **Full Windows-build modernization (CMake) is its own
-phase — see Phase 5 below.**
-
-Candidates (planned at start of phase; actual progress tracked via merged PRs):
-- Repo line-ending policy (`.gitattributes`)
-- Replace deprecated `lua_open()` with `luaL_newstate()` in `hub/hub.c`
-- C++17 `register`-keyword warnings in `adclib/tiger.cpp`
-- `make_cert.sh` `UID`-variable collision with bash builtin
-- Route `+!#` server commands from PM-to-hubbot through the command pipeline
-- Audit hardcoded `"././"` relative paths in `core/init.lua` (audit only;
-  full fix deferred to Phase 6)
-- **Make Windows build reproducible:** replace hardcoded `C:\MinGW` and
-  `C:\OpenSSL` paths in `compile_with_mingw.bat` with ENV variables, sanity
-  check toolchain, document prereqs in `docs/BUILDING.md`
-
-**Review gate:** Build still green on both platforms. Smoke test passes. No new
-warnings. Each change has a PR + closed issue.
-
-### Phase 3 — Lua 5.1 → 5.4 migration
-
-**Goal:** Move embedded interpreter from Lua 5.1.5 (EOL 2012) to Lua 5.4.
-
-This is the biggest single change in the modernization. Scope it carefully:
-- Replace `setfenv` / `getfenv` (used in `core/init.lua`, `core/scripts.lua`) with
-  `_ENV` and explicit closures
-- `loadstring` → `load`
-- `unpack` → `table.unpack`
-- `module(...)` if used anywhere
-- C API changes in `hub/hub.c` and the C modules (`adclib`, `slnunicode`)
-- Compatibility re-check of all bundled libs against Lua 5.4
-
-**Review gate:** All 70+ scripts in `scripts/` load and run. ADC protocol smoke tests
-pass. Plugin sandbox still isolates globals. Performance not visibly worse.
-
-### Phase 4 — Dependency audit (closed as audit-only)
-
-**Outcome (2026-05-03):** every bundled dep is already on its latest
-meaningful upstream tag. Issue #3 (OpenSSL 3.0 deprecation warnings in
-LuaSec 1.3.2) reclassified as `upstream-blocked` + `wontfix` — fix
-requires upstream LuaSec to migrate to the EVP / provider API, which
-has not happened. Switching to a different TLS-binding library
-(`lua-openssl`, etc.) is a network-stack-renewal scope, deliberately
-not pursued.
-
-Full reasoning in [`docs/phases/PHASE_4.md`](docs/phases/PHASE_4.md).
-
-### Phase 5 — Cross-platform build system (CMake migration, closed)
-
-**Outcome (2026-05-03):** Single CMake pipeline replaces the ad-hoc
-`compile` shell script and `compile_with_mingw.bat` (whose `*.c.not`
-rename hack is gone for good). Same three-step `cmake -B build` →
-`--build` → `--install` works on Linux, Windows, and ARM aarch64
-(cross-compile verified). Output sizes match the legacy build within
-±10 %; the legacy scripts are deleted.
-
-Full details in [`docs/phases/PHASE_5.md`](docs/phases/PHASE_5.md).
-
-### Interlude - Upstream issue triage (closed)
-
-**Outcome (2026-05-03):** One-off detour between Phase 5 and Phase 6.
-Six small bugs from the upstream `luadch/luadch` tracker fixed in
-single-PR patches; three further upstream bugs audited and confirmed
-already fixed by the 5.4 / OpenSSL-3.x modernisation. Not part of
-the modernisation roadmap (no review gate of its own); recorded so
-future triage rounds do not re-discover the same audit results.
-
-Full details in [`docs/phases/INTERLUDE_UPSTREAM_TRIAGE.md`](docs/phases/INTERLUDE_UPSTREAM_TRIAGE.md).
-
-### Phase 6 - Refactor & tests (closed)
-
-**Outcome (2026-05-04):** Modernisation refactor complete. `core/cfg.lua`
-3688 -> 668, `core/hub.lua` 2245 -> 1497, all code modules under the
-1500-line ceiling. Smoke harness with seven protocol-level tests
-(plain + TLS handshake / login / +cmd routing / no-script-errors)
-runs on every push and PR via `.github/workflows/smoke.yml`. Path
-anchoring closes issue #12. Tiger hash vendored as
-`tests/smoke/tiger.py` so the test client and hub agree by
-construction. Surviving 100-line functions are documented exceptions
-(factories, sequence-of-stamps) or pre-existing untouched code
-tracked as Phase 8+ in #48.
-
-Full details in [`docs/phases/PHASE_6.md`](docs/phases/PHASE_6.md).
-
-### Phase 7 - Security audit & hardening (closed)
-
-**Outcome (2026-05-04):** Systematic security audit (7a) produced 24
-findings across 8 surfaces; sub-phases 7b-7h closed 22 of them. Two
-remain by design: F-AUTH-1 transparent KDF migration is
-protocol-immanent (mitigated via at-rest AES-256-GCM + chmod 600 +
-configurable master-key path); F-DEP-2 LuaSec OpenSSL-3 deprecated
-APIs stays `upstream-blocked` per Phase 4. Six concrete hardening
-deliverables landed:
-
-- DoS hardening: per-IP / per-user rate limits, TLS handshake
-  deadline, per-IP failed-auth lockout in new `core/ratelimit.lua`
-- AES-256-GCM at-rest encryption of `cfg/user.tbl` in new
-  `core/cfg_secret.lua`, with chmod-or-die and configurable
-  `master_key_path` for backup separation
-- Sandbox `loadfile()` for all `.tbl` files (eliminates RCE on
-  tampered config / user / language / plugin-state files)
-- ADC parser hardening: control-byte rejection, reentrant `parse()`,
-  64 KiB command-size cap, re-enabled UTF-8 entry check
-- CSPRNG-driven password salt + SID via OpenSSL `RAND_bytes`
-- New top-level `docs/SECURITY.md` documenting threat model, plugin
-  trust contract, F-AUTH-1 disclosure, file-permission baseline,
-  CVE-tracking process, and reporting channel
-
-Smoke harness now runs 10 protocol-level tests (up from 7) covering
-the new security mechanisms.
-
-Full details in [`docs/phases/PHASE_7.md`](docs/phases/PHASE_7.md).
-
-After Phase 7 the **modernisation programme is content-complete** -
-the project is on a current Lua runtime, current bundled deps
-(within upstream constraints), a unified modern build system,
-structural code health, a smoke-test floor catching protocol-level
-regressions, and defence-in-depth security around the
-ADC-protocol-mandated cleartext.
-
-### Phase 8+ - Future features (post-modernisation)
-
-Reserved for new capability work that depends on the modernised + audited
-foundation. Not modernisation work - these are deliberate feature additions,
-scoped and prioritised when we get there. Examples held in the maintainer's
-notes:
-
-- External read-only API (HTTP/JSON status, user list, share stats)
-- Web-based registration / admin panel
-- IPv6 listening (issue #105 upstream - not adopted yet)
-- NAT-traversal helpers
-
-Each Phase-8+ item gets its own discrete phase or issue with its own scope
-and review gate. The strict "one phase at a time" discipline still applies.
-
-### In flight: HTTP API (#82)
-
-Phase 1 (read API: framework + auth + 5 core endpoints + rate-limit +
-idempotency) is merged. Phase 2 (#198) migrates the bundled write-action
-plugins to dual ADC-cmd + HTTP-endpoint surfaces; in progress.
-
-**For new plugins that need an HTTP write endpoint** (kick, redirect, gag,
-mute, ...): use `util_http.http_register_user_action` from
-[`core/util_http.lua`](core/util_http.lua), NOT raw `hub.http_register`.
-It handles the standard preflight (SID extraction + online check + non-bot
-rejection) and constructs the §7.1.1 response envelope so the plugin only
-owns the action-specific handler body. See [`docs/HTTP_API.md`](docs/HTTP_API.md)
-§5.1.1 for the contract; `scripts/cmd_disconnect.lua` and
-`scripts/cmd_redirect.lua` are reference call sites.
-
-Raw `hub.http_register` is the lower-level escape hatch for read endpoints,
-resources with non-SID target keys (e.g. cmd_ban with nick/cid/ip), or
-endpoints that need a different envelope shape.
-
-Plugin sandbox already exposes both `util` (for `strip_control_bytes`,
-generic helpers) and `util_http` (for the HTTP helper) as globals via the
-standard `_G` iteration in [`core/scripts.lua`](core/scripts.lua).
+**HTTP-endpoint authoring** (which helper for which endpoint shape, envelope
+contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and
+[`docs/HTTP_API.md`](docs/HTTP_API.md) §5.
 
 ---
 
@@ -378,8 +262,11 @@ standard `_G` iteration in [`core/scripts.lua`](core/scripts.lua).
   adopt one (no bulk import — see §6 *Upstream policy* below).
 - **Auto-memory** — Claude's per-user auto-memory directory for this project — holds
   user profile and high-level context. Architecture / build / roadmap details live in
-  **this file**, not in memory, because they belong with the code.
-- **Releases** — last public release is v2.23 (2022-04-02). Source is at v2.24 RC4.
+  **this file**, not in memory, because they belong with the code. Durable
+  engineering patterns belong in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) so
+  they reach every assistant and contributor, not just one memory owner.
+- **Releases** — this fork's latest release is `v3.1.9` (see §2 and §8); UPSTREAM
+  `luadch/luadch` last released v2.23 back in 2022-04-02 (see Upstream policy below).
 
 ### Upstream policy
 
@@ -402,6 +289,34 @@ open a fresh issue here that references the upstream one in its body.
 - **No em-dashes anywhere.** Use `-` in all written output: chat, commits, PRs,
   issues, docs. (Pre-existing em-dashes in this file are legacy; don't mass-reformat,
   but new/edited lines use `-`.)
+
+### Engineering rules (each one paid for in a real incident; how-to detail in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md))
+
+- **Core modules: every global via `local X = use "X"`.** Core modules run under
+  `core/init.lua`'s restricted env - a bare global (`local type = type`, or a
+  naked `pairs(...)` call) passes unit tests but crashes the hub at boot with
+  "undeclared var". Burned twice (#353, #358). New modules register in `_core`
+  with an ordering comment and must be passive at load (no `init()` side
+  effects, no file I/O). Self-check recipe: DEVELOPMENT.md §2.
+- **Run unit tests locally with Lua 5.4 BEFORE pushing.** CI catches failures
+  one iteration too late (#277). New unit tests must be registered in
+  `.github/workflows/smoke.yml` on BOTH legs (Linux `lua5.4` + Windows msys2
+  `lua`) - an unregistered test is silent non-coverage.
+- **Plugin state lives at `scripts/data/<plugin>.tbl`;** operator-facing
+  artifacts (exports, backups) go to `cfg/`. Never export a mutable table
+  reference across `+reload` - use the getter idiom (DEVELOPMENT.md §3).
+- **Untrusted-input parsers** (anything reading operator-supplied or
+  network-supplied bytes) follow the DEVELOPMENT.md §5 checklist: bounds-check
+  every read, bound total WORK not just depth, pcall-wrap so corrupt input
+  degrades to `(nil, err)` on boot paths, cap sizes before RAM reads.
+- **No live point-in-time numbers in this file.** Counts that keep changing -
+  current module line counts, open-issue counts, "N tests today", percentages -
+  rot within weeks and then poison every session that loads this file. Link the
+  source of truth (`wc -l`, `gh issue list`, CI) instead. Two exemptions, because
+  they do NOT drift: (a) frozen historical facts about a CLOSED phase (e.g. "24
+  findings / 22 closed" in the §5 table); (b) release/version/"verified-on"
+  markers (e.g. "latest release v3.1.9", the deps-table verified date). A live
+  status line (like §5 "In flight") must name the tracker as its source of truth.
 
 ### Tooling gotchas (these have already burned us)
 
