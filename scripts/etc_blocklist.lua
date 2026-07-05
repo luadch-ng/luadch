@@ -714,15 +714,20 @@ local _list_filter_spec = {
         source  = function( e ) return e.source  or "" end,
         by_nick = function( e ) return e.by_nick or "" end,
         reason  = function( e ) return e.reason  or "" end,
-        -- Boolean-as-string so operators can query
-        -- `?stealth=true`; http_filter has no native boolean
-        -- field type, but a normalised string maps cleanly.
-        stealth = function( e ) return e.stealth and "true" or "false" end,
-        -- cidr_contains: an operator typing `?cidr_contains=192.0.2`
-        -- narrows the list to that subnet family without needing
-        -- to reason about buckets. Case-insensitive substring
-        -- match via http_filter's string-field default.
+        -- cidr as substring-match string field per cmd_ban
+        -- convention (bans use `nick`/`cid`/`ip` as string
+        -- fields, not `nick_contains` etc). An operator typing
+        -- `?cidr=192.0.2` narrows to that subnet family without
+        -- reasoning about buckets.
         cidr    = function( e ) return e.cidr or "" end,
+    },
+    boolean_fields = {
+        -- Strict boolean-typed field: query must be literal
+        -- "true" / "false" (not substring). Wrong value ->
+        -- 400 E_BAD_INPUT from http_filter directly, saving
+        -- operator debug cycles vs an empty-200 silent-drop
+        -- if we modelled this as a string-substring field.
+        stealth = function( e ) return e.stealth and true or false end,
     },
     integer_fields = {
         by_level   = function( e ) return tonumber( e.by_level ) or 0 end,
@@ -793,7 +798,14 @@ local http_handler_get_counts = function( req )
     -- blocklist.count() returns { total, by_source = {...} }.
     -- Surface as-is; the shape is already prometheus-friendly
     -- (flat integer scalar + per-source integer map).
+    --
+    -- dkjson would emit an EMPTY Lua table as JSON array `[]`
+    -- (its default for tables with no string keys). Callers with
+    -- typed decoders reading `by_source` as an object would break
+    -- on a fresh install. Force object shape via dkjson's
+    -- __jsontype hint so the empty case wires as `{}`.
     local c = blocklist.count( )
+    setmetatable( c.by_source, { __jsontype = "object" } )
     return { status = 200, data = c }
 end
 
@@ -836,9 +848,18 @@ local http_handler_create_entry = function( req )
     } )
     if not ok then
         local err_s = tostring( engine_err or "" )
-        local status = err_s:find( "^save failed" ) and 500 or 400
+        -- Save-failure (disk I/O / permission) is a server-side
+        -- condition, not caller input; map to 500 E_INTERNAL per
+        -- HTTP_API.md envelope convention. Everything else is a
+        -- caller-input rejection (bad CIDR, host-bits-set, etc).
+        local status, code
+        if err_s:find( "^save failed" ) then
+            status, code = 500, "E_INTERNAL"
+        else
+            status, code = 400, "E_BAD_INPUT"
+        end
         return { status = status, error = {
-            code = "E_BAD_INPUT", message = err_s ~= "" and err_s or "add failed",
+            code = code, message = err_s ~= "" and err_s or "add failed",
         } }
     end
     -- Reason may have gone in nil; ADC-path lang literal
@@ -854,10 +875,17 @@ local http_handler_create_entry = function( req )
     end
     audit.fire( audit.build( "blocklist.add",
         { nick = actor_label, sid = "<http>" }, nil, reason, {
-            cidr    = cidr,
-            source  = source,
-            stealth = stealth,
-            id      = id,
+            cidr     = cidr,
+            source   = source,
+            stealth  = stealth,
+            id       = id,
+            -- Record the synthetic master attribution so an
+            -- operator reading the audit trail can distinguish
+            -- HTTP-token-created entries from ADC-master-created
+            -- ones; ADC path fires this same event with no
+            -- by_level in meta (the actor's real level lives on
+            -- the actor snapshot).
+            by_level = 100,
         } ) )
     return { status = 201, data = {
         action = "added",
@@ -897,14 +925,19 @@ local http_handler_delete_entry = function( req )
             cidr   = entry.cidr,
             source = entry.source,
         } ) )
+    -- Defence-in-depth control-byte strip on the wire response.
+    -- Every ingest path (ADC add, JSONL import) already strips at
+    -- insertion time, so entries in the store are clean; the
+    -- strip here guards against future ingest paths that skip
+    -- the sanitisation.
     return { status = 200, data = {
         action  = "removed",
         id      = id,
         removed = {
-            cidr    = entry.cidr,
-            source  = entry.source,
-            reason  = entry.reason,
-            by_nick = entry.by_nick,
+            cidr    = util_strip( entry.cidr or "" ),
+            source  = util_strip( entry.source or "" ),
+            reason  = util_strip( entry.reason or "" ),
+            by_nick = util_strip( entry.by_nick or "" ),
         },
     } }
 end
@@ -972,9 +1005,12 @@ hub.setlistener( "onStart", { },
                         reason  = { type = "string",  required = false, max_length = 256 },
                         -- 2^31 = 2038-01-19; well beyond current
                         -- cfg horizons and fits in Lua 5.4 int on
-                        -- any platform.
+                        -- any platform. `min = 1` bans the epoch
+                        -- 0 UX trap (immediately-expired entry);
+                        -- callers wanting permanent entries omit
+                        -- the field.
                         expires_at = { type = "integer", required = false,
-                            min = 0, max = 2147483647 },
+                            min = 1, max = 2147483647 },
                     },
                     response_schema = {
                         action = { type = "string",  required = true },

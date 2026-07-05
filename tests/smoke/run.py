@@ -8932,8 +8932,18 @@ def test_http_phase_c_blocklist(staging_dir: Path, proc=None):
     r = get(b"/v1/blocklist/counts")
     if "200 OK" not in status(r):
         raise TestFailure(f"pre-flight GET counts: expected 200, got {status(r)!r}")
-    if '"total":0' not in body_of(r).replace(" ", ""):
+    pre_flight_body = body_of(r).replace(" ", "")
+    if '"total":0' not in pre_flight_body:
         raise TestFailure(f"pre-flight counts.total should be 0, got {body_of(r)!r}")
+    # Empty by_source must wire as JSON `{}`, not `[]`. dkjson's
+    # default for a Lua table with no string keys is array; the
+    # plugin forces `__jsontype = "object"` so callers with typed
+    # decoders don't break on fresh installs.
+    if '"by_source":{}' not in pre_flight_body:
+        raise TestFailure(
+            f"pre-flight counts.by_source should wire as JSON object "
+            f"`{{}}` (not array `[]`) on empty store; body={body_of(r)!r}"
+        )
 
     # 2. Anonymous POST -> 401
     anon_body = b'{"cidr":"10.0.0.0/8"}'

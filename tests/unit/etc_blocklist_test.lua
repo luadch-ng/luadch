@@ -648,7 +648,9 @@ do
     eq( "http: POST source type",   post_schema.source.type,     "string" )
     truthy( "http: POST source has enum", post_schema.source.enum )
     eq( "http: POST expires_at type", post_schema.expires_at.type, "integer" )
-    eq( "http: POST expires_at min",  post_schema.expires_at.min,  0 )
+    -- min=1 rejects the epoch-0 UX trap; callers wanting a
+    -- permanent entry omit the field.
+    eq( "http: POST expires_at min",  post_schema.expires_at.min,  1 )
 end
 
 ----------------------------------------------------------------------
@@ -715,6 +717,19 @@ do
     eq( "create: engine entry expires_at",
         _entries[ 1 ].expires_at, 2000000000 )
 
+    -- Audit meta records the synthetic master attribution so an
+    -- audit-log reader can tell HTTP-token creations apart from
+    -- ADC-master creations (both share by_nick shape but only the
+    -- HTTP path carries by_level=100 in meta by construction).
+    local last_audit = _audit_fired[ #_audit_fired ]
+    truthy( "create: audit event fired", last_audit )
+    eq( "create: audit action=blocklist.add",
+        last_audit and last_audit.action, "blocklist.add" )
+    eq( "create: audit meta.by_level=100 for HTTP path",
+        last_audit and last_audit.meta and last_audit.meta.by_level, 100 )
+    eq( "create: audit actor.sid=<http>",
+        last_audit and last_audit.actor and last_audit.actor.sid, "<http>" )
+
     -- Missing cidr
     local resp2 = plugin._http_handler_create_entry{
         body = { }, token_label = "t",
@@ -766,16 +781,52 @@ do
 
     -- HTTP master-level bypasses ADC hierarchy: entry added by
     -- level 100 master can be removed by HTTP admin token even
-    -- though the token has no operator level.
+    -- though the token has no operator level. Paired with the
+    -- proof that the same entry BLOCKS an ADC-path delete from
+    -- a level-99 operator (the delta between the two calls IS
+    -- the HTTP bypass mechanism, not some unrelated code path).
     _entries = { }; _next_id = 1
     _G.blocklist.add( "1.2.3.0/24", {
         source = "manual", by_nick = "the_owner", by_level = 100 } )
+    local paired_id = _entries[ 1 ].id
+
+    -- Sanity: level-99 op via the ADC-path helper is REJECTED.
+    local ok_low, err_code_low = plugin._do_del_entry(
+        paired_id, "midop", 99 )
+    falsy( "delete: ADC-path level-99 blocked on level-100 entry", ok_low )
+    eq( "delete: hierarchy err_code on paired case",
+        err_code_low, "hierarchy" )
+
+    -- The entry is still there; HTTP path removes it.
     local resp4 = plugin._http_handler_delete_entry{
-        path_vars = { id = tostring( _entries[ 1 ].id ) },
+        path_vars = { id = tostring( paired_id ) },
         token_label = "http-worker",
     }
     eq( "delete: HTTP bypasses hierarchy on level-100 entry",
         resp4.status, 200 )
+end
+
+----------------------------------------------------------------------
+-- Filter spec shape: stealth as boolean_field (strict "true"/"false"
+-- semantics via http_filter), NOT a string_field with substring
+-- match. Guards against a regression to string-substring which would
+-- have `?stealth=tru` match true entries and `?stealth=xyz` silently
+-- return 200 with empty results (should be 400 E_BAD_INPUT).
+----------------------------------------------------------------------
+
+do
+    local spec = plugin._list_filter_spec
+    truthy( "filter: has boolean_fields.stealth",
+        spec.boolean_fields and spec.boolean_fields.stealth )
+    falsy(  "filter: stealth NOT in string_fields",
+        spec.string_fields and spec.string_fields.stealth )
+    -- Boolean getter returns actual bool, not the "true"/"false"
+    -- string a string_field getter would return.
+    local getter = spec.boolean_fields.stealth
+    eq( "filter: stealth getter returns real bool (true)",
+        getter{ stealth = true }, true )
+    eq( "filter: stealth getter returns real bool (false)",
+        getter{ stealth = false }, false )
 end
 
 ----------------------------------------------------------------------
