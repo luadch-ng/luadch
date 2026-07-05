@@ -30,10 +30,12 @@
                                       byte stripping applied to
                                       every string field
 
-    Phase C will add the matching HTTP API surface (GET/POST/DELETE
-    /v1/blocklist + GET /v1/blocklist/counts) sharing the
-    do_add / do_del / do_export / do_import helpers below; designed
-    so the HTTP path is purely additive in a follow-up PR.
+    Phase C shipped in v0.02 adds four HTTP endpoints alongside the
+    ADC surface: GET /v1/blocklist (list + filter/sort/paginate),
+    GET /v1/blocklist/counts (summary), POST /v1/blocklist (add),
+    DELETE /v1/blocklist/{id} (remove). HTTP handlers bypass the
+    ADC hierarchy guard - the admin token IS the trust surface, so
+    a token can undo any entry regardless of who added it.
 
     Hierarchy guard: a level-N operator cannot remove an entry
     added by a level-(N+) master. The entry's `by_level` field,
@@ -53,7 +55,7 @@
 --------------
 
 local scriptname    = "etc_blocklist"
-local scriptversion = "0.01"
+local scriptversion = "0.02"
 
 local cmd_main = "blocklist"
 
@@ -91,6 +93,10 @@ local string_format  = string.format
 --// loads if dkjson is unavailable (e.g. operator stripped the
 --// optional lib); the JSONL verbs degrade to error replies.
 local json = dkjson
+
+--// http_filter (core/http_filter.lua): shared filter+sort+
+--// paginate helper for HTTP list endpoints (#264). Sandbox
+--// global; always available at plugin runtime.
 
 
 --// lang
@@ -672,6 +678,271 @@ local function on_blocklist( user, command, parameters )
 end
 
 
+-------------------
+--[HTTP HANDLERS]--
+-------------------
+-- #78 Phase C: HTTP API mirrors the ADC surface via the four
+-- endpoints below. Registered via raw `hub.http_register`
+-- (NOT `util_http.http_register_user_action`) because a blocklist
+-- entry's identity is a CIDR / integer id, not a user SID -
+-- `util_http`'s SID preflight would not apply.
+--
+-- HTTP admin-token requests do NOT carry an operator level (only
+-- a token label). The plan's §1a.6 line "POST source=geoip from
+-- admin token: ALLOW (token IS the gate)" locks the trust model:
+-- the token is a policy-fully-trusted actor. Concretely, the
+-- HTTP path skips Phase B's `do_del_entry` hierarchy guard by
+-- passing a synthetic `actor_level = 100` (master) so a token
+-- can undo ANY entry regardless of who added it. Operators who
+-- want tighter control on HTTP-driven removes gate at the
+-- token-scope layer, not the entry-level layer.
+
+-- Precomputed enum-set of accepted `source` values on POST.
+-- Kept in sync with core/blocklist.lua's `_SOURCE_PRIORITY`
+-- table. Adding a new source (Phase D/E/F) means updating BOTH
+-- here (the wire schema) and the priority table (the runtime
+-- decision).
+local _SOURCE_ENUM = { "manual", "geoip", "external",
+    "proxycheck", "ipqs", "vpnapi" }
+
+-- #264 filter/sort spec for GET /v1/blocklist. All rows are
+-- pre-listed via blocklist.list() so http_filter sees a stable
+-- shape; there's no lazy-projection layer between engine and
+-- HTTP wire.
+local _list_filter_spec = {
+    string_fields = {
+        source  = function( e ) return e.source  or "" end,
+        by_nick = function( e ) return e.by_nick or "" end,
+        reason  = function( e ) return e.reason  or "" end,
+        -- cidr as substring-match string field per cmd_ban
+        -- convention (bans use `nick`/`cid`/`ip` as string
+        -- fields, not `nick_contains` etc). An operator typing
+        -- `?cidr=192.0.2` narrows to that subnet family without
+        -- reasoning about buckets.
+        cidr    = function( e ) return e.cidr or "" end,
+    },
+    boolean_fields = {
+        -- Strict boolean-typed field: query must be literal
+        -- "true" / "false" (not substring). Wrong value ->
+        -- 400 E_BAD_INPUT from http_filter directly, saving
+        -- operator debug cycles vs an empty-200 silent-drop
+        -- if we modelled this as a string-substring field.
+        stealth = function( e ) return e.stealth and true or false end,
+    },
+    integer_fields = {
+        by_level   = function( e ) return tonumber( e.by_level ) or 0 end,
+        created_at = function( e ) return tonumber( e.created_at ) or 0 end,
+        -- expires_at as integer supports both point-in-time
+        -- filtering (`?expires_at=1735689600`) and range
+        -- (`?expires_at_min=...&expires_at_max=...`) per
+        -- http_filter's integer-field default.
+        expires_at = function( e ) return tonumber( e.expires_at ) or 0 end,
+    },
+    sortable_fields = {
+        id         = function( e ) return tonumber( e.id ) or 0  end,
+        cidr       = function( e ) return e.cidr or ""            end,
+        source     = function( e ) return e.source or ""          end,
+        created_at = function( e ) return tonumber( e.created_at ) or 0 end,
+        expires_at = function( e ) return tonumber( e.expires_at ) or 0 end,
+    },
+    default_sort_field      = "id",
+    default_sort_descending = false,
+}
+
+-- Format a blocklist entry for wire output. `list()` already
+-- returns a copy of the entry with a shallow-copied meta table -
+-- we just rebrand the fields in the wire-canonical order and
+-- drop internals (network_bytes, _network_b64, family). meta is
+-- forwarded verbatim so future Phase D/E/F sources can surface
+-- their per-source metadata (country code, feed name, api
+-- provider, ...) through the same envelope.
+local function _format_entry_for_wire( e )
+    return {
+        id         = e.id,
+        cidr       = e.cidr,
+        source     = e.source,
+        stealth    = e.stealth and true or false,
+        reason     = e.reason or "",
+        by_nick    = e.by_nick or "",
+        by_level   = e.by_level,
+        expires_at = e.expires_at,
+        created_at = e.created_at,
+        meta       = e.meta,
+    }
+end
+
+
+local http_handler_list_entries = function( req )
+    local raw = blocklist.list( )    -- full snapshot; no filter here
+    local entries = { }
+    for _, e in ipairs( raw ) do
+        entries[ #entries + 1 ] = _format_entry_for_wire( e )
+    end
+    local ok, rows, code, msg = http_filter.apply(
+        req.query or { }, _list_filter_spec, entries )
+    if not ok then
+        return { status = rows, error = { code = code, message = msg } }
+    end
+    local pagination = code
+    local wire = json.encode{
+        ok         = true,
+        data       = { entries = rows },
+        pagination = pagination,
+    }
+    return { status = 200, raw_body = wire,
+        content_type = "application/json; charset=utf-8" }
+end
+
+
+local http_handler_get_counts = function( req )
+    -- blocklist.count() returns { total, by_source = {...} }.
+    -- Surface as-is; the shape is already prometheus-friendly
+    -- (flat integer scalar + per-source integer map).
+    --
+    -- dkjson would emit an EMPTY Lua table as JSON array `[]`
+    -- (its default for tables with no string keys). Callers with
+    -- typed decoders reading `by_source` as an object would break
+    -- on a fresh install. Force object shape via dkjson's
+    -- __jsontype hint so the empty case wires as `{}`.
+    local c = blocklist.count( )
+    setmetatable( c.by_source, { __jsontype = "object" } )
+    return { status = 200, data = c }
+end
+
+
+local http_handler_create_entry = function( req )
+    local body = req.body or { }
+    local cidr = body.cidr
+    if type( cidr ) ~= "string" or cidr == "" then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "missing or empty `cidr` field" } }
+    end
+    cidr = util_strip( cidr )
+    local reason = body.reason
+    if reason then reason = util_strip( reason ) end
+    local source = body.source or "manual"
+    local stealth = body.stealth and true or false
+    local expires_at = body.expires_at    -- schema-forced number|nil
+
+    local actor_label = util_strip( req.token_label or "http-api" )
+
+    -- Call blocklist.add directly (bypassing the ADC-oriented
+    -- `do_add_entry` helper) because HTTP callers supply all
+    -- fields we need in one shot - `source`, `stealth`, `reason`,
+    -- and a raw `expires_at` unix ts (not the ADC's YYYY-MM-DD
+    -- date string). Going straight to the engine avoids a
+    -- remove-then-re-add dance to override defaults set by
+    -- do_add_entry, and keeps do_add_entry as the ADC-specific
+    -- convenience wrapper (source=manual, expires date parsing).
+    --
+    -- HTTP admin-token trust model: `by_level = 100` (master) so
+    -- a subsequent DELETE by the same token bypasses Phase B's
+    -- hierarchy guard. Documented in the header block.
+    local ok, id, engine_err = blocklist.add( cidr, {
+        source     = source,
+        stealth    = stealth,
+        reason     = reason,
+        by_nick    = actor_label,
+        by_level   = 100,
+        expires_at = expires_at,
+    } )
+    if not ok then
+        local err_s = tostring( engine_err or "" )
+        -- Save-failure (disk I/O / permission) is a server-side
+        -- condition, not caller input; map to 500 E_INTERNAL per
+        -- HTTP_API.md envelope convention. Everything else is a
+        -- caller-input rejection (bad CIDR, host-bits-set, etc).
+        local status, code
+        if err_s:find( "^save failed" ) then
+            status, code = 500, "E_INTERNAL"
+        else
+            status, code = 400, "E_BAD_INPUT"
+        end
+        return { status = status, error = {
+            code = code, message = err_s ~= "" and err_s or "add failed",
+        } }
+    end
+    -- Reason may have gone in nil; ADC-path lang literal
+    -- surfaces "" for empty. Mirror it on the HTTP `msg` used
+    -- for the opchat + audit trail so operator-facing output
+    -- stays consistent between the two entry paths.
+    local stealth_label = stealth and "yes" or "no"
+    local msg = utf_format( msg_added,
+        actor_label, id, cidr, source, stealth_label )
+    if report then
+        report.send( report_activate, report_hubbot, report_opchat,
+            report_llevel, msg )
+    end
+    audit.fire( audit.build( "blocklist.add",
+        { nick = actor_label, sid = "<http>" }, nil, reason, {
+            cidr     = cidr,
+            source   = source,
+            stealth  = stealth,
+            id       = id,
+            -- Record the synthetic master attribution so an
+            -- operator reading the audit trail can distinguish
+            -- HTTP-token-created entries from ADC-master-created
+            -- ones; ADC path fires this same event with no
+            -- by_level in meta (the actor's real level lives on
+            -- the actor snapshot).
+            by_level = 100,
+        } ) )
+    return { status = 201, data = {
+        action = "added",
+        id     = id,
+        cidr   = cidr,
+        source = source,
+    } }
+end
+
+
+local http_handler_delete_entry = function( req )
+    local id_str = req.path_vars and req.path_vars.id
+    local id = tonumber( id_str )
+    if not id or id < 1 or id ~= math.floor( id ) then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "invalid {id} - must be a positive integer" } }
+    end
+    local actor_label = util_strip( req.token_label or "http-api" )
+    -- Level 100 (master) → hierarchy guard passes for any entry.
+    local ok, payload, msg = do_del_entry( id, actor_label, 100 )
+    if not ok then
+        local err_code = payload
+        local status = err_code == "not_found" and 404 or 400
+        return { status = status, error = {
+            code = err_code == "not_found" and "E_NOT_FOUND" or "E_BAD_INPUT",
+            message = msg,
+        } }
+    end
+    local entry = payload
+    if report then
+        report.send( report_activate, report_hubbot, report_opchat,
+            report_llevel, msg )
+    end
+    audit.fire( audit.build( "blocklist.remove",
+        { nick = actor_label, sid = "<http>" }, nil, entry.reason, {
+            id     = id,
+            cidr   = entry.cidr,
+            source = entry.source,
+        } ) )
+    -- Defence-in-depth control-byte strip on the wire response.
+    -- Every ingest path (ADC add, JSONL import) already strips at
+    -- insertion time, so entries in the store are clean; the
+    -- strip here guards against future ingest paths that skip
+    -- the sanitisation.
+    return { status = 200, data = {
+        action  = "removed",
+        id      = id,
+        removed = {
+            cidr    = util_strip( entry.cidr or "" ),
+            source  = util_strip( entry.source or "" ),
+            reason  = util_strip( entry.reason or "" ),
+            by_nick = util_strip( entry.by_nick or "" ),
+        },
+    } }
+end
+
+
 -----------------
 --[LIFECYCLE ]--
 -----------------
@@ -701,6 +972,65 @@ hub.setlistener( "onStart", { },
         assert( hubcmd )
         assert( hubcmd.add( cmd_main, on_blocklist ) )
 
+        -- #78 Phase C HTTP API. Raw hub.http_register (target is
+        -- CIDR / id, not SID; util_http.http_register_user_action
+        -- does not apply). Schema field names use the `min`/`max`
+        -- convention (#277 catch, not `minimum`/`maximum`).
+        if hub.http_register then
+            hub.http_register( "GET", "/v1/blocklist", "read",
+                http_handler_list_entries, {
+                    plugin = scriptname,
+                    description = "list blocklist entries (= ADC `+blocklist show`); supports filter (source, stealth, cidr_contains, reason_contains, by_nick, by_level, created_at, expires_at) + sort + pagination via the standard http_filter convention",
+                    response_schema = {
+                        entries = { type = "array", required = true },
+                    },
+                } )
+            hub.http_register( "GET", "/v1/blocklist/counts", "read",
+                http_handler_get_counts, {
+                    plugin = scriptname,
+                    description = "counts summary (= ADC `+blocklist count`); prometheus + WebUI dashboard friendly",
+                    response_schema = {
+                        total     = { type = "integer", required = true },
+                        by_source = { type = "object",  required = true },
+                    },
+                } )
+            hub.http_register( "POST", "/v1/blocklist", "admin",
+                http_handler_create_entry, {
+                    plugin = scriptname,
+                    description = "add a blocklist entry (= ADC `+blocklist add`); body `{cidr, stealth?, source?, reason?, expires_at?}`. source enum locks to the Phase-A priority set; expires_at is a unix timestamp (integer). CIDRs with host bits set are rejected (`1.2.3.4/24` -> use `1.2.3.0/24`).",
+                    request_schema = {
+                        cidr    = { type = "string",  required = true,  max_length = 45 },
+                        stealth = { type = "boolean", required = false },
+                        source  = { type = "string",  required = false, enum = _SOURCE_ENUM },
+                        reason  = { type = "string",  required = false, max_length = 256 },
+                        -- 2^31 = 2038-01-19; well beyond current
+                        -- cfg horizons and fits in Lua 5.4 int on
+                        -- any platform. `min = 1` bans the epoch
+                        -- 0 UX trap (immediately-expired entry);
+                        -- callers wanting permanent entries omit
+                        -- the field.
+                        expires_at = { type = "integer", required = false,
+                            min = 1, max = 2147483647 },
+                    },
+                    response_schema = {
+                        action = { type = "string",  required = true },
+                        id     = { type = "integer", required = true },
+                        cidr   = { type = "string",  required = true },
+                        source = { type = "string",  required = true },
+                    },
+                } )
+            hub.http_register( "DELETE", "/v1/blocklist/{id}", "admin",
+                http_handler_delete_entry, {
+                    plugin = scriptname,
+                    description = "remove a blocklist entry by numeric id (= ADC `+blocklist del <id>`). Ids are stable across the store lifetime (assigned monotonically); a re-add gets a fresh id. HTTP admin tokens bypass the ADC-side hierarchy guard - the token is the trust surface.",
+                    response_schema = {
+                        action  = { type = "string",  required = true },
+                        id      = { type = "integer", required = true },
+                        removed = { type = "object",  required = true },
+                    },
+                } )
+        end
+
         return nil
     end
 )
@@ -710,11 +1040,17 @@ hub_debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
 
 --// expose internals for unit tests
 return {
-    _parse_add_args      = parse_add_args,
-    _parse_expires_date  = parse_expires_date,
-    _do_add_entry        = do_add_entry,
-    _do_del_entry        = do_del_entry,
-    _sanitize_import_row = _sanitize_import_row,
-    _format_show         = format_show,
-    _format_count        = format_count,
+    _parse_add_args             = parse_add_args,
+    _parse_expires_date         = parse_expires_date,
+    _do_add_entry               = do_add_entry,
+    _do_del_entry               = do_del_entry,
+    _sanitize_import_row        = _sanitize_import_row,
+    _format_show                = format_show,
+    _format_count               = format_count,
+    _http_handler_list_entries  = http_handler_list_entries,
+    _http_handler_get_counts    = http_handler_get_counts,
+    _http_handler_create_entry  = http_handler_create_entry,
+    _http_handler_delete_entry  = http_handler_delete_entry,
+    _list_filter_spec           = _list_filter_spec,
+    _SOURCE_ENUM                = _SOURCE_ENUM,
 }

@@ -590,13 +590,37 @@ all plugin-owned state in one place. `+reload` re-snapshots the
 cfg keys (`blocklist_enabled`, `blocklist_stealth_default`,
 `blocklist_aggregated_log_window_sec`) and re-reads the .tbl.
 
-**Tradeoffs.** This plugin only ships the admin CLI; the HTTP
-API surface (`GET / POST / DELETE /v1/blocklist`) lands in Phase
-C. JSONL export/import is the cross-hub sync path until then.
-Importing the same file twice creates duplicate entries (no
-dedup on cidr alone, since (cidr, source) is the engine's
-identity tuple); operators rely on the `+blocklist show` id +
-manual `+blocklist del` for cleanup.
+**HTTP API surface (v0.02 / Phase C).** Four endpoints alongside
+the ADC verbs, all documented in `docs/HTTP_API.md`:
+
+- `GET /v1/blocklist` (read) - list with filter/sort/pagination
+  via the shared `http_filter` convention. Query params include
+  `source`, `stealth`, `cidr_contains`, `reason_contains`,
+  `by_nick`, and range-filters on `by_level` / `created_at` /
+  `expires_at`.
+- `GET /v1/blocklist/counts` (read) - `{total, by_source}` for
+  prometheus + dashboard use.
+- `POST /v1/blocklist` (admin) - body `{cidr, source?, stealth?,
+  reason?, expires_at?}`. `source` enum-locked; `expires_at` is a
+  unix timestamp integer (HTTP path skips the ADC-side
+  `YYYY-MM-DD` date parsing).
+- `DELETE /v1/blocklist/{id}` (admin) - stable numeric ids from
+  GET; unlike `/v1/bans/{id}` these do NOT shift on removal.
+
+HTTP admin tokens bypass the ADC-side hierarchy guard: the token
+is the trust surface, so a token can undo any entry regardless
+of who added it. Entries created via HTTP are attributed with
+`by_nick = <token label>` and `by_level = 100` (synthetic
+master).
+
+**Tradeoffs.** JSONL export/import remains the cross-hub sync
+path (dedicated GET `/v1/blocklist/export` for bulk snapshots is
+NOT provided; use GET /v1/blocklist with pagination if a caller
+wants machine-readable batches). Importing the same JSONL twice
+creates duplicate entries (no dedup on cidr alone, since (cidr,
+source) is the engine's identity tuple); operators rely on the
+`+blocklist show` id + `+blocklist del` (or the DELETE endpoint)
+for cleanup.
 
 **Upgrading from a pre-Phase-B hub.** `cfg.scripts` is
 replace-not-merge - an operator with a `cfg.tbl` predating this
