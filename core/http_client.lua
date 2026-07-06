@@ -13,13 +13,14 @@
     untouched.
 
     Latency note: the timer fires ~once per second, so each I/O step
-    that must WAIT (connect-completion, more-data) costs up to ~1s.
-    Each tick makes maximal progress (drains all available bytes,
-    finishes any non-blocking write) and only yields when it would
-    block. A small request to a reachable host typically completes in
-    1-3 ticks. This is intended for BACKGROUND outbound (hublist
-    announce, webhooks) where a few seconds of latency is irrelevant -
-    NOT for anything on a user-facing request path.
+    that must WAIT (connect-completion, more-data) costs up to ~1s. The
+    RAM path reads one chunk per tick and yields, so a small response
+    completes in 1-3 ticks (it is sized for small BACKGROUND outbound -
+    hublist announce, webhooks - where a few seconds of latency is
+    irrelevant, NOT a user-facing path). Stream-to-disk mode instead
+    drains up to a per-tick budget before yielding so a multi-MB feed
+    completes in a bounded number of ticks rather than at one chunk per
+    tick (see DOWNLOAD_TICK_BUDGET).
 
     Security / trust model:
       - Plugins are trusted (docs/SECURITY.md s2); `socket` + `ssl`
@@ -51,11 +52,43 @@
           max_response = 65536,        -- response byte cap (default 64 KiB)
           verify      = "peer",        -- "peer" (default) | "none" (TLS only)
           cafile      = "certs/ca-bundle.pem", -- CA bundle path; default = bundled
+          download_to_file = "cfg/feed.json", -- optional: stream the body
+                                       -- to this path instead of RAM (see below)
           on_complete = function( res ) end,  -- res = { status, headers, body }
           on_error    = function( err ) end,  -- err = string
       }
       Returns true if the request was queued, or (false, err) if it
       was rejected synchronously (bad url / in-flight cap reached).
+
+    Stream-to-disk mode (Precursor 0a of the #78 blocklist arc):
+    pass download_to_file = "<path>" to write the response BODY straight
+    to that file instead of buffering it in RAM. This lifts the response
+    size from the 1 MiB RAM ceiling to a 50 MiB on-disk ceiling for
+    large external feeds. In this mode:
+      - only a 2xx response is written; a non-2xx status FAILS the
+        request (on_error) and leaves any existing file untouched, so a
+        404 / 500 error page never clobbers the last good feed file.
+      - a `Transfer-Encoding: chunked` response is REJECTED (we do not
+        de-chunk; writing the chunk framing would corrupt the file). Use
+        an endpoint that serves a plain body with Content-Length.
+      - when the response carries a Content-Length, a short read (server
+        closed mid-body) is reported as a truncation and NOT committed.
+      - the body is written to "<path>.tmp" and renamed onto "<path>"
+        only after a complete, in-cap download (atomic on POSIX; on
+        Windows a move-aside-and-rollback via "<path>.bak" keeps the last
+        good file if the swap fails). A failed or partial download removes
+        the temp and never replaces the file. Concurrent downloads to the
+        same path are refused (the second request returns (false, err)).
+        The module owns the "<path>.tmp" and "<path>.bak" siblings - do
+        not point download_to_file at a path whose .tmp/.bak you rely on.
+      - `max_response` does NOT apply; the body cap is MAX_DOWNLOAD_CEIL.
+      - on_complete receives res = { status, headers,
+        downloaded_path = "<path>", downloaded_bytes = N } and res.body
+        is nil (the bytes are on disk, not in RAM).
+      - throughput is bounded by the timer cadence (see the latency note
+        above); pass a generous `timeout` for large feeds.
+    The caller owns the path (same trust model as the URL - do NOT
+    derive it from untrusted input).
 
 ]]--
 
@@ -73,6 +106,7 @@ local socket    = use "socket"
 local ssl       = use "ssl"
 local out       = use "out"
 local io        = use "io"
+local os        = use "os"
 local coroutine = use "coroutine"
 
 local coroutine_create = coroutine.create
@@ -81,9 +115,12 @@ local string_match     = string.match
 local string_lower     = string.lower
 local string_len       = string.len
 local string_find      = string.find
+local string_sub       = string.sub
 local table_concat     = table.concat
 local socket_gettime   = socket.gettime
 local io_open          = io.open
+local os_remove        = os.remove
+local os_rename        = os.rename
 local out_put          = out.put
 local out_error        = out.error
 
@@ -111,7 +148,34 @@ local DEFAULT_VERIFY    = "peer"
 local DEFAULT_CAFILE    = "certs/ca-bundle.pem"
 local READ_CHUNK        = 16 * 1024
 
+-- // stream-to-disk download mode (Precursor 0a of #78 arc) //
+-- A caller passing download_to_file streams the response BODY straight
+-- to a file instead of buffering it in RAM, so feeds far larger than
+-- MAX_RESP_CEIL (e.g. AbuseIPDB ships a ~10 MB JSON blacklist) can be
+-- fetched in-hub without RAM pressure. The body is bounded by
+-- MAX_DOWNLOAD_CEIL; the response HEADERS are still buffered in RAM (to
+-- find the header/body boundary + parse the status line) and bounded
+-- SEPARATELY by MAX_HEADER_SIZE, so a server that never sends the
+-- \r\n\r\n terminator cannot grow the RAM buffer without limit.
+local MAX_DOWNLOAD_CEIL = 50 * 1024 * 1024   -- body cap for download_to_file mode
+local MAX_HEADER_SIZE   = 64 * 1024          -- response-header cap (download mode)
+-- Bytes the download loop may drain per timer resume before it yields.
+-- The hub timer resumes a background coroutine at most ~once per second
+-- (core/server.lua), so yielding after every 16 KiB READ_CHUNK (what the
+-- RAM path does) would cap a download at ~16 KiB/s and make a multi-MB
+-- feed time out. Instead the download loop keeps reading while the socket
+-- still has a full chunk buffered and only yields when the socket would
+-- block OR this budget is reached - so effective throughput rises to
+-- roughly the socket-buffer refill per tick, while a fast/local peer that
+-- can refill the buffer indefinitely still cannot pin the single hub
+-- thread for more than one budget's worth of work per tick.
+local DOWNLOAD_TICK_BUDGET = 1024 * 1024
+
 local _inflight = 0
+-- final paths with a download in flight; guards against two concurrent
+-- download_to_file requests writing/renaming the same target (their
+-- shared <path>.tmp would otherwise interleave into a corrupt file).
+local _dl_active = { }
 
 -- Reject CR/LF (and other control bytes) in any value that gets
 -- interpolated into the request line / headers - otherwise a caller
@@ -221,6 +285,208 @@ local function safe_cb( fn, arg )
     end
 end
 
+-- Receive an HTTP response and stream its BODY into the open file
+-- handle `f` (download_to_file mode).
+--
+-- Two phases in one loop:
+--   header phase - accumulate bytes in RAM until the \r\n\r\n terminator
+--     is seen (the header portion is bounded by max_head), then parse the
+--     status line + headers. The terminator may straddle a read boundary,
+--     so we search the whole accumulated buffer, not the latest chunk.
+--   body phase   - write every subsequent byte straight to `f`, counting
+--     toward max_body.
+--
+-- Integrity: only a 2xx response is accepted (a non-2xx status returns an
+-- error BEFORE any byte is written, so the caller leaves the last good
+-- file in place); a `Transfer-Encoding: chunked` response is rejected
+-- (we do not de-chunk, and writing the chunk framing would silently
+-- corrupt the file); and when the response carries a Content-Length a
+-- short read (server closed mid-body) is reported as a truncation rather
+-- than committed. A response with neither Content-Length nor chunked is
+-- close-delimited and EOF is taken as complete (best effort - that is all
+-- the framing offers).
+--
+-- Throughput: the loop keeps reading while the socket still hands back a
+-- full chunk and only yields when the socket would block or the per-tick
+-- DOWNLOAD_TICK_BUDGET is reached; see the constant for why.
+--
+-- Returns:
+--   true, res, body_bytes   on success (res = { status, headers },
+--                           res.body = nil)
+--   false, err              on any handled failure
+-- Does NOT close `f` / the socket and does NOT rename - the caller
+-- (stream_to_file) owns those so cleanup is guaranteed on every path.
+local function stream_transfer( sock, expired, f, max_body, max_head, tick_budget )
+    max_body     = max_body or MAX_DOWNLOAD_CEIL
+    max_head     = max_head or MAX_HEADER_SIZE
+    tick_budget  = tick_budget or DOWNLOAD_TICK_BUDGET
+
+    local head_buf = {}
+    local head_done = false
+    local res
+    local body_bytes = 0
+    local expected_len          -- Content-Length, or nil (close-delimited)
+    local tick_bytes = 0        -- bytes drained since the last yield
+
+    local function write_body( piece )
+        body_bytes = body_bytes + string_len( piece )
+        if body_bytes > max_body then
+            return false, "download exceeds " .. max_body .. " byte cap"
+        end
+        local wok, werr = f:write( piece )
+        if not wok then return false, "file write failed: " .. tostring( werr ) end
+        return true
+    end
+
+    while true do
+        if expired( ) then
+            return false, head_done and "read timeout (body)" or "read timeout (headers)"
+        end
+        local data, rerr, partial = sock:receive( READ_CHUNK )
+        local piece = data or partial
+        if piece and piece ~= "" then
+            tick_bytes = tick_bytes + string_len( piece )
+            if not head_done then
+                head_buf[ #head_buf + 1 ] = piece
+                local joined = table_concat( head_buf )
+                local _, he = string_find( joined, "\r\n\r\n", 1, true )
+                if he then
+                    -- header portion is `he` bytes (incl. the terminator);
+                    -- body bytes past it do NOT count against the header cap
+                    if he > max_head then
+                        return false, "response headers exceed " .. max_head .. " byte cap"
+                    end
+                    head_done = true
+                    res = parse_response( string_sub( joined, 1, he ) )
+                    res.body = nil
+                    local st = res.status
+                    if type( st ) ~= "number" or st < 200 or st > 299 then
+                        return false, "server returned HTTP status " .. tostring( st )
+                    end
+                    local te = res.headers[ "transfer-encoding" ]
+                    if te and string_find( string_lower( te ), "chunked", 1, true ) then
+                        return false, "chunked transfer-encoding not supported in download mode"
+                    end
+                    local cl = tonumber( res.headers[ "content-length" ] )
+                    if cl and cl >= 0 then expected_len = cl end
+                    local leftover = string_sub( joined, he + 1 )
+                    if leftover ~= "" then
+                        local wok, werr = write_body( leftover )
+                        if not wok then return false, werr end
+                    end
+                elseif #joined > max_head then
+                    -- still accumulating headers and already over the cap
+                    return false, "response headers exceed " .. max_head .. " byte cap"
+                end
+            else
+                local wok, werr = write_body( piece )
+                if not wok then return false, werr end
+            end
+        end
+        if rerr == "closed" then
+            if not head_done then
+                return false, "connection closed before response headers were complete"
+            end
+            if expected_len and body_bytes ~= expected_len then
+                return false, "truncated download: got " .. body_bytes ..
+                    " of " .. expected_len .. " body bytes"
+            end
+            break    -- EOF: complete body received
+        elseif rerr == nil then
+            -- a full READ_CHUNK was read and more may be buffered. Keep
+            -- draining within this tick until the per-tick budget is hit,
+            -- THEN yield - so a multi-MB feed finishes in a bounded number
+            -- of 1 Hz timer ticks instead of at 16 KiB/tick, while a peer
+            -- that can refill the buffer indefinitely (loopback) cannot
+            -- pin the hub thread for more than one budget's work per tick.
+            if tick_bytes >= tick_budget then
+                tick_bytes = 0
+                coroutine_yield( )
+            end
+        elseif rerr == "wantread" or rerr == "wantwrite" or rerr == "timeout" then
+            -- socket has nothing more buffered right now: yield and let the
+            -- timer resume us (with a fresh budget) once data has arrived
+            tick_bytes = 0
+            coroutine_yield( )
+        else
+            return false, "read failed: " .. tostring( rerr )
+        end
+    end
+
+    return true, res, body_bytes
+end
+
+-- Wrap stream_transfer with the file lifecycle: open <path>.tmp, run the
+-- transfer under pcall (a leaked file handle keeps a lock on the temp on
+-- Windows and blocks the cleanup remove), then close + rename on success
+-- or close + remove on any failure. Concurrent downloads to the same
+-- final path are refused up front in request(), so the fixed .tmp name is
+-- collision-free.
+local function stream_to_file( sock, req, expired )
+    local final_path = req.download_to_file
+    local tmp_path   = final_path .. ".tmp"
+    local f, ferr = io_open( tmp_path, "wb" )
+    if not f then
+        sock:close( )
+        return false, "cannot open download temp '" .. tmp_path .. "': " .. tostring( ferr )
+    end
+
+    local pok, ok, res_or_err, nbytes = pcall( stream_transfer, sock, expired, f )
+
+    -- Always release the handle. A failed flush at close (e.g. the disk
+    -- filled and the last buffered bytes never landed) must FAIL the
+    -- download, not commit a silently-truncated file - so capture the
+    -- close result and treat it as a transfer failure below.
+    local cok, cerr = f:close( )
+    sock:close( )
+
+    if not pok then
+        os_remove( tmp_path )
+        return false, "download crashed: " .. tostring( ok )
+    end
+    if not ok then
+        os_remove( tmp_path )
+        return false, res_or_err
+    end
+    if not cok then
+        os_remove( tmp_path )
+        return false, "flushing download to '" .. tmp_path .. "' failed: " .. tostring( cerr )
+    end
+
+    -- Atomic move tmp -> final. POSIX rename replaces the target
+    -- atomically. Windows rename refuses an existing target, so we move
+    -- the current file aside first and roll it back if the swap then
+    -- fails (a transient AV / indexer lock on tmp must not lose the last
+    -- good file - the failure mode of a plain remove-then-rename).
+    local rok, rerr = os_rename( tmp_path, final_path )
+    if not rok then
+        local bak = final_path .. ".bak"
+        os_remove( bak )
+        local had_final = os_rename( final_path, bak )    -- nil if final absent
+        rok, rerr = os_rename( tmp_path, final_path )
+        if rok then
+            if had_final then os_remove( bak ) end
+        elseif had_final then
+            -- swap failed; put the previous file back. If even that fails
+            -- (final slot still locked) the good copy is stranded at .bak -
+            -- log it so the operator can recover it manually.
+            if not os_rename( bak, final_path ) then
+                out_error( "http_client: download swap for '", final_path,
+                    "' failed and the previous file could not be restored; ",
+                    "it is preserved at '", bak, "'" )
+            end
+        end
+    end
+    if not rok then
+        os_remove( tmp_path )
+        return false, "rename '" .. tmp_path .. "' -> '" .. final_path .. "' failed: " .. tostring( rerr )
+    end
+
+    res_or_err.downloaded_path  = final_path
+    res_or_err.downloaded_bytes = nbytes
+    return true, res_or_err
+end
+
 -- The non-blocking state machine, run inside a coroutine that yields
 -- back to the select loop between I/O steps. Never blocks.
 local function drive( req )
@@ -244,6 +510,17 @@ local function drive( req )
     end
     if not sock then return false, "socket create failed: " .. tostring( err ) end
     sock:settimeout( 0 )
+
+    -- Stream-to-disk downloads are drained at most once per ~1 s timer
+    -- tick, so throughput is bounded by how much the OS buffers between
+    -- ticks. Ask for a larger receive buffer up front (before connect, so
+    -- window scaling can use it) to raise that per-tick ceiling toward the
+    -- drain budget. Best-effort: the OS may clamp it and setoption is only
+    -- valid on the plain socket, so wrap it - a failure only means the
+    -- default (smaller) buffer, i.e. a slower download, never incorrect.
+    if req.download_to_file then
+        pcall( function( ) sock:setoption( "recv-buffer-size", 4 * 1024 * 1024 ) end )
+    end
 
     -- // connect (non-blocking) //
     local ok
@@ -342,6 +619,11 @@ local function drive( req )
         end
     end
 
+    -- // receive: stream the body to disk, or accumulate in RAM //
+    if req.download_to_file then
+        return stream_to_file( sock, req, expired )
+    end
+
     -- // receive response (accumulate until close or cap) //
     local chunks = {}
     local got = 0
@@ -399,9 +681,20 @@ request = function( req )
             end
         end
     end
+    if req.download_to_file ~= nil then
+        if type( req.download_to_file ) ~= "string" or req.download_to_file == "" then
+            return false, "download_to_file must be a non-empty path string"
+        end
+        if has_ctrl( req.download_to_file ) then
+            return false, "download_to_file path contains control bytes"
+        end
+    end
 
     if _inflight >= MAX_INFLIGHT then
         return false, "http_client: in-flight cap (" .. MAX_INFLIGHT .. ") reached"
+    end
+    if req.download_to_file and _dl_active[ req.download_to_file ] then
+        return false, "http_client: a download to '" .. req.download_to_file .. "' is already in progress"
     end
 
     -- normalise + clamp
@@ -418,6 +711,7 @@ request = function( req )
     end
 
     _inflight = _inflight + 1
+    if req.download_to_file then _dl_active[ req.download_to_file ] = true end
     local co = coroutine_create( function( )
         -- pcall so a thrown error in drive() still decrements
         -- _inflight (otherwise a crash leaks an in-flight slot and,
@@ -426,6 +720,7 @@ request = function( req )
         -- handle them here.
         local pok, a, b = pcall( drive, req )
         _inflight = _inflight - 1
+        if req.download_to_file then _dl_active[ req.download_to_file ] = nil end
         if not pok then
             out_error( "http_client: request to ", tostring( req.url ), " crashed: ", tostring( a ) )
             safe_cb( req.on_error, "internal error" )
@@ -447,4 +742,6 @@ return {
     _build_request = build_request,
     _parse_response = parse_response,
     _has_ctrl      = has_ctrl,
+    _stream_transfer = stream_transfer,
+    _stream_to_file  = stream_to_file,
 }
