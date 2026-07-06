@@ -699,8 +699,12 @@ no further query. Clean verdicts are cached to
 provider error / timeout / spent quota the plugin **fails open** (allows
 the connection) unless `etc_proxydetect_fail_open = false`. Operators are
 exempt by default (`etc_proxydetect_check_levels`). Must sit AFTER
-`hub_inf_manager.lua` in `cfg.scripts`. Phase F1 ships the `proxycheck`
-provider; `vpnapi` + `ipqs` land in F2.
+`hub_inf_manager.lua` in `cfg.scripts`. Three providers: `proxycheck`
+(keyless-capable), `vpnapi`, and `ipqs` (both key-required). For `vpnapi`
+/ `ipqs` the key rides in the request URL, so the plugin passes a
+key-free `log_url` to keep it out of the hub's failure logs. A run of
+provider failures fires one op-chat alert
+(`etc_proxydetect_fail_alert_threshold`).
 
 **Command:**
 - `+proxydetect` - read-only status: provider, action mode, blocked
@@ -712,7 +716,8 @@ No write endpoint - the policy is cfg-driven.
 
 **Audit events:** `proxydetect.block` on every match (both modes, with
 `ip` / `provider` / `types` / `action` / `cached` meta),
-`proxydetect.query.fail` on a provider error / timeout.
+`proxydetect.query.fail` on a provider error / timeout,
+`proxydetect.provider.down` when failures cross the alert threshold.
 
 **Config keys:** `etc_proxydetect_enabled`, `etc_proxydetect_provider`,
 `etc_proxydetect_api_key` (prefer the `LUADCH_ETC_PROXYDETECT_API_KEY`
@@ -720,9 +725,9 @@ env var), `etc_proxydetect_action`, `etc_proxydetect_block_types`,
 `etc_proxydetect_check_levels`, `etc_proxydetect_cache_ttl_sec`,
 `etc_proxydetect_query_timeout_sec`, `etc_proxydetect_fail_open`,
 `etc_proxydetect_stealth`, `etc_proxydetect_max_queries_per_day`,
-`etc_proxydetect_kick_reason`, `etc_proxydetect_oplevel`,
-`etc_proxydetect_report[_hubbot|_opchat]`, `etc_proxydetect_llevel`. See
-[`BLOCKLIST.md`](BLOCKLIST.md) for the table.
+`etc_proxydetect_fail_alert_threshold`, `etc_proxydetect_kick_reason`,
+`etc_proxydetect_oplevel`, `etc_proxydetect_report[_hubbot|_opchat]`,
+`etc_proxydetect_llevel`. See [`BLOCKLIST.md`](BLOCKLIST.md) for the table.
 
 ### etc_clientblocker
 

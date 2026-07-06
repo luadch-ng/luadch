@@ -3100,9 +3100,10 @@ local defaults = {
         end
     },
 
-    -- Detection provider (pick ONE). "proxycheck" is implemented in
-    -- Phase F1; "vpnapi" + "ipqs" land in F2. See docs/BLOCKLIST.md for
-    -- the free-tier / commercial-use terms of each before enabling.
+    -- Detection provider (pick ONE): "proxycheck", "vpnapi", or "ipqs".
+    -- See docs/BLOCKLIST.md for the free-tier / commercial-use terms of
+    -- each before enabling - they differ sharply (vpnapi free = non-
+    -- commercial only; ipqs free = evaluation only, 1000/month).
     etc_proxydetect_provider = { "proxycheck",
         function( value )
             return value == "proxycheck" or value == "vpnapi" or value == "ipqs"
@@ -3131,7 +3132,10 @@ local defaults = {
     },
 
     -- Which detected types trigger a block (map of type -> boolean).
-    -- proxycheck reports proxy / vpn / tor. A detected type only counts
+    -- proxycheck / ipqs report proxy / vpn / tor; vpnapi additionally
+    -- reports "relay" (e.g. iCloud Private Relay) - deliberately left OUT
+    -- of the default so mainstream Apple users are not kicked; add
+    -- relay=true only to block privacy relays. A detected type counts only
     -- if it is present AND true here.
     etc_proxydetect_block_types = { {
         proxy = true,
@@ -3226,6 +3230,16 @@ local defaults = {
         function( value )
             return types_number( value, nil, true )
                 and value % 1 == 0 and value >= 0 and value <= 1000000
+        end
+    },
+
+    -- Op-chat alert threshold: this many provider failures within a 60s
+    -- window fires ONE alert (debounced until a success) so a down provider
+    -- or a bad API key does not silently degrade detection. 0 = disabled.
+    etc_proxydetect_fail_alert_threshold = { 10,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 0 and value <= 100000
         end
     },
 

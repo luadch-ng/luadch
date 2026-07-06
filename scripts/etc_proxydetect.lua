@@ -68,7 +68,7 @@
       arrived from that IP during the ~query window stay for their
       session; they are caught on their NEXT connection by the
       pre-handshake store block (block mode). log_only is the default, so
-      this is acceptable for F1; a kick-all-same-IP pass (enumerating
+      this is acceptable (best-effort); a kick-all-same-IP pass (enumerating
       online users) is a possible follow-up once the getusers()-at-connect
       timing is verified.
 
@@ -77,10 +77,13 @@
       positive cannot lock staff out.
 
     - PROVIDER T&C (surfaced to the operator at load + in docs/BLOCKLIST.md):
-        proxycheck.io - 1000 lookups/day free (100 keyless); commercial
-                        use on the free tier is NOT explicitly granted.
-      VPNAPI.io / IPQualityScore adapters (Phase F2) carry stricter
-      non-commercial / evaluation-only free-tier terms.
+        proxycheck.io   - 1000/day free (100 keyless); commercial use on
+                          the free tier is NOT explicitly granted.
+        VPNAPI.io       - 1000/day free, but PERSONAL / NON-COMMERCIAL only.
+        IPQualityScore  - 1000/MONTH free (35/day), EVALUATION only.
+      A run of provider failures fires one op-chat alert
+      (etc_proxydetect_fail_alert_threshold) so a down provider / bad key
+      does not degrade detection silently.
 
     Public surface (getters, NOT direct exports, to survive +reload
     rebinds - the #239 / #238 hazard):
@@ -98,7 +101,11 @@
 
     v0.01: by Aybo
         - initial implementation, Part of #78 (Phase F1: framework +
-          proxycheck.io adapter). VPNAPI.io + IPQS adapters land in F2.
+          proxycheck.io adapter).
+    v0.02: by Aybo
+        - Phase F2 (closes #352): VPNAPI.io + IPQualityScore adapters
+          (key kept out of the failure log via http_client `log_url`) +
+          op-chat alert on a run of provider failures.
 
 ]]--
 
@@ -108,7 +115,7 @@
 --------------
 
 local scriptname = "etc_proxydetect"
-local scriptversion = "0.01"
+local scriptversion = "0.02"
 
 local cmd_status = "proxydetect"
 
@@ -130,6 +137,11 @@ local MAX_CACHE_ENTRIES = 20000
 -- Rolling window for the daily query cap.
 local QUERY_WINDOW_SEC = 86400
 
+-- Rolling window (seconds) for the provider-failure alert: this many
+-- failures within the window fires ONE op-chat alert (debounced until a
+-- success), so ops learn the provider is down / the key is bad.
+local FAIL_ALERT_WINDOW = 60
+
 
 --// imports
 local scriptlang = cfg.get( "language" )
@@ -146,6 +158,7 @@ local query_timeout    = cfg.get( "etc_proxydetect_query_timeout_sec" ) or 5
 local fail_open        = cfg.get( "etc_proxydetect_fail_open" )
 local stealth          = cfg.get( "etc_proxydetect_stealth" )
 local max_per_day      = cfg.get( "etc_proxydetect_max_queries_per_day" ) or 1000
+local fail_alert_threshold = cfg.get( "etc_proxydetect_fail_alert_threshold" ) or 10
 local oplevel          = cfg.get( "etc_proxydetect_oplevel" ) or 80
 
 local report_activate  = cfg.get( "etc_proxydetect_report" )
@@ -184,6 +197,7 @@ local msg_provider_bad = lang.msg_provider_bad or "etc_proxydetect.lua: unknown 
 local msg_key_missing = lang.msg_key_missing  or "etc_proxydetect.lua: provider '%s' needs an API key (etc_proxydetect_api_key or LUADCH_ETC_PROXYDETECT_API_KEY) - the plugin is inert."
 local msg_tos_note    = lang.msg_tos_note     or "etc_proxydetect.lua: provider '%s' - review its free-tier terms (see docs/BLOCKLIST.md): %s."
 local msg_quota       = lang.msg_quota        or "etc_proxydetect.lua: daily query cap (%d) reached - skipping lookups (fail-open) until the window resets."
+local msg_fail_alert  = lang.msg_fail_alert   or "[ PROXYDETECT ]--> provider '%s' lookups failing: %d errors in %ds - detection is degraded (fail-%s)."
 
 -- +proxydetect status lines
 local msg_status_header   = lang.msg_status_header   or "\n=== PROXYDETECT STATUS ==="
@@ -224,6 +238,11 @@ local query_count = 0
 local query_window_start = 0
 local quota_warned = false
 
+-- Provider-failure alert bookkeeping (see FAIL_ALERT_WINDOW).
+local fail_count = 0
+local fail_window_start = 0
+local fail_alerted = false
+
 
 ------------------------------
 --[ PROVIDER ADAPTERS ]--
@@ -231,9 +250,13 @@ local quota_warned = false
 
 -- Each adapter owns its endpoint (fixed host - NOT operator-supplied,
 -- for SSRF), whether it needs a key, and how to turn a decoded JSON
--- body into a set of detected types. Phase F2 adds vpnapi + ipqs here.
+-- body into a set of detected types.
 --
---   build_url(ip, key) -> url          (ip is already SSRF-validated)
+--   build_request(ip, key) -> { url, method, headers, body, log_url }
+--       ip is already SSRF-validated. `log_url` is a KEY-FREE url that
+--       http_client logs in place of `url` on failure (Precursor F0), for
+--       providers that must carry the key in the url (vpnapi query string /
+--       ipqs path); proxycheck omits it (its key goes in the POST body).
 --   interpret(parsed, ip) -> types_table | nil, err
 --       types_table: { proxy=true, vpn=true, tor=true, ... } (empty = clean)
 --       nil + err:   the provider reported an error (bad key / quota /
@@ -291,6 +314,65 @@ local PROVIDERS = {
             local t = type( rec.type ) == "string" and rec.type:lower( ) or ""
             if t == "vpn" then types.vpn = true end
             if t == "tor" then types.tor = true end
+            return types
+        end,
+    },
+
+    vpnapi = {
+        source   = "vpnapi",
+        needs_key = true,     -- no keyless tier
+        tos      = "1000/day free, but the free tier is PERSONAL / NON-COMMERCIAL only - a public/community hub needs a paid plan",
+        -- Key is a query param; log_url drops it so it never reaches the
+        -- failure log (F0). Response: booleans under `security`.
+        build_request = function( ip, key )
+            return {
+                url     = "https://vpnapi.io/api/" .. ip .. "?key=" .. ( key or "" ),
+                log_url = "https://vpnapi.io/api/" .. ip,
+                method  = "GET",
+                headers = { [ "Accept" ] = "application/json" },
+            }
+        end,
+        interpret = function( parsed, ip )
+            local sec = parsed.security
+            if type( sec ) ~= "table" then
+                -- a valid reply always carries `security`; its absence is an
+                -- error response (e.g. invalid key -> { message = ... }).
+                return nil, tostring( parsed.message or "no security block" )
+            end
+            local types = { }
+            if sec.vpn   == true then types.vpn = true end
+            if sec.proxy == true then types.proxy = true end
+            if sec.tor   == true then types.tor = true end
+            -- `relay` (e.g. iCloud Private Relay) is its OWN type, NOT proxy.
+            -- Private Relay is a privacy feature used by millions of ordinary
+            -- Apple users, so it is NOT in the default block_types - an
+            -- operator opts in by adding relay=true. See docs/BLOCKLIST.md.
+            if sec.relay == true then types.relay = true end
+            return types
+        end,
+    },
+
+    ipqs = {
+        source   = "ipqs",
+        needs_key = true,     -- no keyless tier
+        tos      = "1000/MONTH free (35/day cap); the free tier is EVALUATION only - production / commercial use needs a paid plan",
+        -- Key is in the URL PATH; log_url redacts that path segment (F0).
+        build_request = function( ip, key )
+            return {
+                url     = "https://www.ipqualityscore.com/api/json/ip/" .. ( key or "" ) .. "/" .. ip,
+                log_url = "https://www.ipqualityscore.com/api/json/ip/REDACTED/" .. ip,
+                method  = "GET",
+                headers = { [ "Accept" ] = "application/json" },
+            }
+        end,
+        interpret = function( parsed, ip )
+            if parsed.success ~= true then
+                return nil, tostring( parsed.message or "success=false" )
+            end
+            local types = { }
+            if parsed.proxy == true then types.proxy = true end
+            if parsed.vpn   == true then types.vpn = true end
+            if parsed.tor   == true then types.tor = true end
             return types
         end,
     },
@@ -493,6 +575,40 @@ local function apply_positive( user, ip, family, types, matched, cached )
     end
 end
 
+-- A run of failures within FAIL_ALERT_WINDOW fires ONE op-chat alert so
+-- ops notice a down provider / bad key instead of silent degradation.
+-- A single success resets the counter (recovery).
+local function note_success( )
+    fail_count = 0
+    fail_alerted = false
+end
+
+local function note_failure( provider )
+    if fail_alert_threshold <= 0 then return end
+    local now = socket_gettime( )
+    if now - fail_window_start >= FAIL_ALERT_WINDOW then
+        fail_window_start = now
+        fail_count = 0
+        -- fail_alerted is intentionally NOT reset here: a window rollover
+        -- restarts the count but must not re-arm the alert, or a sustained
+        -- outage would spam op-chat once per window. Only note_success (a
+        -- recovered lookup) clears it, so an outage yields exactly ONE alert.
+    end
+    fail_count = fail_count + 1
+    if fail_count >= fail_alert_threshold and not fail_alerted then
+        fail_alerted = true
+        if report then
+            report.send( report_activate, report_hubbot, report_opchat, report_llevel,
+                utf_format( msg_fail_alert, provider, fail_count, FAIL_ALERT_WINDOW,
+                    fail_open and "open" or "closed" ) )
+        end
+        if audit then
+            audit.fire( audit.build( "proxydetect.provider.down", scriptname, nil, nil,
+                { provider = provider, failures = fail_count, window = FAIL_ALERT_WINDOW } ) )
+        end
+    end
+end
+
 -- A provider error / timeout. Fail-open (allow) by default; fail-closed
 -- kicks the still-live user (but does NOT store-push - we have no
 -- verdict, only a broken provider).
@@ -502,6 +618,7 @@ local function apply_failure( sid, cid, ip, err )
             { ip = ip, provider = adapter and adapter.source or provider_name,
               err = tostring( err ), fail_open = fail_open and true or false } ) )
     end
+    note_failure( adapter and adapter.source or provider_name )
     if fail_open then return end
     local u = hub_issidonline( sid )
     if u and u:cid( ) == cid then
@@ -532,10 +649,10 @@ local function handle_response( res, ip, family, sid, cid )
     if not pok or type( parsed ) ~= "table" then
         return apply_failure( sid, cid, ip, "JSON decode failed" )
     end
-    -- pcall the adapter interpret too: the current proxycheck parser is
-    -- throw-safe, but a future provider adapter (F2) parsing untrusted
-    -- JSON could throw - degrade to a query failure rather than a
-    -- swallowed callback error (the untrusted-input-parser contract).
+    -- pcall the adapter interpret too: the proxycheck/vpnapi/ipqs parsers
+    -- are throw-safe today, but a provider adapter parsing untrusted JSON
+    -- could throw - degrade to a query failure rather than a swallowed
+    -- callback error (the untrusted-input-parser contract).
     local pok2, types, ierr = pcall( adapter.interpret, parsed, ip )
     if not pok2 then
         return apply_failure( sid, cid, ip, "interpret error: " .. tostring( types ) )
@@ -546,6 +663,7 @@ local function handle_response( res, ip, family, sid, cid )
 
     local matched = matched_types( types )
     cache_set( ip, types )
+    note_success( )    -- a good verdict clears the provider-failure alert
     if #matched == 0 then return end    -- detected-but-not-blocked, or clean
 
     local u = hub_issidonline( sid )
@@ -588,6 +706,7 @@ local check_proxydetect = function( user )
         method       = rq.method,
         headers      = rq.headers,
         body         = rq.body,
+        log_url      = rq.log_url,    -- key-free url for the failure log (vpnapi/ipqs put the key in the url)
         timeout      = query_timeout,
         max_response = 65536,    -- provider JSON is a few KiB; bound a misbehaving one
         on_complete  = function( res ) handle_response( res, ip, family, sid, cid ) end,

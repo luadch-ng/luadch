@@ -327,9 +327,20 @@ before enabling on a public hub - the free tiers differ sharply:
 | [VPNAPI.io](https://vpnapi.io) | `vpnapi` | 1,000/day | **No** - the free tier is "personal, non-commercial use" only. A public/community hub needs a paid plan. | API key (required) |
 | [IPQualityScore](https://www.ipqualityscore.com) | `ipqs` | 1,000/**month** (35/day cap) | **Evaluation only** - free/trial use is for testing; production/commercial use needs a paid plan. | API key in the URL path (required) |
 
-**Phase F1 ships the `proxycheck` adapter only**; `vpnapi` and `ipqs`
-land in F2. Selecting an unimplemented provider leaves the plugin inert
-(it logs a one-time note and never queries).
+All three adapters are implemented. Selecting an unknown provider - or a
+keyed provider (`vpnapi` / `ipqs`) with no key set - leaves the plugin
+inert (it logs a one-time note and never queries). The API key is kept
+out of the hub's failure logs even though `vpnapi` (query string) and
+`ipqs` (URL path) carry it in the request URL, via `http_client`'s
+`log_url` redaction.
+
+> **iCloud Private Relay (`vpnapi`):** VPNAPI.io flags Apple's iCloud
+> Private Relay as a `relay`. That is a **separate** detected type and is
+> deliberately **NOT** in the default `etc_proxydetect_block_types`
+> (`{proxy, vpn, tor}`) - Private Relay is a mainstream privacy feature
+> used by ordinary Apple users, so blocking it would kick a large
+> population. Add `relay = true` to `etc_proxydetect_block_types` only if
+> you truly want to block privacy relays.
 
 Facts above were verified 2026-07-06; provider limits and terms drift -
 re-check the provider's own pricing / terms pages before relying on them.
@@ -381,7 +392,7 @@ used today.
 | Key | Default | Meaning |
 |---|---|---|
 | `etc_proxydetect_enabled` | `false` | master toggle (the plugin loads either way; the check is inert when false) |
-| `etc_proxydetect_provider` | `"proxycheck"` | `proxycheck` \| `vpnapi` \| `ipqs` (only `proxycheck` implemented in F1) |
+| `etc_proxydetect_provider` | `"proxycheck"` | `proxycheck` \| `vpnapi` \| `ipqs` |
 | `etc_proxydetect_api_key` | `""` | provider key; prefer the `LUADCH_ETC_PROXYDETECT_API_KEY` env var |
 | `etc_proxydetect_action` | `"log_only"` | `log_only` audits + reports a match; `block` kicks + pre-handshake-blocks the IP |
 | `etc_proxydetect_block_types` | `{proxy,vpn,tor}` | which detected types trigger a block (re-evaluated live on every cache hit) |
@@ -391,20 +402,34 @@ used today.
 | `etc_proxydetect_fail_open` | `true` | on provider error/timeout/quota: `true` = allow (safe), `false` = kick (strict) |
 | `etc_proxydetect_stealth` | `true` | repeat connections dropped silently pre-handshake; the first detection still gets a visible kick |
 | `etc_proxydetect_max_queries_per_day` | `1000` | daily provider-query cap (0 = unlimited) |
+| `etc_proxydetect_fail_alert_threshold` | `10` | provider failures within 60s that fire one op-chat alert (0 = disabled) |
 | `etc_proxydetect_kick_reason` | (text) | kick message (block mode only) |
 | `etc_proxydetect_oplevel` | `80` | min level to run `+proxydetect` |
 
 ### Failure behaviour: fail-open vs fail-closed
 
-By **default the plugin fails OPEN**: if the provider errors, times out,
-or the daily cap is spent, the connection is **allowed in**. This is
-deliberate - an external HTTP dependency in the connect path should not
-lock every joining user out when the provider has an outage. A
-`proxydetect.query.fail` audit fires so you can see it.
+By **default the plugin fails OPEN**: if the provider errors or times
+out, the connection is **allowed in** - an external HTTP dependency in
+the connect path should not lock every joining user out during an outage.
+A `proxydetect.query.fail` audit fires per failure so you can see it. (A
+spent daily query cap likewise fails open, but only logs a one-time note;
+it is not a provider failure and fires no audit.)
 
 Set `etc_proxydetect_fail_open = false` to fail **closed** (kick on
 provider error) only if you have 24/7 monitoring - a provider outage will
 otherwise reject every new user.
+
+So a clearly-broken provider (a bad key, or the provider down /
+unreachable) does not slip by silently under fail-open, a run of
+`etc_proxydetect_fail_alert_threshold` failures within 60 s fires **one**
+op-chat alert (once per outage, until a lookup succeeds again) plus a
+`proxydetect.provider.down` audit. This is a **best-effort** signal tuned
+for a busy hub during a near-total outage: a **partial** outage (the
+provider alternating success / error) or a **low-traffic** hub may not
+reach the threshold within the window - lower the threshold for a quieter
+hub, or set it to `0` to disable the alert. The op-chat alert respects
+`etc_proxydetect_report` (set that false and only the
+`proxydetect.provider.down` audit remains).
 
 ### Design note: two decision points
 
