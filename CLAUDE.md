@@ -238,10 +238,12 @@ Shipped feature arcs so far (closed trackers, details in the issues): HTTP
 API #82, audit log #84, real HBRI #214, registered-users API family #236,
 subsystem managers #249, client blocker #81, aliases #327.
 
-**In flight (status 2026-07-05 - the tracker is the source of truth):**
+**In flight (status 2026-07-06 - the tracker is the source of truth):**
 unified blocklist arc [#78](https://github.com/luadch-ng/luadch/issues/78) -
-Precursors + Phases A/B/C + D1 (`core/mmdb.lua`) merged; paused before Phase
-D2 (`scripts/etc_geoip.lua`). Phase E closes #79, Phase F closes #352.
+Precursors + Phases A/B/C/D (through `scripts/etc_geoip.lua`) + Precursor 0a
+(`http_client` stream-to-disk) + Precursor E0 (`blocklist.bulk_replace`)
+merged; Phase E (`scripts/etc_blocklist_feeds.lua`, external feeds) in
+progress. Phase E closes #79, Phase F closes #352.
 
 **HTTP-endpoint authoring** (which helper for which endpoint shape, envelope
 contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and

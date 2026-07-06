@@ -134,6 +134,14 @@ def override_test_ports(staging_dir: Path):
         (r'\{\s*"etc_geoip\.lua",\s*enabled\s*=\s*false\s*\}',
          '{ "etc_geoip.lua", enabled = true }'),
         (r"etc_geoip_enabled\s*=\s*false", "etc_geoip_enabled = true"),
+        # #78 Phase E: turn etc_blocklist_feeds ON (ships OFF) with NO feed
+        # enabled - exercises the plugin's real-sandbox load path + onStart
+        # command registration on every smoke boot WITHOUT any outbound
+        # network (no feed is scheduled). A sandbox-undeclared-global or a
+        # load-time crash surfaces via test_no_script_errors.
+        (r'\{\s*"etc_blocklist_feeds\.lua",\s*enabled\s*=\s*false\s*\}',
+         '{ "etc_blocklist_feeds.lua", enabled = true }'),
+        (r"etc_blocklist_feeds_enabled\s*=\s*false", "etc_blocklist_feeds_enabled = true"),
     ]
     for pattern, replacement in rewrites:
         new_text, count = re.subn(pattern, replacement, text, count=1)

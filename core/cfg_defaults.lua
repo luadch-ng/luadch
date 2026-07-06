@@ -2914,6 +2914,113 @@ local defaults = {
     },
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_blocklist_feeds.lua settings (#78 Phase E)
+    --
+    -- Pull external IP/CIDR blocklists (Tor exits, Spamhaus DROP) over
+    -- HTTPS and push them into the unified blocklist with source=external.
+    -- Every feed is independently opt-in; all OFF by default. The refresh
+    -- interval is a sanity-bounded cfg value here; the plugin ADDITIONALLY
+    -- clamps each feed up to its provider's published auto-fetch floor
+    -- (Tor 30 min, Spamhaus 1 h) at runtime. See docs/BLOCKLIST.md.
+
+    -- Master toggle. The plugin loads either way (it is whitelisted in
+    -- cfg.scripts); when false the onTimer refresh loop is inert.
+    etc_blocklist_feeds_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Tor exit-node list (plain IPv4, one per line).
+    etc_blocklist_feeds_tor_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_tor_url = { "https://check.torproject.org/torbulkexitlist",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_tor_refresh_interval_sec = { 3600,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 60 and value <= 604800
+        end
+    },
+    etc_blocklist_feeds_tor_stealth = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Spamhaus DROP v4 (JSONL: one {"cidr","sblid"} object per line).
+    etc_blocklist_feeds_spamhaus_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_spamhaus_url = { "https://www.spamhaus.org/drop/drop_v4.json",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_spamhaus_refresh_interval_sec = { 86400,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 60 and value <= 604800
+        end
+    },
+    etc_blocklist_feeds_spamhaus_stealth = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Spamhaus DROP v6 (same JSONL format, drop_v6.json). Shares the
+    -- spamhaus refresh interval + stealth toggle above.
+    etc_blocklist_feeds_spamhaus_v6_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_spamhaus_v6_url = { "https://www.spamhaus.org/drop/drop_v6.json",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Operator level that can run `+blfeeds` (read-only status).
+    etc_blocklist_feeds_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    -- Opchat / hubbot report on refresh success + on an ok->fail
+    -- transition (mirrors etc_geoip: opchat ON, hubbot OFF).
+    etc_blocklist_feeds_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_trafficmanager.lua settings
 
     etc_trafficmanager_activate = { true,
