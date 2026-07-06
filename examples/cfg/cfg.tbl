@@ -1042,6 +1042,31 @@ return { -- the settings are a lua table, do not tough this!
     },
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_blocklist_feeds.lua settings | pull external IP/CIDR blocklists (Tor, Spamhaus DROP) into the blocklist (#78 Phase E). All feeds OFF by default - see docs/BLOCKLIST.md
+
+    etc_blocklist_feeds_enabled = false,  -- master toggle; plugin loads either way but the refresh loop is inert when false (boolean)
+
+    etc_blocklist_feeds_tor_enabled = false,  -- pull the Tor exit-node list (boolean)
+    etc_blocklist_feeds_tor_url = "https://check.torproject.org/torbulkexitlist",  -- Tor exit list URL, plain IPv4 one per line (string). NOTE: dan.me.uk bans IPs fetching >1/30min - keep the default
+    etc_blocklist_feeds_tor_refresh_interval_sec = 3600,  -- refresh cadence (integer); clamped UP to the 1800s Tor minimum at runtime
+    etc_blocklist_feeds_tor_stealth = false,  -- stealth-drop Tor IPs (silent close, no per-attempt log) vs visible (boolean)
+
+    etc_blocklist_feeds_spamhaus_enabled = false,  -- pull Spamhaus DROP v4 (boolean)
+    etc_blocklist_feeds_spamhaus_url = "https://www.spamhaus.org/drop/drop_v4.json",  -- Spamhaus DROP v4 JSONL URL (string)
+    etc_blocklist_feeds_spamhaus_refresh_interval_sec = 86400,  -- refresh cadence (integer); clamped UP to the 3600s Spamhaus minimum. Their policy is >=1h; daily is plenty (DROP churns slowly)
+    etc_blocklist_feeds_spamhaus_stealth = false,  -- stealth-drop Spamhaus CIDRs (boolean); shared by the v6 feed below
+
+    etc_blocklist_feeds_spamhaus_v6_enabled = false,  -- pull Spamhaus DROP v6 (boolean); shares the spamhaus interval + stealth
+    etc_blocklist_feeds_spamhaus_v6_url = "https://www.spamhaus.org/drop/drop_v6.json",  -- Spamhaus DROP v6 JSONL URL (string)
+
+    etc_blocklist_feeds_oplevel = 80,  -- min level to run `+blfeeds` read-only status (integer)
+
+    etc_blocklist_feeds_report = true,  -- fire etc_report on a refresh + on an ok->fail transition (boolean)
+    etc_blocklist_feeds_report_hubbot = false,  -- send the report as a hubbot PM (boolean)
+    etc_blocklist_feeds_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_blocklist_feeds_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_log_cleaner.lua settings | this script adds a command to clean log files
 
     etc_log_cleaner_minlevel = 100,  -- min level to use this command? (integer)
@@ -1459,6 +1484,7 @@ return { -- the settings are a lua table, do not tough this!
         { "etc_clientblocker.lua", enabled = true },  -- #81 client AP/VE blocklist. API-toggleable (#261). Must sit AFTER hub_inf_manager so structural BINF rejects (forbidden flags / identity spoofing) happen first; client-policy kicks then run on already-validated INFs.
         { "etc_blocklist.lua", enabled = true },  -- #78 Phase B `+blocklist` admin CLI for the unified pre-handshake IP/CIDR blocklist (engine = core/blocklist.lua, Phase A). API-toggleable (#261). Manages MANUAL entries; Phase D/E/F plugins (geoip / external feeds / proxydetect) will push auto-feed entries into the same store.
         { "etc_geoip.lua", enabled = false },  -- #78 Phase D2 country / ASN blocking via MaxMind GeoLite2. OFF by default (needs a geoipupdate-managed DB - see docs/BLOCKLIST.md). Per-connection post-handshake lookup; must sit AFTER hub_inf_manager like etc_clientblocker. Enable here + set etc_geoip_enabled=true + populate etc_geoip_blocked_countries.
+        { "etc_blocklist_feeds.lua", enabled = false },  -- #78 Phase E external IP/CIDR feeds (Tor exits, Spamhaus DROP) pulled over HTTPS into the blocklist store. OFF by default. Store WRITER (the engine blocks pre-handshake), so chain position is not load-bearing. Enable here + set etc_blocklist_feeds_enabled=true + turn on a feed - see docs/BLOCKLIST.md.
         { "hub_runtime.lua", enabled = true },  -- using report import; API-toggleable (#261)
         { "bot_regchat.lua", enabled = true },  -- API-toggleable (#261)
         { "bot_session_chat.lua", enabled = true },  -- API-toggleable (#261)

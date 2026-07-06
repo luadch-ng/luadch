@@ -176,6 +176,12 @@ jobs:
       - name: Run etc_geoip unit test
         run: lua5.4 tests/unit/etc_geoip_test.lua
 
+      # #78 Phase E: external-feed plugin. Drives the line + Spamhaus-JSON
+      # parsers (real dkjson) and the fetch -> parse -> bulk_replace flow +
+      # failure paths via a mocked http_client / blocklist.
+      - name: Run etc_blocklist_feeds unit test
+        run: lua5.4 tests/unit/etc_blocklist_feeds_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -306,6 +312,11 @@ jobs:
       - name: Run etc_geoip unit test
         shell: msys2 {0}
         run: lua tests/unit/etc_geoip_test.lua
+
+      # #78 Phase E: external-feed plugin (see Linux job note).
+      - name: Run etc_blocklist_feeds unit test
+        shell: msys2 {0}
+        run: lua tests/unit/etc_blocklist_feeds_test.lua
 
       - name: Configure
         shell: msys2 {0}

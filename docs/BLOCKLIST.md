@@ -193,6 +193,72 @@ the rate limiter; GeoIP layers cleanly on top of them.
 
 ---
 
-*Phase E (external feeds: Tor / Spamhaus / AbuseIPDB) and Phase F
-(live proxy/VPN detection) sections will be added to this guide as those
-land ([#78](https://github.com/luadch-ng/luadch/issues/78)).*
+## External feeds (`etc_blocklist_feeds`, #78 Phase E)
+
+`etc_blocklist_feeds` pulls public known-bad-IP lists over HTTPS on a
+per-feed timer and pushes them into the same pre-handshake blocklist, so
+listed IPs are dropped at TCP-accept before they cost a handshake. Unlike
+GeoIP (a post-handshake policy check), feeds are pure infrastructure
+blocking and run through the engine's fast pre-handshake path.
+
+Every feed is **independently opt-in and OFF by default**. The plugin
+needs no API key and no external tool - it fetches directly (verified TLS
+against the bundled CA bundle). A whole feed is ingested in one atomic
+store write, and each refresh *replaces* the feed's previous entries, so
+a shrinking feed leaves no stale rows.
+
+### Built-in feeds
+
+| Feed | Source | Default URL | Min interval | Notes |
+|---|---|---|---|---|
+| `tor` | Tor exit nodes | `check.torproject.org/torbulkexitlist` | 30 min | Plain IPv4, one per line. **Do not** point it at `dan.me.uk` - that host firewall-bans IPs fetching more than once per 30 min. |
+| `spamhaus` | Spamhaus DROP v4 | `spamhaus.org/drop/drop_v4.json` | 1 h | JSON (one `{"cidr","sblid"}` per line). Spamhaus policy is "at least 1 h apart"; the default is 24 h (DROP churns slowly). EDROP merged into DROP in 2024 - there is no separate EDROP feed. |
+| `spamhaus_v6` | Spamhaus DROP v6 | `spamhaus.org/drop/drop_v6.json` | 1 h | Same format; shares the `spamhaus` interval + stealth toggle. |
+
+The operator's configured refresh interval is **clamped up** to the
+feed's minimum at runtime - polling faster than a provider allows gets
+the hub's IP firewalled by that provider.
+
+### Enable a feed
+
+In `cfg/cfg.tbl`, turn the plugin on in `cfg.scripts`:
+
+```lua
+{ "etc_blocklist_feeds.lua", enabled = true },
+```
+
+then flip the master toggle and the feed(s) you want:
+
+```lua
+etc_blocklist_feeds_enabled = true,
+etc_blocklist_feeds_tor_enabled = true,
+etc_blocklist_feeds_spamhaus_enabled = true,
+```
+
+`+reload` (or restart). Each enabled feed refreshes a few seconds after
+boot and then on its interval. Check state with `+blfeeds` (or
+`GET /v1/blocklist/feeds`): it shows each feed's enabled state, interval,
+current entry count, and the last refresh result.
+
+### Stealth
+
+By default a blocked feed IP gets the same visible pre-handshake drop as a
+manual block. Set `etc_blocklist_feeds_tor_stealth = true` or
+`etc_blocklist_feeds_spamhaus_stealth = true` (the v6 feed shares the
+spamhaus toggle) to drop those connections silently (no per-attempt log
+line; the aggregated rollup still counts them) - useful for large feeds
+where per-attempt logging would be noisy.
+
+### Failure behaviour
+
+A fetch / parse / HTTP failure is **self-healing**: the last-good entries
+stay in place (the store refuses to replace a feed with an all-invalid
+parse), a `feed.refresh.fail` audit fires, and op-chat is alerted once on
+the transition to failing (not every interval). Entries carry a TTL of
+twice the refresh interval as a backstop, so a permanently-dead feed
+eventually ages out rather than blocking forever on stale data.
+
+---
+
+*Phase F (live proxy/VPN detection) will be added to this guide as it
+lands ([#78](https://github.com/luadch-ng/luadch/issues/78)).*
