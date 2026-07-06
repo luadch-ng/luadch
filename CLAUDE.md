@@ -240,10 +240,12 @@ subsystem managers #249, client blocker #81, aliases #327.
 
 **In flight (status 2026-07-06 - the tracker is the source of truth):**
 unified blocklist arc [#78](https://github.com/luadch-ng/luadch/issues/78) -
-Precursors + Phases A/B/C/D (through `scripts/etc_geoip.lua`) + Precursor 0a
-(`http_client` stream-to-disk) + Precursor E0 (`blocklist.bulk_replace`)
-merged; Phase E (`scripts/etc_blocklist_feeds.lua`, external feeds) in
-progress. Phase E closes #79, Phase F closes #352.
+Precursors + Phases A/B/C/D + Precursor 0a (`http_client` stream-to-disk) +
+Precursor E0 (`blocklist.bulk_replace`) + Phase E1
+(`scripts/etc_blocklist_feeds.lua`: Tor + Spamhaus) merged; Phase E2
+(same plugin: AbuseIPDB + generic adapters, closes #79) in review.
+**Phase E is content-complete**; Phase F (`scripts/etc_proxydetect.lua`,
+live proxy/VPN detection, closes #352) is the arc's last remaining phase.
 
 **HTTP-endpoint authoring** (which helper for which endpoint shape, envelope
 contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and
