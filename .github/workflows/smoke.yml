@@ -169,6 +169,13 @@ jobs:
       - name: Run mmdb unit test
         run: lua5.4 tests/unit/mmdb_test.lua
 
+      # #78 Phase D2: scripts/etc_geoip.lua country/ASN policy blocking.
+      # Drives the plugin's resolve/classify/onConnect logic against the
+      # real GeoLite2-Country fixture (block + log_only + op-exempt +
+      # disabled + missing-DB + v4-mapped dual-stack paths).
+      - name: Run etc_geoip unit test
+        run: lua5.4 tests/unit/etc_geoip_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -294,6 +301,11 @@ jobs:
       - name: Run mmdb unit test
         shell: msys2 {0}
         run: lua tests/unit/mmdb_test.lua
+
+      # #78 Phase D2: etc_geoip country/ASN blocking (see Linux job note).
+      - name: Run etc_geoip unit test
+        shell: msys2 {0}
+        run: lua tests/unit/etc_geoip_test.lua
 
       - name: Configure
         shell: msys2 {0}

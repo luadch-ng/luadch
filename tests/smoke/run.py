@@ -124,6 +124,16 @@ def override_test_ports(staging_dir: Path):
         # log traces (e.g. #265 regression test scans event.log for the
         # 'invalid named parameter' line emitted on `nowhitespace` reject).
         (r"log_events\s*=\s*false", "log_events = true"),
+        # #78 Phase D2: turn etc_geoip ON (ships OFF) with NO database
+        # present in the staging tree. This exercises the plugin's
+        # real-sandbox load path + graceful missing-DB handling on every
+        # smoke boot: a sandbox-undeclared-global or a load-time crash
+        # would surface as a script error (caught by test_no_script_errors)
+        # or prevent the hub from binding its ports. onConnect stays inert
+        # without a DB, so no other test is affected.
+        (r'\{\s*"etc_geoip\.lua",\s*enabled\s*=\s*false\s*\}',
+         '{ "etc_geoip.lua", enabled = true }'),
+        (r"etc_geoip_enabled\s*=\s*false", "etc_geoip_enabled = true"),
     ]
     for pattern, replacement in rewrites:
         new_text, count = re.subn(pattern, replacement, text, count=1)

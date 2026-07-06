@@ -639,6 +639,45 @@ set `blocklist_store_path = "cfg/blocklist.tbl"` in `cfg.tbl`
 to pin the old location). No auto-migration is provided; the
 old-path window was small.
 
+### etc_geoip
+
+Country / ASN policy blocking via a MaxMind GeoLite2 database (#78
+Phase D2). **Off by default** - needs a database the operator installs
+with MaxMind's `geoipupdate` tool. Full setup (licence key, Linux /
+Windows / Docker recipes, `log_only` -> `block` workflow) is in
+[`BLOCKLIST.md`](BLOCKLIST.md).
+
+On each connect (post-handshake) it resolves the client IP to its
+country (and ASN, if that DB is configured) and, if it matches
+`etc_geoip_blocked_countries` / `etc_geoip_blocked_asns`, either logs
+the match (`etc_geoip_action = "log_only"`, the default) or kicks the
+connection (`= "block"`). The lookup is a bounded per-connection mmdb
+read, not a pre-handshake store sweep; country blocking is policy, so it
+kicks post-handshake like `+ban` / the client blocker. Operators are
+exempt by default (`etc_geoip_check_levels`), and the hub boots fine
+without a database (a missing / stale `.mmdb` logs one warning and the
+checks stay inert). Must sit AFTER `hub_inf_manager.lua` in
+`cfg.scripts`.
+
+**Command:**
+- `+geoip` - read-only status: DB load state + build date, action mode,
+  blocked country / ASN lists. Requires `etc_geoip_oplevel` (default 80).
+
+**HTTP API:** `GET /v1/geoip` (read scope) mirrors `+geoip`. There is no
+write endpoint - the policy is cfg-driven (`etc_geoip_blocked_countries`
+etc. in `cfg.tbl`, then `+reload`).
+
+**Audit events:** `geoip.block` on every match (both modes, with
+`country` / `asn` / `matched` / `action` meta), `geoip.db.missing` and
+`geoip.db.stale` (once each) on DB problems.
+
+**Config keys:** `etc_geoip_enabled`, `etc_geoip_country_db_path`,
+`etc_geoip_asn_db_path`, `etc_geoip_blocked_countries`,
+`etc_geoip_blocked_asns`, `etc_geoip_action`, `etc_geoip_check_levels`,
+`etc_geoip_recheck_interval_sec`, `etc_geoip_kick_reason`,
+`etc_geoip_oplevel`, `etc_geoip_report[_hubbot|_opchat]`,
+`etc_geoip_llevel`. See [`BLOCKLIST.md`](BLOCKLIST.md) for the table.
+
 ### etc_clientblocker
 
 Block clients by Lua-pattern match against the BINF `AP+VE` field
