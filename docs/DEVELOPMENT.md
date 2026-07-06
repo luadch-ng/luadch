@@ -136,6 +136,16 @@ The conventions below are either not in it or are easy to get wrong:
   module on the real hub. `os`/`io` reach plugins only through the curated
   `_os_safe`/`_io_safe` shims (no file-stat; use a file's own embedded timestamp,
   not mtime, for staleness).
+- **API keys / secrets: env-var-first via `core/secrets.lua`.** Read a key with
+  `secrets.lookup("cfg_key")` (checks `LUADCH_CFG_KEY` env first, then `cfg.tbl`)
+  and call `secrets.register("cfg_key")` in `onStart` so `GET /v1/config` redacts
+  it. Two gotchas: redaction is active only once the plugin is *loaded* (a key
+  sat in `cfg.tbl` before the plugin is enabled in `cfg.scripts` is NOT redacted,
+  and `/v1/config` is `read`-scoped) - so document "prefer the env var" (never
+  dumped); and there is no `+showcfg` command today, only `GET /v1/config`
+  redacts, so do not claim otherwise. Send the key in a request HEADER, never a
+  URL query param (`http_client` logs the URL on failure, never the headers).
+  Precedent: `etc_blocklist_feeds` (AbuseIPDB key).
 - **`scriptversion` bump on any semantic change** (behaviour, cfg keys, wire
   surface) - the companion `luadch-ng/scripts` repo syncs by version.
 - **Config defaults + validator go in `core/cfg_defaults.lua`.** Add the key
@@ -208,6 +218,27 @@ lua5.4 tests/unit/yourmodule_test.lua      # exit 0 = pass, 1 = fail
 same under `shell: msys2 {0}` with `lua`. An unregistered test is silent
 non-coverage.
 
+### Restricted-env load check for a plugin
+
+A plugin unit test stubs the sandbox globals in `_G`, so it provides *every*
+global and **cannot catch a bare global that is missing from `SANDBOX_GLOBALS`**
+- the exact use-trap that crashes the real hub at boot ("undeclared var",
+#353/#358). Before pushing a new/changed plugin, also load it under an `_ENV`
+that errors on any undeclared access, with only the real sandbox set present:
+
+```lua
+local E = { }   -- fill with the real SANDBOX_GLOBALS + injected hub/utf/PROCESSED + stubs
+setmetatable(E, { __index    = function(_, k) error("undeclared global '"..k.."'") end,
+                  __newindex = function(_, k) error("undeclared write '"..k.."'") end })
+local src   = io.open("scripts/your.lua"):read("*a")
+local chunk = assert(load(src, "@your.lua", "t", E))
+assert(pcall(chunk))            -- then run the captured onStart / onTimer too
+```
+
+The smoke run is the CI backstop for the same thing: force-enable the plugin
+(no live feed/DB) in `override_test_ports` so `test_no_script_errors` loads it
+in the real sandbox every boot.
+
 ### Regression tests must fail pre-fix (`CLAUDE.md` §1a.7)
 
 A test that is green on both old and new code proves nothing. For a bug fix,
@@ -271,6 +302,25 @@ crash / hang / OOM takes down the single-threaded hub. Required:
   ceiling before slurping it.
 - **Validate before trusting derived arithmetic.** e.g. reject a claimed
   `node_count` that would overflow when multiplied, before you multiply.
+- **Cap the RIGHT dimension.** A cap on a proxy (row count) does not bound a
+  resource whose growth is a different function of the input. A feed capped at
+  200k ROWS still OOM'd because one low-prefix v6 CIDR expands to ~32k
+  bucket-cache slots (#78 E0); the fix caps the actual growth (reject over-broad
+  prefixes), not the proxy. Verify the cap bounds what you think it bounds.
+- **A "replace" primitive's empty input is a fail-open trap.** If a refresh
+  replaces a whole data set and the fetch/parse degenerates to zero items (empty
+  body, format drift, mid-transfer close), "replace with nothing" = wipe. Treat
+  an empty result from a SUCCESS response as a soft failure (keep last-good),
+  never a deliberate clear (#78 E1: an empty 200 wiped the feed and reported
+  success). Likewise verify completeness of a fetched replace-set (Content-Length
+  match; reject `chunked` if you do not de-chunk) - RAM-mode `http_client` has no
+  built-in short-read guard.
+- **Untrusted fields entering a shared, serialized store must be bounded
+  scalars.** A feed's `sblid` string forwarded verbatim into a store table that
+  gets `util.savetable`'d can poison the `.tbl` - a nested/huge value makes the
+  next `loadtable` fail, so the WHOLE store loads empty (fail-open, taking
+  operator pins with it). Coerce to a length-capped scalar at the trust boundary
+  (#78 E1).
 
 ### Privilege / hierarchy checklist
 
