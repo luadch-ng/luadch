@@ -123,6 +123,19 @@ The conventions below are either not in it or are easy to get wrong:
   operator-visible string goes through it, and both `scripts/lang/<name>.lang.en`
   and `.lang.de` ship. Keep DC jargon (Hub, Slot, Share, OP, Kick, Ban, Nick,
   PM) in English in both files. Do not half-translate.
+- **Operator *policy* text goes in cfg, not lang.** A kick/ban reason the
+  operator is meant to customise (e.g. `etc_geoip_kick_reason`) belongs in a cfg
+  key, not a `.lang` key - a lang key with the same fallback silently *shadows*
+  the cfg key (`local r = lang.x or cfg.get("x")` makes the cfg lever dead), and
+  the operator's edit has no effect. Lang files are for the hub-language UI; a
+  per-hub policy message is cfg (matches `etc_clientblocker`'s `default_reason`).
+- **A plugin that needs a core module must whitelist it.** Plugins have no
+  `use`; a core module (e.g. `mmdb`, `blocklist`) is only reachable if its name
+  is in `SANDBOX_GLOBALS` in [`core/scripts.lua`](../core/scripts.lua). Forgetting
+  this loads fine in a unit test (which sets `_G`) but the plugin cannot see the
+  module on the real hub. `os`/`io` reach plugins only through the curated
+  `_os_safe`/`_io_safe` shims (no file-stat; use a file's own embedded timestamp,
+  not mtime, for staleness).
 - **`scriptversion` bump on any semantic change** (behaviour, cfg keys, wire
   surface) - the companion `luadch-ng/scripts` repo syncs by version.
 - **Config defaults + validator go in `core/cfg_defaults.lua`.** Add the key
@@ -270,6 +283,17 @@ crash / hang / OOM takes down the single-threaded hub. Required:
   and bypasses the ADC hierarchy guard by design - the token IS the trust
   surface. Document it at the call site; never treat a token request as a
   lower-privilege actor.
+
+### Fail-safe checklist
+
+- **Periodic file re-reads must RETAIN the last-good handle on failure.** A
+  plugin that re-reads a file on a timer (a GeoIP `.mmdb`, an external feed
+  file) MUST keep the previously-loaded reader if the reopen fails - never
+  null-it-on-failure. A non-atomic `cp new over old` has a truncation window, a
+  permission blip is transient; null-on-failure silently turns enforcement OFF
+  until the next successful reload (a fail-*open*). Pattern: `reopen(path,
+  current)` returns `current` on open failure and only swaps on success (closing
+  the old handle then). Reviewer-caught in #78 D2.
 
 ---
 
