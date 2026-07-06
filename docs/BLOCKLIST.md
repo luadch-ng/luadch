@@ -286,5 +286,142 @@ eventually ages out rather than blocking forever on stale data.
 
 ---
 
-*Phase F (live proxy/VPN detection) will be added to this guide as it
-lands ([#78](https://github.com/luadch-ng/luadch/issues/78)).*
+## Live proxy / VPN / Tor detection (`etc_proxydetect`, #78 Phase F)
+
+`etc_proxydetect` looks the connecting IP up against an external
+detection provider on connect and, if it is a proxy / VPN / Tor exit of a
+type you block, kicks the connection (`etc_proxydetect_action = "block"`)
+or just logs it (`"log_only"`, the default). It is **OFF by default** and
+needs a provider (an API key is recommended, and required for some
+providers).
+
+Unlike GeoIP (a local database lookup) this makes a **non-blocking
+outbound HTTPS request** per new IP - the verdict arrives a moment later,
+so the connection is allowed through first and kicked from the callback
+if it turns out to be a proxy. To keep this cheap and quota-friendly:
+
+- A **positive verdict in block mode is also pushed into the
+  pre-handshake blocklist** with a TTL. The *next* connection from that
+  IP is then dropped at TCP-accept (silently, by default) before it costs
+  a handshake - and it survives `+reload` / restart because the blocklist
+  store is persisted. So a repeat proxy is only ever queried once.
+- **Clean verdicts are cached** (`scripts/data/etc_proxydetect.tbl`) for
+  `etc_proxydetect_cache_ttl_sec`, so a reconnecting legitimate user does
+  not burn a query each time.
+- A **daily query cap** (`etc_proxydetect_max_queries_per_day`, default
+  1000) is a quota / cost safety valve: a flood of distinct IPs cannot
+  run past your provider's free tier or a paid bill. Over the cap the
+  lookup is skipped and the connection allowed.
+
+Operators are exempt by default (`etc_proxydetect_check_levels`, mirrors
+GeoIP) so a provider false positive cannot lock staff out.
+
+### Providers
+
+Pick **one** via `etc_proxydetect_provider`. Review its free-tier terms
+before enabling on a public hub - the free tiers differ sharply:
+
+| Provider | `provider` | Free tier | Commercial use on free tier | Auth |
+|---|---|---|---|---|
+| [proxycheck.io](https://proxycheck.io) | `proxycheck` | 1,000/day (100/day without a key) | Not explicitly granted - the terms neither permit nor forbid it. Treat as unconfirmed. | API key as query param (optional) |
+| [VPNAPI.io](https://vpnapi.io) | `vpnapi` | 1,000/day | **No** - the free tier is "personal, non-commercial use" only. A public/community hub needs a paid plan. | API key (required) |
+| [IPQualityScore](https://www.ipqualityscore.com) | `ipqs` | 1,000/**month** (35/day cap) | **Evaluation only** - free/trial use is for testing; production/commercial use needs a paid plan. | API key in the URL path (required) |
+
+**Phase F1 ships the `proxycheck` adapter only**; `vpnapi` and `ipqs`
+land in F2. Selecting an unimplemented provider leaves the plugin inert
+(it logs a one-time note and never queries).
+
+Facts above were verified 2026-07-06; provider limits and terms drift -
+re-check the provider's own pricing / terms pages before relying on them.
+
+### API key
+
+Give the key to the hub **env-var-first** (Docker / systemd friendly) or
+via cfg:
+
+```sh
+# preferred: the key never touches cfg.tbl and is never dumped by the API
+export LUADCH_ETC_PROXYDETECT_API_KEY=your_key_here
+```
+
+```lua
+-- or in cfg/cfg.tbl as a fallback:
+etc_proxydetect_api_key = "your_key_here",
+```
+
+A key in `cfg.tbl` is redacted in `GET /v1/config`, but only once the
+plugin is loaded - so prefer the env var, which the config API never
+dumps. The key is never written to a log or the `+proxydetect` status.
+
+### Enable it
+
+In `cfg/cfg.tbl`, turn the plugin on in `cfg.scripts`:
+
+```lua
+{ "etc_proxydetect.lua", enabled = true },
+```
+
+then set the master toggle, provider, and (recommended) start in
+`log_only` to verify before enforcing:
+
+```lua
+etc_proxydetect_enabled = true,
+etc_proxydetect_provider = "proxycheck",
+etc_proxydetect_action = "log_only",   -- switch to "block" once the logs look right
+```
+
+`+reload` (or restart). Watch op-chat / the audit log for
+`proxydetect.block` entries, then flip `etc_proxydetect_action = "block"`.
+Check state with `+proxydetect` (or `GET /v1/proxydetect`): it shows the
+provider, action mode, blocked types, cached-verdict count, and queries
+used today.
+
+### Config reference
+
+| Key | Default | Meaning |
+|---|---|---|
+| `etc_proxydetect_enabled` | `false` | master toggle (the plugin loads either way; the check is inert when false) |
+| `etc_proxydetect_provider` | `"proxycheck"` | `proxycheck` \| `vpnapi` \| `ipqs` (only `proxycheck` implemented in F1) |
+| `etc_proxydetect_api_key` | `""` | provider key; prefer the `LUADCH_ETC_PROXYDETECT_API_KEY` env var |
+| `etc_proxydetect_action` | `"log_only"` | `log_only` audits + reports a match; `block` kicks + pre-handshake-blocks the IP |
+| `etc_proxydetect_block_types` | `{proxy,vpn,tor}` | which detected types trigger a block (re-evaluated live on every cache hit) |
+| `etc_proxydetect_check_levels` | ops exempt | which user levels are checked (map of level -> bool) |
+| `etc_proxydetect_cache_ttl_sec` | `86400` | how long a verdict is cached and a positive IP stays pre-handshake-blocked |
+| `etc_proxydetect_query_timeout_sec` | `5` | per-lookup HTTP timeout (1..30) |
+| `etc_proxydetect_fail_open` | `true` | on provider error/timeout/quota: `true` = allow (safe), `false` = kick (strict) |
+| `etc_proxydetect_stealth` | `true` | repeat connections dropped silently pre-handshake; the first detection still gets a visible kick |
+| `etc_proxydetect_max_queries_per_day` | `1000` | daily provider-query cap (0 = unlimited) |
+| `etc_proxydetect_kick_reason` | (text) | kick message (block mode only) |
+| `etc_proxydetect_oplevel` | `80` | min level to run `+proxydetect` |
+
+### Failure behaviour: fail-open vs fail-closed
+
+By **default the plugin fails OPEN**: if the provider errors, times out,
+or the daily cap is spent, the connection is **allowed in**. This is
+deliberate - an external HTTP dependency in the connect path should not
+lock every joining user out when the provider has an outage. A
+`proxydetect.query.fail` audit fires so you can see it.
+
+Set `etc_proxydetect_fail_open = false` to fail **closed** (kick on
+provider error) only if you have 24/7 monitoring - a provider outage will
+otherwise reject every new user.
+
+### Design note: two decision points
+
+A proxy IP can be blocked at **two** layers, and they compose:
+
+- **Pre-handshake** (the blocklist accept-hook): an IP already flagged in
+  a *prior* session is dropped at TCP-accept - no query, no handshake.
+- **Post-handshake** (this plugin's `onConnect`): a *new* IP is queried
+  live; the verdict kicks the user and feeds the pre-handshake layer for
+  next time.
+
+Because the verdict is asynchronous, the plugin re-resolves the user from
+its session ID when the answer lands and verifies the CID still matches -
+so a client that inherited a recycled SID is never kicked for the
+departed proxy's verdict.
+
+Changing `etc_proxydetect_block_types` takes effect immediately for
+cached verdicts (the block decision is re-evaluated on every hit), but an
+IP already pushed into the pre-handshake blocklist stays blocked until
+its TTL expires (up to `etc_proxydetect_cache_ttl_sec`).

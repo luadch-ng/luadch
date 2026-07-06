@@ -142,6 +142,16 @@ def override_test_ports(staging_dir: Path):
         (r'\{\s*"etc_blocklist_feeds\.lua",\s*enabled\s*=\s*false\s*\}',
          '{ "etc_blocklist_feeds.lua", enabled = true }'),
         (r"etc_blocklist_feeds_enabled\s*=\s*false", "etc_blocklist_feeds_enabled = true"),
+        # #78 Phase F: turn etc_proxydetect ON (ships OFF). Keep the real
+        # default provider (proxycheck) so the real-sandbox load + onStart
+        # command registration run on every smoke boot, but EMPTY
+        # check_levels so onConnect never fires an outbound provider query -
+        # no network dependency in CI. A sandbox-undeclared-global or a
+        # load-time crash surfaces via test_no_script_errors.
+        (r'\{\s*"etc_proxydetect\.lua",\s*enabled\s*=\s*false\s*\}',
+         '{ "etc_proxydetect.lua", enabled = true }'),
+        (r"etc_proxydetect_enabled\s*=\s*false", "etc_proxydetect_enabled = true"),
+        (r"etc_proxydetect_check_levels = \{[^}]*\}", "etc_proxydetect_check_levels = { }"),
     ]
     for pattern, replacement in rewrites:
         new_text, count = re.subn(pattern, replacement, text, count=1)
@@ -6813,6 +6823,44 @@ def test_blocklist_feeds_status():
             raise TestFailure(f"+blfeeds did not return status: {reply!r}")
 
 
+def test_proxydetect_status():
+    """#78 Phase F etc_proxydetect `+proxydetect` read-only status smoke.
+
+    override_test_ports enables the plugin with EMPTY check_levels, so
+    onConnect never fires an outbound provider query (no network in CI)
+    while the real-hub operator surface is validated end-to-end over an
+    ADC session: the onStart command + HTTP registration, secrets.register,
+    get_status and format_status all run in the restricted sandbox. The
+    async lookup -> kick / store-push flow + SSRF / SID-reuse / fail-open
+    guards are unit-tested with a mocked http_client / blocklist (75
+    checks); a live mock-provider end-to-end is left as an F2 follow-up.
+
+    Sequence:
+      1. Login as dummy (level 100 > etc_proxydetect_oplevel=80).
+      2. `+proxydetect` -> DMSG reply with the status header + provider row.
+    """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
+    def _dcontains(f, substr):
+        return substr in f.replace("\\s", " ")
+
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+
+        sock.sendall(f"BMSG {sid} +proxydetect\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "PROXYDETECT STATUS")
+                and _dcontains(f, "proxycheck"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+proxydetect did not return status: {reply!r}")
+
+
 def test_http_aliases(staging_dir: Path, proc=None):
     """#327: HTTP API CRUD for etc_aliases.
 
@@ -11908,6 +11956,7 @@ TESTS = [
     ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
     ("blocklist admin CLI (#78 Phase B)", test_blocklist_78_phase_b),
     ("blocklist feeds status (#78 Phase E)", test_blocklist_feeds_status),
+    ("proxydetect status (#78 Phase F)", test_proxydetect_status),
     ("S1: fragmented frame reassembled (phase8-io)", test_s1_fragmented_frame_reassembled),
     ("S1: two frames in one segment (phase8-io)", test_s1_two_frames_one_segment),
     ("literal [+!#] bracket hint + no-arg-echo (#137)", test_literal_bracket_command_hint),
