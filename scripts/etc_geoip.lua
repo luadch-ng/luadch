@@ -112,7 +112,11 @@ local table_sort   = table.sort
 
 --// lang
 local msg_denied      = lang.msg_denied      or "You are not allowed to use this command."
-local kick_reason     = lang.msg_kick_reason or cfg.get( "etc_geoip_kick_reason" )
+-- Kick text is operator POLICY, so cfg is the single source of truth
+-- (a message the operator sets in cfg.tbl must actually take effect) -
+-- not a lang key that would silently shadow it. Mirrors
+-- etc_clientblocker's cfg-driven reason.
+local kick_reason     = cfg.get( "etc_geoip_kick_reason" )
                         or "Your region is not permitted on this hub."
 local msg_report      = lang.msg_report      or "[ GEOIP ]--> The user %s with IP %s (%s) is not permitted (%s). Action: %s."
 local msg_db_missing  = lang.msg_db_missing  or "etc_geoip.lua: %s database not found at '%s' - GeoIP checks for it are disabled. Run geoipupdate (see docs/BLOCKLIST.md)."
@@ -169,12 +173,18 @@ local function _build_sets( )
 end
 
 
--- Open one DB path into a reader. A missing / corrupt file is NOT an
--- error - it logs once and returns nil so the plugin stays inert for
--- that DB. On success, emit a one-time staleness warning if the DB
+-- (Re)open one DB path, given the reader currently in use for it.
+--   - success:        close the old reader (mmdb contract) + return the new one.
+--   - open failure:   RETAIN `current` and warn once. A transient failure
+--                     (e.g. a non-atomic DB replace mid-write, a brief
+--                     permission blip) must NOT null a working reader and
+--                     silently disable enforcement until the next recheck.
+--                     First open (current == nil) therefore just stays nil
+--                     (inert) - identical to the old behaviour.
+-- On a successful open, emit a one-time staleness warning if the DB
 -- build_epoch is older than 30 days.
-local function _open_reader( which, path )
-    if type( path ) ~= "string" or path == "" then return nil end
+local function _reopen( which, path, current )
+    if type( path ) ~= "string" or path == "" then return current end
     local reader, err = mmdb.open( path )
     if not reader then
         if not warned_missing[ which ] then
@@ -185,9 +195,10 @@ local function _open_reader( which, path )
                     { db = which, path = path, err = tostring( err ) } ) )
             end
         end
-        return nil
+        return current    -- keep the last-good reader (or nil on first open)
     end
     warned_missing[ which ] = nil
+    if current and current ~= reader and current.close then current:close( ) end
     local meta = reader.metadata or { }
     local built = tonumber( meta.build_epoch )
     local built_str = built and os.date( "!%Y-%m-%d", built ) or "?"
@@ -203,9 +214,13 @@ local function _open_reader( which, path )
 end
 
 
+-- Open / refresh both DBs. No-op when the feature is disabled so a
+-- loaded-but-off plugin does zero DB I/O (the onConnect check is
+-- likewise gated on `enabled`).
 local function _open_all( )
-    country_reader = _open_reader( "country", country_db_path )
-    asn_reader     = _open_reader( "asn", asn_db_path )
+    if not enabled then return end
+    country_reader = _reopen( "country", country_db_path, country_reader )
+    asn_reader     = _reopen( "asn", asn_db_path, asn_reader )
 end
 
 
@@ -371,6 +386,7 @@ hub.setlistener( "onTimer", { },
         -- Re-read the DB on a deadline so a `geoipupdate` cron write is
         -- picked up without a manual +reload. Reopen into fresh locals;
         -- the swap is atomic (single-threaded, no yield mid-open).
+        if not enabled then return end
         local now = os_time( )
         if now >= next_recheck then
             next_recheck = now + recheck_interval

@@ -19,6 +19,7 @@ pinned by the SHA-256 list below regardless of upstream branch moves.
 | `MaxMind-DB-test-ipv4-28.mmdb` | 4 | 28 | 28-bit nibble-split node encoding + native-IPv4 start node |
 | `MaxMind-DB-test-ipv6-32.mmdb` | 6 | 32 | 32-bit node encoding + IPv6 traversal + v4-in-v6 miss path |
 | `GeoLite2-Country-Test.mmdb` | 6 | 28 | Realistic Country schema (`country.iso_code`, nested `names`) + v4-in-v6 hits |
+| `GeoLite2-ASN-Test.mmdb` | 6 | 28 | Realistic ASN schema (`autonomous_system_number` / `_organization`); e.g. `1.0.0.0/24` -> AS15169 (Google). Used by `etc_geoip_test.lua` for the ASN block path |
 
 Together these cover all three record sizes (24 / 28 / 32), both IP
 families, the v4-in-v6 embedding, all data types, and the real Country
@@ -35,6 +36,7 @@ test data, not a real GeoLite2 distribution.
 ## SHA-256
 
 ```
+75901b98ed6e58d3bd41af9985044b747a7ec0be1369f930c24f5e044427181a  GeoLite2-ASN-Test.mmdb
 6996ce679243c7f719b901ebe3b490048af2fb5965163f083857533841154fd8  GeoLite2-Country-Test.mmdb
 1b34970ee2f8b05c03a478e90b8e5266a01ea2f9385f361bfd3d31edd8d4ce3a  MaxMind-DB-test-decoder.mmdb
 fd0102ee5e1b72b17d00ee01599547e641186f6561f037b91f5df6102416dbb4  MaxMind-DB-test-ipv4-28.mmdb

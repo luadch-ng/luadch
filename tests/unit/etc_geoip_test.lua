@@ -184,6 +184,36 @@ do
 end
 
 ----------------------------------------------------------------------
+-- ASN path end-to-end: real GeoLite2-ASN fixture -> classify -> block
+----------------------------------------------------------------------
+
+do
+    local ASN_FIX = "tests/unit/fixtures/mmdb/GeoLite2-ASN-Test.mmdb"
+    _cfg.etc_geoip_asn_db_path = ASN_FIX
+    _cfg.etc_geoip_blocked_countries = { }        -- isolate the ASN path
+    _cfg.etc_geoip_blocked_asns = { 15169 }       -- Google, = 1.0.0.0/24 in the fixture
+    _cfg.etc_geoip_action = "block"
+    local p = load_plugin( )
+
+    local _c, asn, org = p.classify( "1.0.0.1" )
+    eq( "classify asn number", asn, 15169 )
+    eq( "classify asn org", org, "Google Inc." )
+    eq( "resolve blocked asn (live)", p.resolve( nil, asn ), "ASN=15169" )
+
+    local check = _listeners.onConnect
+    local r = check( make_user{ level = 20, ip = "1.0.0.1" } )     -- AS15169, blocked
+    eq( "asn block: PROCESSED", r, "PROCESSED" )
+    eq( "asn block: kill emitted", #_kicks, 1 )
+    eq( "asn block: audit meta asn", _audit[ 1 ] and _audit[ 1 ].meta.asn, 15169 )
+    eq( "asn block: audit matched", _audit[ 1 ] and _audit[ 1 ].meta.matched, "ASN=15169" )
+
+    -- restore the country-path config for the tests below
+    _cfg.etc_geoip_asn_db_path = "tests/unit/fixtures/mmdb/does-not-exist.mmdb"
+    _cfg.etc_geoip_blocked_countries = { "GB", "se" }
+    _cfg.etc_geoip_blocked_asns = { 4134 }
+end
+
+----------------------------------------------------------------------
 -- onConnect: block mode kicks a blocked-country user
 ----------------------------------------------------------------------
 
@@ -278,6 +308,31 @@ do
     falsy( "no DB: onConnect inert", r )
     eq( "no DB: no kick", #_kicks, 0 )
     falsy( "no DB: country reader absent", p.get_status( ).country_db.loaded )
+    _cfg.etc_geoip_country_db_path = FIX
+end
+
+----------------------------------------------------------------------
+-- SEC-1: a FAILED onTimer reopen must RETAIN the last-good reader (a
+-- transient DB failure, e.g. a non-atomic replace mid-write, must not
+-- silently disable enforcement). Uses a fake clock to force the reopen.
+----------------------------------------------------------------------
+
+do
+    local real_os = _real.os
+    local clock = { t = 1000000 }
+    _G.os = { time = function( ) return clock.t end,
+              date = real_os.date, difftime = real_os.difftime, clock = real_os.clock }
+    _cfg.etc_geoip_country_db_path = FIX
+    local p = load_plugin( )                      -- onStart opens the good DB
+    truthy( "retain: reader loaded at start", p.get_status( ).country_db.loaded )
+
+    _cfg.etc_geoip_country_db_path = "tests/unit/fixtures/mmdb/gone.mmdb"  -- now bad
+    clock.t = clock.t + 3601                       -- past next_recheck
+    _listeners.onTimer( )                          -- reopen ATTEMPT fails
+    truthy( "retain: reader kept after failed reopen (SEC-1)", p.get_status( ).country_db.loaded )
+    eq( "retain: classify still works", ( select( 1, p.classify( "81.2.69.160" ) ) ), "GB" )
+
+    _G.os = real_os
     _cfg.etc_geoip_country_db_path = FIX
 end
 

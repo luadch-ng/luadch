@@ -1,7 +1,8 @@
 return {
 
+    -- NOTE: the blocked-user kick text is operator policy and lives in
+    -- the cfg key `etc_geoip_kick_reason`, NOT here.
     msg_denied      = "You are not allowed to use this command.",
-    msg_kick_reason = "Your region is not permitted on this hub.",
     msg_report      = "[ GEOIP ]--> The user %s with IP %s (%s) is not permitted (%s). Action: %s.",
 
     msg_db_missing  = "etc_geoip.lua: %s database not found at '%s' - GeoIP checks for it are disabled. Run geoipupdate (see docs/BLOCKLIST.md).",

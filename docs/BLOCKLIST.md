@@ -153,8 +153,12 @@ snapshot is available read-only at `GET /v1/geoip`.
 | `etc_geoip_action` | `"log_only"` | `"log_only"` or `"block"` |
 | `etc_geoip_check_levels` | ops exempt | which user levels are checked |
 | `etc_geoip_recheck_interval_sec` | `3600` | how often the `.mmdb` is re-read (picks up geoipupdate writes) |
-| `etc_geoip_kick_reason` | "Your region is not permitted..." | kick message (block mode) |
+| `etc_geoip_kick_reason` | "Your region is not permitted..." | kick message (block mode); operator policy text, set it here |
 | `etc_geoip_oplevel` | `80` | min level for `+geoip` |
+| `etc_geoip_report` | `true` | fire an op-chat / hubbot report on every match |
+| `etc_geoip_report_hubbot` | `false` | send the report as a hubbot PM to ops >= `etc_geoip_llevel` |
+| `etc_geoip_report_opchat` | `true` | send the report into op-chat |
+| `etc_geoip_llevel` | `60` | min level for the hubbot-PM report |
 
 ### Troubleshooting
 
@@ -166,8 +170,12 @@ snapshot is available read-only at `GET /v1/geoip`.
 - **A user from an allowed country is blocked / vice versa.** GeoIP is
   approximate and changes over time. Verify with `+geoip` and the audit
   log; keep the DB fresh.
-- **Dual-stack hubs.** IPv4 clients arriving as `::ffff:a.b.c.d` resolve
-  correctly (the reader handles the v4-mapped form).
+- **Dual-stack hubs.** On a `::` listener, IPv4 clients arrive as
+  `::ffff:a.b.c.d` and resolve correctly - MaxMind's GeoLite2 databases
+  are IPv6 (`ip_version = 6`) and alias the v4-mapped range onto the v4
+  data. Use the GeoLite2 databases `geoipupdate` provides; a
+  hand-built IPv4-only or non-aliasing DB would silently not geo-check
+  v4-mapped clients.
 
 ---
 
