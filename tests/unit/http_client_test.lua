@@ -18,13 +18,24 @@
 -- real stdlib so the cafile-existence-probe (Precursor 0b of #78
 -- arc) inside the TLS-handshake branch works during smoke; the unit
 -- tests here never reach that branch.
+-- Capture out.put / out.error so the log_url redaction test (Precursor F0
+-- of the #78 arc) can assert what reached the log. out_put / out_error are
+-- bound as module-load-time locals, so the capturing functions must be in
+-- the shim BEFORE the module is loaded below.
+local _logged = {}
+local function _cap( ... )
+    local parts = {}
+    for i = 1, select( "#", ... ) do parts[ i ] = tostring( ( select( i, ... ) ) ) end
+    _logged[ #_logged + 1 ] = table.concat( parts )
+end
+
 local _real = {
     type = type, tostring = tostring, tonumber = tonumber,
     pcall = pcall, pairs = pairs, ipairs = ipairs,
     string = string, table = table,
     socket = { gettime = function() return 0 end },
     ssl = {},
-    out = { put = function() end, error = function() end },
+    out = { put = _cap, error = _cap },
     io = io,
     os = os,     -- download_to_file mode uses os.remove / os.rename
     coroutine = coroutine,
@@ -484,6 +495,84 @@ do
     eq( "dl: yield-across-pcall content", cY, "PARTIAL2" )
 
     cleanup_dl()
+end
+
+----------------------------------------------------------------------
+-- log_url redaction (Precursor F0 of #78 arc): request() logs the request
+-- URL on failure/crash; a key in the query string or path would leak into
+-- error.log / event.log. A caller-supplied log_url is logged instead.
+----------------------------------------------------------------------
+do
+    -- request() resolves `server` via use"server" at call time; give it an
+    -- addtimer that captures the coroutine so the test can drive it.
+    local captured
+    _real.server = { addtimer = function( co ) captured = co end }
+
+    local start = #_logged
+    local queued = hc.request{
+        url      = "https://vpnapi.io/api/1.2.3.4?key=SECRETKEY123",
+        log_url  = "https://vpnapi.io/api/1.2.3.4",
+        on_error = function() end,
+    }
+    ok( "log_url: request queued", queued == true )
+    ok( "log_url: coroutine captured", captured ~= nil )
+    -- Drive the coroutine to completion: drive() fails (the socket stub has
+    -- no tcp), request()'s pcall wrapper catches it, and the failure log
+    -- line fires - now with log_url instead of the key-bearing url.
+    if captured then
+        for _ = 1, 100 do
+            if coroutine.status( captured ) == "dead" then break end
+            local o = coroutine.resume( captured )
+            if not o then break end
+        end
+    end
+    local blob = table.concat( _logged, "\n", start + 1 )
+    ok( "log_url: something logged on failure", #_logged > start )
+    ok( "log_url: API key NOT in the log", blob:find( "SECRETKEY123", 1, true ) == nil )
+    ok( "log_url: redacted url IS logged", blob:find( "vpnapi.io/api/1.2.3.4", 1, true ) ~= nil )
+
+    -- validation: control bytes + non-string log_url rejected synchronously
+    local badc = hc.request{ url = "https://h/x", log_url = "https://h/\r\nx", on_error = function() end }
+    ok( "log_url: rejects control bytes", badc == false )
+    local badt = hc.request{ url = "https://h/x", log_url = 123, on_error = function() end }
+    ok( "log_url: rejects non-string", badt == false )
+
+    -- Also cover the "failed" log line (out_put): stub socket.tcp so drive()
+    -- RETURNS a clean (false, err) instead of throwing (the crash test above
+    -- only exercised out_error). Both lines must redact symmetrically.
+    _real.socket.tcp = function() return nil, "stub: no tcp" end
+    local start2 = #_logged
+    local captured2
+    _real.server = { addtimer = function( co ) captured2 = co end }
+    hc.request{
+        url      = "https://vpnapi.io/api/9.9.9.9?key=FAILKEY456",
+        log_url  = "https://vpnapi.io/api/9.9.9.9",
+        on_error = function() end,
+    }
+    if captured2 then
+        for _ = 1, 100 do
+            if coroutine.status( captured2 ) == "dead" then break end
+            if not coroutine.resume( captured2 ) then break end
+        end
+    end
+    local blob2 = table.concat( _logged, "\n", start2 + 1 )
+    ok( "log_url: failed-line key NOT in the log", blob2:find( "FAILKEY456", 1, true ) == nil )
+    ok( "log_url: failed-line redacted url logged", blob2:find( "vpnapi.io/api/9.9.9.9", 1, true ) ~= nil )
+    _real.socket.tcp = nil
+
+    -- empty-string log_url is treated as unset -> falls back to req.url
+    local start3 = #_logged
+    local captured3
+    _real.server = { addtimer = function( co ) captured3 = co end }
+    hc.request{ url = "https://host.example/path", log_url = "", on_error = function() end }
+    if captured3 then
+        for _ = 1, 100 do
+            if coroutine.status( captured3 ) == "dead" then break end
+            if not coroutine.resume( captured3 ) then break end
+        end
+    end
+    local blob3 = table.concat( _logged, "\n", start3 + 1 )
+    ok( "log_url: empty string falls back to url", blob3:find( "host.example/path", 1, true ) ~= nil )
 end
 
 io.write( string.format( "\n%d checks, %d failures\n", checks, failures ) )

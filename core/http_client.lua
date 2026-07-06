@@ -54,6 +54,14 @@
           cafile      = "certs/ca-bundle.pem", -- CA bundle path; default = bundled
           download_to_file = "cfg/feed.json", -- optional: stream the body
                                        -- to this path instead of RAM (see below)
+          log_url     = "https://host/path",  -- optional: a key-free URL to
+                                       -- log on failure INSTEAD of `url`. The
+                                       -- failure/crash log lines below print
+                                       -- the request URL; if the real `url`
+                                       -- carries an API key in its query string
+                                       -- or path, pass a redacted `log_url` so
+                                       -- the key never reaches error.log /
+                                       -- event.log. Caller builds it key-free.
           on_complete = function( res ) end,  -- res = { status, headers, body }
           on_error    = function( err ) end,  -- err = string
       }
@@ -689,6 +697,15 @@ request = function( req )
             return false, "download_to_file path contains control bytes"
         end
     end
+    if req.log_url ~= nil then
+        -- Optional key-free URL logged in place of req.url on failure /
+        -- crash (the two out.* lines below), so an API key carried in the
+        -- real url's query string or path never reaches the log. Caller-
+        -- built; validated for type + control bytes only (it is only ever
+        -- logged, never used for the connection).
+        if type( req.log_url ) ~= "string" then return false, "log_url must be a string" end
+        if has_ctrl( req.log_url ) then return false, "log_url contains control bytes" end
+    end
 
     if _inflight >= MAX_INFLIGHT then
         return false, "http_client: in-flight cap (" .. MAX_INFLIGHT .. ") reached"
@@ -712,6 +729,12 @@ request = function( req )
 
     _inflight = _inflight + 1
     if req.download_to_file then _dl_active[ req.download_to_file ] = true end
+    -- URL to show in the failure/crash logs: the redacted log_url when the
+    -- caller supplied a NON-EMPTY one (key in the real url), else the url
+    -- itself. "" is treated as unset (mirrors the cafile handling) so a
+    -- blank log_url never yields a useless empty URL in the log.
+    local log_url = req.url
+    if req.log_url and req.log_url ~= "" then log_url = req.log_url end
     local co = coroutine_create( function( )
         -- pcall so a thrown error in drive() still decrements
         -- _inflight (otherwise a crash leaks an in-flight slot and,
@@ -722,12 +745,12 @@ request = function( req )
         _inflight = _inflight - 1
         if req.download_to_file then _dl_active[ req.download_to_file ] = nil end
         if not pok then
-            out_error( "http_client: request to ", tostring( req.url ), " crashed: ", tostring( a ) )
+            out_error( "http_client: request to ", tostring( log_url ), " crashed: ", tostring( a ) )
             safe_cb( req.on_error, "internal error" )
         elseif a == true then
             safe_cb( req.on_complete, b )
         else
-            out_put( "http_client: request to ", tostring( req.url ), " failed: ", tostring( a == false and b or a ) )
+            out_put( "http_client: request to ", tostring( log_url ), " failed: ", tostring( a == false and b or a ) )
             safe_cb( req.on_error, ( a == false and b ) or a )
         end
     end )
