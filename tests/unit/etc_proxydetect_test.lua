@@ -431,9 +431,104 @@ end
 -- unknown provider -> inert (no request, no crash)
 ----------------------------------------------------------------------
 do
-    load_plugin( { etc_proxydetect_provider = "vpnapi" } )   -- not implemented in F1
+    load_plugin( { etc_proxydetect_provider = "bogus" } )   -- adapter = nil
     connect( mkuser( 20, "1.2.3.4", "S1", "C1" ) )
     eq( "unknown provider: no request", #_requests, 0 )
+end
+
+----------------------------------------------------------------------
+-- keyed provider (vpnapi) without a key -> inert
+----------------------------------------------------------------------
+do
+    load_plugin( { etc_proxydetect_provider = "vpnapi" } )   -- needs_key, no key set
+    connect( mkuser( 20, "1.2.3.4", "S1", "C1" ) )
+    eq( "vpnapi no key: no request (inert)", #_requests, 0 )
+end
+
+----------------------------------------------------------------------
+-- vpnapi interpret (security.{vpn,proxy,tor,relay} booleans)
+----------------------------------------------------------------------
+do
+    local p = load_plugin( { etc_proxydetect_provider = "vpnapi", _resolved_key = "K" } )
+    local t = p.classify( { security = { vpn = true, proxy = false, tor = false, relay = false } }, "1.2.3.4" )
+    truthy( "vpnapi: security.vpn -> vpn", t and t.vpn )
+    local t2 = p.classify( { security = { vpn = false, proxy = false, tor = true, relay = false } }, "1.2.3.4" )
+    truthy( "vpnapi: security.tor -> tor", t2 and t2.tor )
+    local t3 = p.classify( { security = { relay = true } }, "1.2.3.4" )
+    truthy( "vpnapi: relay -> relay type", t3 and t3.relay )
+    falsy( "vpnapi: relay is NOT proxy (not in default block_types)", t3 and t3.proxy )
+    local t4 = p.classify( { security = { vpn = false, proxy = false, tor = false, relay = false } }, "1.2.3.4" )
+    truthy( "vpnapi: all false -> clean", type( t4 ) == "table" and not next( t4 ) )
+    falsy( "vpnapi: no security block -> provider error", p.classify( { message = "Invalid API key." }, "1.2.3.4" ) )
+end
+
+----------------------------------------------------------------------
+-- vpnapi request: key in url, key-free log_url (F0 leak guard)
+----------------------------------------------------------------------
+do
+    load_plugin( { etc_proxydetect_provider = "vpnapi", _resolved_key = "VPNKEY" } )
+    connect( mkuser( 20, "1.2.3.4", "S1", "C1" ) )
+    eq( "vpnapi: request fired", #_requests, 1 )
+    local r = _requests[ 1 ]
+    truthy( "vpnapi: url carries the key", r.url:find( "VPNKEY", 1, true ) ~= nil )
+    truthy( "vpnapi: log_url set + key-free", r.log_url and r.log_url:find( "VPNKEY", 1, true ) == nil )
+    truthy( "vpnapi: log_url has the ip", r.log_url:find( "1.2.3.4", 1, true ) ~= nil )
+end
+
+----------------------------------------------------------------------
+-- ipqs interpret (success + proxy/vpn/tor booleans)
+----------------------------------------------------------------------
+do
+    local p = load_plugin( { etc_proxydetect_provider = "ipqs", _resolved_key = "K" } )
+    local t = p.classify( { success = true, proxy = true, vpn = true, tor = false }, "1.2.3.4" )
+    truthy( "ipqs: proxy -> proxy", t and t.proxy )
+    truthy( "ipqs: vpn -> vpn", t and t.vpn )
+    local t2 = p.classify( { success = true, proxy = false, vpn = false, tor = false }, "1.2.3.4" )
+    truthy( "ipqs: all false -> clean", type( t2 ) == "table" and not next( t2 ) )
+    falsy( "ipqs: success=false -> provider error", p.classify( { success = false, message = "Invalid key." }, "1.2.3.4" ) )
+end
+
+----------------------------------------------------------------------
+-- ipqs request: key in the url PATH, redacted log_url (F0 leak guard)
+----------------------------------------------------------------------
+do
+    load_plugin( { etc_proxydetect_provider = "ipqs", _resolved_key = "IPQSKEY" } )
+    connect( mkuser( 20, "9.9.9.9", "S1", "C1" ) )
+    local r = _requests[ 1 ]
+    truthy( "ipqs: url carries the key (path)", r.url:find( "IPQSKEY", 1, true ) ~= nil )
+    truthy( "ipqs: log_url key-free", r.log_url and r.log_url:find( "IPQSKEY", 1, true ) == nil )
+    truthy( "ipqs: log_url has REDACTED", r.log_url:find( "REDACTED", 1, true ) ~= nil )
+end
+
+----------------------------------------------------------------------
+-- provider-failure op-chat alert (threshold + debounce + reset-on-success)
+----------------------------------------------------------------------
+do
+    load_plugin( { etc_proxydetect_fail_alert_threshold = 2 } )
+    connect( mkuser( 20, "1.1.1.1", "S1", "C1" ) ); complete( 200, '{"status":"denied"}' )   -- fail 1
+    connect( mkuser( 20, "2.2.2.2", "S2", "C2" ) ); complete( 200, '{"status":"denied"}' )   -- fail 2 -> alert
+    local alerted = false
+    for _, m in ipairs( _reports ) do
+        if m:find( "proxycheck", 1, true ) and m:find( "failing", 1, true ) then alerted = true end
+    end
+    truthy( "fail-alert: op-chat alerted at threshold", alerted )
+    local after_alert = #_reports
+    connect( mkuser( 20, "3.3.3.3", "S3", "C3" ) ); complete( 200, '{"status":"denied"}' )   -- fail 3, same window
+    eq( "fail-alert: debounced within window", #_reports, after_alert )
+    -- cross-window: a rollover restarts the count but must NOT re-arm the
+    -- alert (sticky until a success) - else a sustained outage spams op-chat.
+    _now = _now + 61
+    connect( mkuser( 20, "4.4.4.4", "S4", "C4" ) ); complete( 200, '{"status":"denied"}' )   -- new window fail 1
+    connect( mkuser( 20, "5.5.5.5", "S5", "C5" ) ); complete( 200, '{"status":"denied"}' )   -- new window fail 2 (>= threshold)
+    eq( "fail-alert: NO re-alert across window during sustained outage", #_reports, after_alert )
+    -- recovery clears the debounce; a fresh outage can alert again
+    connect( mkuser( 20, "6.6.6.6", "S6", "C6" ) ); complete( 200, CLEAN_JSON )               -- success -> reset
+    local before = #_reports
+    connect( mkuser( 20, "7.7.7.7", "S7", "C7" ) ); complete( 200, '{"status":"denied"}' )   -- fail 1 < threshold
+    eq( "fail-alert: single post-reset failure does not re-alert", #_reports, before )
+    connect( mkuser( 20, "8.8.8.8", "S8", "C8" ) ); complete( 200, '{"status":"denied"}' )   -- fail 2 -> re-alert
+    truthy( "fail-alert: re-alerts after recovery + fresh outage", #_reports > before )
+    _now = 1000000
 end
 
 ----------------------------------------------------------------------

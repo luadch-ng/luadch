@@ -9,6 +9,7 @@ return {
     msg_key_missing  = "etc_proxydetect.lua: provider '%s' needs an API key (etc_proxydetect_api_key or LUADCH_ETC_PROXYDETECT_API_KEY) - the plugin is inert.",
     msg_tos_note     = "etc_proxydetect.lua: provider '%s' - review its free-tier terms (see docs/BLOCKLIST.md): %s.",
     msg_quota        = "etc_proxydetect.lua: daily query cap (%d) reached - skipping lookups (fail-open) until the window resets.",
+    msg_fail_alert   = "[ PROXYDETECT ]--> provider '%s' lookups failing: %d errors in %ds - detection is degraded (fail-%s).",
 
     msg_status_header   = "\n=== PROXYDETECT STATUS ===",
     msg_status_footer   = "=== END ===\n",

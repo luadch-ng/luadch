@@ -1081,10 +1081,10 @@ return { -- the settings are a lua table, do not tough this!
     --// etc_proxydetect.lua settings | live proxy/VPN/Tor detection via a provider API on connect (#78 Phase F, closes #352). OFF by default - see docs/BLOCKLIST.md
 
     etc_proxydetect_enabled = false,  -- master toggle; plugin loads either way but the onConnect check is inert when false (boolean)
-    etc_proxydetect_provider = "proxycheck",  -- detection provider, pick ONE: "proxycheck" (implemented); "vpnapi" / "ipqs" arrive in F2 (string). Review each provider's free-tier terms in docs/BLOCKLIST.md
-    etc_proxydetect_api_key = "",  -- provider API key (string). Prefer the env var LUADCH_ETC_PROXYDETECT_API_KEY (Docker, never dumped); a cfg.tbl key is redacted in GET /v1/config only once the plugin loads. proxycheck works keyless (100/day); a key raises it to 1000/day
+    etc_proxydetect_provider = "proxycheck",  -- detection provider, pick ONE: "proxycheck" / "vpnapi" / "ipqs" (string). Review each provider's free-tier terms in docs/BLOCKLIST.md (vpnapi free = non-commercial; ipqs free = evaluation-only, 1000/month)
+    etc_proxydetect_api_key = "",  -- provider API key (string). Prefer the env var LUADCH_ETC_PROXYDETECT_API_KEY (Docker, never dumped); a cfg.tbl key is redacted in GET /v1/config only once the plugin loads. proxycheck works keyless (100/day, 1000/day keyed); vpnapi + ipqs require a key
     etc_proxydetect_action = "log_only",  -- "log_only" audits+reports a match but lets the user in (verify first); "block" kicks + pushes the IP into the pre-handshake blocklist (string)
-    etc_proxydetect_block_types = {  -- which detected types trigger a block (table of type -> boolean); proxycheck reports proxy / vpn / tor
+    etc_proxydetect_block_types = {  -- which detected types trigger a block (table of type -> boolean); proxycheck/ipqs report proxy/vpn/tor, vpnapi also "relay" (iCloud Private Relay) - add relay=true only to block privacy relays (kicks Apple users)
         proxy = true,
         vpn   = true,
         tor   = true,
@@ -1094,6 +1094,7 @@ return { -- the settings are a lua table, do not tough this!
     etc_proxydetect_fail_open = true,  -- provider error/timeout/quota: true = let the user in (fail-open, safe default); false = kick (fail-closed, risky without 24/7 ops) (boolean)
     etc_proxydetect_stealth = true,  -- repeat connections silently dropped pre-handshake; the FIRST detection still gets a visible kick (boolean)
     etc_proxydetect_max_queries_per_day = 1000,  -- daily provider-query cap (quota/cost safety valve); over the cap -> skip lookup + fail-open. 0 = unlimited (integer)
+    etc_proxydetect_fail_alert_threshold = 10,  -- this many provider failures within 60s fires one op-chat alert (down provider / bad key); 0 = disabled (integer)
     etc_proxydetect_kick_reason = "Proxy / VPN / Tor connections are not permitted on this hub.",  -- kick message (block mode only) (string)
     etc_proxydetect_oplevel = 80,  -- min level to run `+proxydetect` read-only status (integer)
 

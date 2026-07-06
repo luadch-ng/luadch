@@ -6832,8 +6832,9 @@ def test_proxydetect_status():
     ADC session: the onStart command + HTTP registration, secrets.register,
     get_status and format_status all run in the restricted sandbox. The
     async lookup -> kick / store-push flow + SSRF / SID-reuse / fail-open
-    guards are unit-tested with a mocked http_client / blocklist (75
-    checks); a live mock-provider end-to-end is left as an F2 follow-up.
+    guards + all three provider adapters (proxycheck / vpnapi / ipqs) are
+    unit-tested with a mocked http_client / blocklist; a live mock-provider
+    end-to-end is left as a follow-up.
 
     Sequence:
       1. Login as dummy (level 100 > etc_proxydetect_oplevel=80).
