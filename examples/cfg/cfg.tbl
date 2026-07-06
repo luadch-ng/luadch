@@ -1059,6 +1059,17 @@ return { -- the settings are a lua table, do not tough this!
     etc_blocklist_feeds_spamhaus_v6_enabled = false,  -- pull Spamhaus DROP v6 (boolean); shares the spamhaus interval + stealth
     etc_blocklist_feeds_spamhaus_v6_url = "https://www.spamhaus.org/drop/drop_v6.json",  -- Spamhaus DROP v6 JSONL URL (string)
 
+    etc_blocklist_feeds_abuseipdb_enabled = false,  -- pull the AbuseIPDB blacklist (boolean); needs the API key below
+    etc_blocklist_feeds_abuseipdb_url = "https://api.abuseipdb.com/api/v2/blacklist?plaintext",  -- blacklist download endpoint, plaintext one IP per line (string)
+    etc_blocklist_feeds_abuseipdb_refresh_interval_sec = 86400,  -- refresh cadence (integer); clamped UP to the 21600s (6h) minimum - free-tier blacklist download is 5/day
+    etc_blocklist_feeds_abuseipdb_stealth = false,  -- stealth-drop AbuseIPDB IPs (boolean)
+    etc_blocklist_feeds_abuseipdb_key = "",  -- AbuseIPDB API key (string). Prefer the env var LUADCH_ETC_BLOCKLIST_FEEDS_ABUSEIPDB_KEY (Docker, never dumped). A cfg.tbl key here is redacted in GET /v1/config only once the plugin is loaded. Empty = feed disabled
+
+    etc_blocklist_feeds_generic_enabled = false,  -- pull an operator-supplied line-list URL (boolean)
+    etc_blocklist_feeds_generic_url = "",  -- your line-list URL, one IP/CIDR per line, #/; comments tolerated (string). Empty = feed skipped
+    etc_blocklist_feeds_generic_refresh_interval_sec = 3600,  -- refresh cadence (integer); clamped UP to the 300s (5min) minimum
+    etc_blocklist_feeds_generic_stealth = false,  -- stealth-drop generic-feed IPs (boolean)
+
     etc_blocklist_feeds_oplevel = 80,  -- min level to run `+blfeeds` read-only status (integer)
 
     etc_blocklist_feeds_report = true,  -- fire etc_report on a refresh + on an ok->fail transition (boolean)

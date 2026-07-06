@@ -214,10 +214,36 @@ a shrinking feed leaves no stale rows.
 | `tor` | Tor exit nodes | `check.torproject.org/torbulkexitlist` | 30 min | Plain IPv4, one per line. **Do not** point it at `dan.me.uk` - that host firewall-bans IPs fetching more than once per 30 min. |
 | `spamhaus` | Spamhaus DROP v4 | `spamhaus.org/drop/drop_v4.json` | 1 h | JSON (one `{"cidr","sblid"}` per line). Spamhaus policy is "at least 1 h apart"; the default is 24 h (DROP churns slowly). EDROP merged into DROP in 2024 - there is no separate EDROP feed. |
 | `spamhaus_v6` | Spamhaus DROP v6 | `spamhaus.org/drop/drop_v6.json` | 1 h | Same format; shares the `spamhaus` interval + stealth toggle. |
+| `abuseipdb` | AbuseIPDB blacklist | `api.abuseipdb.com/api/v2/blacklist?plaintext` | 6 h | Top-N most-reported IPs (free tier = 10,000 individual IPs). **Needs an API key.** The blacklist-download endpoint is capped at 5 requests/day on the free tier - a separate limit from the "1,000 Checks & Reports" and "100 Block Checks" quotas shown on the pricing page - so the interval floor is 6 h (4 pulls/day). Default 24 h. |
+| `generic` | operator URL | (none - you set it) | 5 min | Any line-list of one IP or CIDR per line (`#`/`;` comment lines and inline trailing comments tolerated). No API key. `etc_blocklist_feeds_generic_enabled` does nothing until you set `etc_blocklist_feeds_generic_url`. |
 
 The operator's configured refresh interval is **clamped up** to the
 feed's minimum at runtime - polling faster than a provider allows gets
 the hub's IP firewalled by that provider.
+
+### AbuseIPDB API key
+
+The `abuseipdb` feed needs a free API key (register at abuseipdb.com).
+Give it to the hub **env-var-first** (Docker-friendly) or via cfg:
+
+```sh
+# preferred (Docker / systemd): the key never touches cfg.tbl
+export LUADCH_ETC_BLOCKLIST_FEEDS_ABUSEIPDB_KEY=your_key_here
+```
+
+```lua
+-- or in cfg/cfg.tbl as a fallback:
+etc_blocklist_feeds_abuseipdb_key = "your_key_here",
+```
+
+A key placed in `cfg.tbl` is redacted in `GET /v1/config`, but only once
+the plugin is loaded (in `cfg.scripts`) - so prefer the env var, which is
+never dumped by the config API at all. The key is sent in the `Key:`
+request header and is never written to a log or the `+blfeeds` status.
+
+If the feed is enabled but no key is found, the plugin leaves it disabled
+(it never fires a keyless request) and shows it as `enabled=false` in
+`+blfeeds`; with `log_scripts` on it also logs a one-time warning.
 
 ### Enable a feed
 

@@ -14,6 +14,12 @@
       - spamhaus    : Spamhaus DROP v4 (JSONL {"cidr","sblid"} per line)
                       https://www.spamhaus.org/drop/drop_v4.json
       - spamhaus_v6 : Spamhaus DROP v6 (same JSONL, drop_v6.json)
+      - abuseipdb   : AbuseIPDB blacklist (top-N reported IPs, plaintext).
+                      Needs an API key (Key header, env-var-first via
+                      secrets); free-tier blacklist download is 5/day so
+                      the interval floor is 6 h.
+      - generic     : operator-supplied line-list URL (IP/CIDR per line,
+                      #/; comments) - no key, no default URL.
 
     Design:
       - Non-blocking fetch via core/http_client (verify=peer against the
@@ -47,8 +53,9 @@
       GET /v1/blocklist/feeds same, read-only (policy is cfg-driven)
 
     v0.01:
-      - initial: tor + spamhaus(+v6) adapters, RAM-mode fetch,
-        bulk_replace ingest, TTL backstop, +blfeeds status + HTTP mirror.
+      - initial: tor + spamhaus(+v6) + abuseipdb (API key via secrets) +
+        generic operator-URL adapters, RAM-mode fetch, bulk_replace
+        ingest, TTL backstop, +blfeeds status + HTTP mirror.
 
 ]]--
 
@@ -92,6 +99,7 @@ local msg_denied       = lang.msg_denied       or "You are not allowed to use th
 local msg_refresh_ok   = lang.msg_refresh_ok   or "etc_blocklist_feeds.lua: feed '%s' refreshed: +%d / -%d entries (%d skipped)."
 local msg_refresh_fail = lang.msg_refresh_fail  or "etc_blocklist_feeds.lua: feed '%s' refresh FAILED: %s (keeping last-good entries)."
 local msg_clamped      = lang.msg_clamped      or "etc_blocklist_feeds.lua: feed '%s' refresh interval raised to the %ds minimum (feed policy)."
+local msg_abuseipdb_no_key = lang.msg_abuseipdb_no_key or "etc_blocklist_feeds.lua: abuseipdb feed is enabled but no API key is set (cfg '%s' or the LUADCH_* env var) - the feed is disabled."
 local msg_report_ok    = lang.msg_report_ok    or "[ FEEDS ]--> Feed '%s' updated: %d entries now active."
 local msg_report_fail  = lang.msg_report_fail  or "[ FEEDS ]--> Feed '%s' refresh FAILED: %s"
 
@@ -246,6 +254,7 @@ local function refresh_feed( f )
     f.in_flight = true
     local ok, rerr = http_client.request{
         url          = f.url,
+        headers      = f.headers,      -- e.g. AbuseIPDB's Key + Accept
         max_response = f.max_response,
         timeout      = 30,
         on_complete  = function( res )
@@ -294,7 +303,7 @@ end
 -- interval is clamped UP to the adapter minimum (the feed provider's
 -- published auto-fetch floor) regardless of the operator value - polling
 -- faster gets the hub's IP firewalled by the provider.
-local function add_feed( name, cfg_enabled, url, interval_cfg, min_interval, stealth, parse_fn, max_resp )
+local function add_feed( name, cfg_enabled, url, interval_cfg, min_interval, stealth, parse_fn, max_resp, headers )
     if type( url ) ~= "string" or url == "" then return end
     local raw = tonumber( interval_cfg ) or min_interval
     local interval = math_max( math_floor( raw ), min_interval )
@@ -304,7 +313,7 @@ local function add_feed( name, cfg_enabled, url, interval_cfg, min_interval, ste
     feeds[ #feeds + 1 ] = {
         name = name, enabled = cfg_enabled and true or false, url = url,
         interval = interval, stealth = stealth and true or false,
-        parse = parse_fn, max_response = max_resp,
+        parse = parse_fn, max_response = max_resp, headers = headers,
         next_refresh = 0, in_flight = false, last = nil,
     }
 end
@@ -329,6 +338,38 @@ add_feed( "spamhaus_v6",
     cfg.get( "etc_blocklist_feeds_spamhaus_refresh_interval_sec" ), 3600,   -- shares spamhaus interval
     cfg.get( "etc_blocklist_feeds_spamhaus_stealth" ),                       -- shares spamhaus stealth
     parse_spamhaus_json, 1024 * 1024 )
+
+-- AbuseIPDB blacklist (top-N most-reported IPs, free tier = 10k, plain
+-- text one IP per line via ?plaintext). Needs an API key sent in the
+-- `Key` header - env-var-first via secrets.lookup (Docker-friendly), cfg
+-- fallback. If the feed is enabled but no key is set, do NOT schedule it
+-- (it would 401 every interval) - warn once. The blacklist DOWNLOAD
+-- endpoint is capped at 5 requests/day on the free tier (a separate limit
+-- from the 1000 check/report + 100 check-block quotas), so the interval
+-- floor is 6 h (= 4 pulls/day, safely under 5).
+local abuseipdb_key     = secrets.lookup( "etc_blocklist_feeds_abuseipdb_key" )
+local abuseipdb_enabled = cfg.get( "etc_blocklist_feeds_abuseipdb_enabled" ) and true or false
+if abuseipdb_enabled and not abuseipdb_key then
+    hub_debug( utf_format( msg_abuseipdb_no_key, "etc_blocklist_feeds_abuseipdb_key" ) )
+    abuseipdb_enabled = false
+end
+add_feed( "abuseipdb",
+    abuseipdb_enabled,
+    cfg.get( "etc_blocklist_feeds_abuseipdb_url" ) or "https://api.abuseipdb.com/api/v2/blacklist?plaintext",
+    cfg.get( "etc_blocklist_feeds_abuseipdb_refresh_interval_sec" ), 21600,
+    cfg.get( "etc_blocklist_feeds_abuseipdb_stealth" ),
+    parse_line_list, 1024 * 1024,
+    abuseipdb_key and { Key = abuseipdb_key, Accept = "text/plain" } or nil )
+
+-- Generic operator-supplied line list (one IP/CIDR per line, #/; comments
+-- tolerated). No default URL - an operator who enables it must set one;
+-- add_feed skips a feed with an empty url. No API key.
+add_feed( "generic",
+    cfg.get( "etc_blocklist_feeds_generic_enabled" ),
+    cfg.get( "etc_blocklist_feeds_generic_url" ) or "",
+    cfg.get( "etc_blocklist_feeds_generic_refresh_interval_sec" ), 300,
+    cfg.get( "etc_blocklist_feeds_generic_stealth" ),
+    parse_line_list, 1024 * 1024 )
 
 
 ------------
@@ -431,6 +472,12 @@ hub.setlistener( "onTimer", { },
 
 hub.setlistener( "onStart", { },
     function( )
+        -- Register the AbuseIPDB API key as a secret so GET /v1/config
+        -- redacts it (idempotent). Redaction is active only once this
+        -- plugin is loaded; the LUADCH_* env var is never dumped either
+        -- way, so it is the safer place for the key.
+        if secrets.register then secrets.register( "etc_blocklist_feeds_abuseipdb_key" ) end
+
         -- Seed each enabled feed to refresh shortly after boot (staggered
         -- a few seconds apart so they do not all fetch at once), then on
         -- its own interval. Disabled feeds are never scheduled.
