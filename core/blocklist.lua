@@ -153,6 +153,29 @@ local _next_id = 1
 local _buckets_v4 = { }     -- [byte 1] -> array of entry refs
 local _buckets_v6 = { }     -- [byte1 * 256 + byte2] -> array of entry refs
 
+-- Per-feed entry ceiling for bulk_replace (Phase E external feeds). A
+-- feed that dumps more CIDRs than this into the pure-Lua bucket cache
+-- would bloat RAM + slow the accept-time linear bucket scan. The bytes
+-- of a feed are already bounded upstream (http_client RAM 1 MiB /
+-- download 50 MiB caps), but a 1 MiB feed of bare /32s is ~130k rows -
+-- so a store-side entry cap is the last line of defence. Callers may
+-- lower it per feed via opts.max; they cannot exceed this hard ceiling.
+-- MAX_FEED_ENTRIES also bounds the SCAN: bulk_replace stops parsing past
+-- this many input items so a multi-MB feed cannot pin the hub thread.
+local MAX_FEED_ENTRIES = 200000
+
+-- Minimum CIDR prefix bulk_replace accepts from a feed. `_bucket_for`
+-- enumerates 1<<(8-prefix) bucket keys for a v4 prefix < 8, and up to
+-- 256*256 for a v6 prefix < 8 - so a feed of low-prefix CIDRs
+-- (e.g. 8000::/1 -> 32768 buckets EACH) would explode the cache to
+-- multiple GB while staying under the row + byte caps. A blocklist feed
+-- listing anything broader than /8 (v4) or /16 (v6) is not legitimate;
+-- such wide bans are the operator's manual call via +blocklist add
+-- (which has no floor). Below the floor -> the entry is rejected +
+-- counted + logged. At/above it every entry maps to exactly one bucket.
+local FEED_MIN_PREFIX_V4 = 8
+local FEED_MIN_PREFIX_V6 = 16
+
 ----------------------------------------------------------------------
 -- Aggregated rollup state
 ----------------------------------------------------------------------
@@ -592,6 +615,185 @@ local function remove( id )
     return false, "not_found"
 end
 
+-- Atomically replace every entry belonging to one external feed with a
+-- fresh set, in a SINGLE disk write. This is the ingest path for Phase E
+-- feeds (Tor / Spamhaus / AbuseIPDB / generic): the per-CIDR add() does a
+-- full-store atomic rewrite EACH call, so pushing an N-CIDR feed through
+-- add() is O(N^2) disk I/O and would freeze the single hub thread for
+-- seconds on any real feed. bulk_replace does it in O(N) with one write.
+--
+-- A "feed" is identified by (source, meta.feed): every entry this call
+-- writes carries meta.feed = feed and the given source. On each refresh
+-- the caller passes the CURRENT full list; the previous rows for that
+-- exact (source, feed) pair are dropped and replaced - so a shrinking
+-- feed does not leave stale rows, and there is no per-refresh duplicate
+-- accumulation. Entries from OTHER feeds/sources (and manual pins) are
+-- untouched. Globally-expired rows are swept in the same rewrite (as
+-- add() does). An empty `entries` list clears the feed (the caller must
+-- therefore NOT call this on a failed fetch - only on a successful one).
+--
+-- `entries` is an array whose items are either a bare "cidr" string or a
+-- table { cidr = "...", reason?, expires_at?, stealth?, meta? }. Feed-
+-- wide defaults come from `opts` { expires_at?, stealth?, max? }; a
+-- per-item value overrides the opts default. `meta` must be flat scalars
+-- (it is shallow-copied + persisted verbatim - a nested/cyclic table
+-- would bloat or hang the .tbl writer). Items are dropped + counted when:
+-- the CIDR is malformed (`skipped`), broader than /8 v4 or /16 v6
+-- (`too_broad`, folded into `skipped`), a duplicate of an earlier row
+-- (`skipped`), or past the min(opts.max, MAX_FEED_ENTRIES) row cap /
+-- MAX_FEED_ENTRIES scan limit (`capped`). All drops are logged - no
+-- silent truncation.
+--
+-- source = "manual" is refused (feeds must never be able to reap
+-- operator pins). A non-empty `entries` that yields ZERO valid rows is
+-- ALSO refused (that is a broken feed parser, not a genuinely-empty
+-- feed - we do not wipe the last-good feed with garbage). A genuinely
+-- empty `entries` list DOES clear the feed, so the caller must call this
+-- only on a SUCCESSFUL fetch, never on a failed one.
+--
+-- Returns ( true, { added, removed, skipped, capped, too_broad } ) or
+-- ( false, nil, err ). On a disk-save failure the whole operation rolls
+-- back to the pre-call state (no partial feed).
+local function bulk_replace( source, feed, entries, opts )
+    if type( source ) ~= "string" or source == "" then
+        return false, nil, "source must be a non-empty string"
+    end
+    if source == "manual" then
+        -- The partition keys on (source, meta.feed), so a manual pin is
+        -- spared only because it carries no meta.feed. Refuse manual
+        -- outright so "feeds never clobber operator pins" is structural.
+        return false, nil, "bulk_replace refuses source='manual' (feed sources only)"
+    end
+    if type( feed ) ~= "string" or feed == "" then
+        return false, nil, "feed must be a non-empty string"
+    end
+    if type( entries ) ~= "table" then
+        return false, nil, "entries must be a table"
+    end
+    opts = opts or { }
+    local max_entries = tonumber( opts.max )
+    if not max_entries or max_entries < 1 or max_entries > MAX_FEED_ENTRIES then
+        max_entries = MAX_FEED_ENTRIES
+    end
+    max_entries = math_floor( max_entries )
+
+    local now = socket_gettime( )
+
+    -- Snapshot current state for rollback on a save failure.
+    local prev_entries = _entries
+    local prev_v4      = _buckets_v4
+    local prev_v6      = _buckets_v6
+    local prev_next_id = _next_id
+
+    -- 1. Keep everything that is NOT this feed's old rows and NOT
+    --    globally expired. Dropping this feed's rows is the "replace";
+    --    dropping expired rows piggybacks the sweep add() also does.
+    local kept = { }
+    local removed = 0
+    for _, e in ipairs( _entries ) do
+        if e.source == source and type( e.meta ) == "table" and e.meta.feed == feed then
+            removed = removed + 1
+        elseif e.expires_at and e.expires_at <= now then
+            -- expired row from another feed/source: swept, not counted
+        else
+            kept[ #kept + 1 ] = e
+        end
+    end
+
+    -- 2. Build the new feed rows: parse + canonicalise each CIDR, reject
+    --    over-broad prefixes (bucket-cache bomb), dedup on the canonical
+    --    form, cap the row count AND the scan (parse cost).
+    local added_entries = { }
+    local seen = { }
+    local skipped, capped, too_broad = 0, 0, 0
+    local n_entries = #entries
+    for i, item in ipairs( entries ) do
+        if #added_entries >= max_entries or i > MAX_FEED_ENTRIES then
+            -- row cap reached, or scan limit hit: drop the rest unparsed
+            -- so a multi-million-line feed cannot pin the hub thread.
+            capped = n_entries - i + 1
+            break
+        end
+        local is_tbl = type( item ) == "table"
+        local cidr = is_tbl and item.cidr or item
+        local meta = { feed = feed }
+        if is_tbl and type( item.meta ) == "table" then
+            for k, v in pairs( item.meta ) do meta[ k ] = v end
+            meta.feed = feed    -- feed key is authoritative, never overridable
+        end
+        -- explicit per-item stealth override (incl. an explicit `false`);
+        -- the `a and b or c` idiom would silently drop a false override.
+        local item_stealth = opts.stealth
+        if is_tbl and item.stealth ~= nil then item_stealth = item.stealth end
+        local entry = _make_entry( cidr, {
+            source     = source,
+            reason     = is_tbl and item.reason or nil,
+            stealth    = item_stealth,
+            expires_at = ( is_tbl and item.expires_at ) or opts.expires_at,
+            meta       = meta,
+        } )
+        if not entry then
+            skipped = skipped + 1
+        elseif ( entry.family == 4 and entry.prefix_len < FEED_MIN_PREFIX_V4 )
+            or ( entry.family == 6 and entry.prefix_len < FEED_MIN_PREFIX_V6 ) then
+            too_broad = too_broad + 1
+            skipped = skipped + 1
+        elseif seen[ entry.cidr ] then
+            skipped = skipped + 1
+        else
+            seen[ entry.cidr ] = true
+            added_entries[ #added_entries + 1 ] = entry
+        end
+    end
+    if capped > 0 and out_put then
+        out_put( string_format(
+            "blocklist: bulk_replace(%s/%s) stopped at the %d-entry limit, dropped %d",
+            source, feed, max_entries, capped ) )
+    end
+    if too_broad > 0 and out_put then
+        out_put( string_format(
+            "blocklist: bulk_replace(%s/%s) rejected %d over-broad CIDR(s) (need >= /%d v4, /%d v6)",
+            source, feed, too_broad, FEED_MIN_PREFIX_V4, FEED_MIN_PREFIX_V6 ) )
+    end
+
+    -- Safety net: a non-empty input that produced ZERO valid rows is
+    -- almost always a broken feed parser (format drift). Refuse to wipe
+    -- the last-good feed with garbage - leave the old rows untouched and
+    -- report. A genuinely-empty input (n_entries == 0) still clears.
+    if #added_entries == 0 and n_entries > 0 then
+        return false, nil, "refusing to replace feed '" .. feed ..
+            "' with 0 valid entries from a " .. n_entries ..
+            "-item input (feed parse likely failed)"
+    end
+
+    -- 3. Commit in memory: assign fresh ids to the new rows, splice
+    --    kept ++ added, rebuild the bucket index in one O(N) pass.
+    local new_next_id = prev_next_id
+    for _, e in ipairs( added_entries ) do
+        e.id = new_next_id
+        new_next_id = new_next_id + 1
+    end
+    local new_entries = { }
+    for _, e in ipairs( kept ) do new_entries[ #new_entries + 1 ] = e end
+    for _, e in ipairs( added_entries ) do new_entries[ #new_entries + 1 ] = e end
+    _entries = new_entries
+    _next_id = new_next_id
+    _rebuild_indices( )
+
+    -- 4. Single disk write; roll back the whole batch on failure.
+    local ok, err = _save_to_disk( )
+    if not ok then
+        _entries    = prev_entries
+        _buckets_v4 = prev_v4
+        _buckets_v6 = prev_v6
+        _next_id    = prev_next_id
+        return false, nil, "save failed: " .. tostring( err )
+    end
+
+    return true, { added = #added_entries, removed = removed,
+                   skipped = skipped, capped = capped, too_broad = too_broad }
+end
+
 -- Supported filter_spec keys. Extending the set is a Phase B/C
 -- task; unknown keys today log a one-time warn so an operator
 -- typo through the future HTTP API doesn't silently return "all
@@ -752,6 +954,7 @@ return {
     check_ip           = check_ip,
     add                = add,
     remove             = remove,
+    bulk_replace       = bulk_replace,
     list               = list,
     count              = count,
     reload             = reload,

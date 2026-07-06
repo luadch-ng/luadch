@@ -29,6 +29,8 @@
 
 local _disk = { }    -- path -> table
 local _now = 1000
+local _save_count = 0    -- number of savetable calls (proves one-write batching)
+local _fail_save = false  -- flip true to simulate a disk-save failure
 
 local function _stub_use_factory( opts )
     opts = opts or { }
@@ -49,6 +51,8 @@ local function _stub_use_factory( opts )
             return {
                 loadtable = function( path ) return _disk[ path ] end,
                 savetable = function( tbl, _name, path )
+                    _save_count = _save_count + 1
+                    if _fail_save then return false, "disk full (test)" end
                     -- Deep-copy so subsequent mutations don't leak.
                     local copy = { }
                     for i, row in ipairs( tbl ) do
@@ -120,6 +124,8 @@ end
 local function reset_state( opts )
     _disk = { }
     _now = 1000
+    _save_count = 0
+    _fail_save = false
     _G.use = _stub_use_factory( opts )
     bl = assert( loadfile( "core/blocklist.lua" ) )( )
     bl.init( )
@@ -457,6 +463,238 @@ do
         if line:find( "unknown filter key" ) then saw_warning = true; break end
     end
     truthy( "unknown filter key triggers warning", saw_warning )
+end
+
+----------------------------------------------------------------------
+-- bulk_replace (Phase E feed ingest): atomic O(N) feed-set replacement
+-- in ONE disk write. The per-CIDR add() rewrites the whole store each
+-- call (O(N^2)); a feed with thousands of CIDRs must not do that.
+----------------------------------------------------------------------
+
+-- count entries belonging to a (source, feed) pair (list() has no meta filter)
+local function feed_count( source, feed )
+    local n = 0
+    for _, r in ipairs( bl.list{ source = source } ) do
+        if r.meta and r.meta.feed == feed then n = n + 1 end
+    end
+    return n
+end
+
+reset_state{}
+do
+    _save_count = 0
+    local ok, stats = bl.bulk_replace( "external", "tor", {
+        "1.1.1.1", "2.2.2.0/24", "3.3.3.3", "4.4.0.0/16", "5.5.5.5",
+    } )
+    eq( "bulk_replace ok", ok, true )
+    eq( "bulk_replace ONE disk write for 5 entries", _save_count, 1 )
+    eq( "bulk_replace added 5", stats.added, 5 )
+    eq( "bulk_replace removed 0 (none pre-existing)", stats.removed, 0 )
+    eq( "bulk_replace total 5", bl.count( ).total, 5 )
+    eq( "bulk_replace feed-tagged 5", feed_count( "external", "tor" ), 5 )
+
+    local b, src, r = bl.check_ip( "2.2.2.42" )
+    eq( "bulk entry blocks (bucket cache correct)", b, true )
+    eq( "bulk entry source", src, "external" )
+    eq( "bulk entry meta.feed", r.meta and r.meta.feed, "tor" )
+end
+
+do
+    -- refresh: old rows dropped, new rows in, still exactly one write
+    _save_count = 0
+    local ok, stats = bl.bulk_replace( "external", "tor", { "3.3.3.3", "9.9.9.0/24" } )
+    eq( "refresh ok", ok, true )
+    eq( "refresh ONE write", _save_count, 1 )
+    eq( "refresh removed old 5", stats.removed, 5 )
+    eq( "refresh added 2", stats.added, 2 )
+    eq( "refresh feed now 2", feed_count( "external", "tor" ), 2 )
+    eq( "dropped feed IP no longer blocks", bl.check_ip( "2.2.2.42" ), false )
+    eq( "new feed IP blocks", bl.check_ip( "9.9.9.1" ), true )
+    eq( "kept-across-refresh IP still blocks", bl.check_ip( "3.3.3.3" ), true )
+end
+
+reset_state{}
+do
+    -- other feeds + manual pins untouched by a feed replace
+    bl.add( "100.100.100.100", { source = "manual", reason = "pin" } )
+    bl.bulk_replace( "external", "spamhaus", { "50.50.0.0/16" } )
+    bl.bulk_replace( "external", "tor", { "60.60.60.60" } )
+    bl.bulk_replace( "external", "tor", { "61.61.61.61" } )   -- replace tor again
+    eq( "manual pin survives feed churn", bl.check_ip( "100.100.100.100" ), true )
+    eq( "other feed (spamhaus) survives", bl.check_ip( "50.50.1.2" ), true )
+    eq( "old tor entry replaced", bl.check_ip( "60.60.60.60" ), false )
+    eq( "new tor entry present", bl.check_ip( "61.61.61.61" ), true )
+    eq( "spamhaus feed count", feed_count( "external", "spamhaus" ), 1 )
+    eq( "tor feed count", feed_count( "external", "tor" ), 1 )
+end
+
+reset_state{}
+do
+    -- dedup within the input + malformed skip
+    local ok, stats = bl.bulk_replace( "external", "generic", {
+        "1.2.3.4", "1.2.3.4/32", "1.2.3.4",   -- same canonical form -> 1 kept, 2 skipped
+        "not-a-cidr",                          -- malformed -> skipped
+        "5.6.7.0/24",                          -- valid distinct
+    } )
+    eq( "dedup+malformed ok", ok, true )
+    eq( "dedup+malformed added 2", stats.added, 2 )
+    eq( "dedup+malformed skipped 3", stats.skipped, 3 )
+    eq( "dedup+malformed feed count 2", feed_count( "external", "generic" ), 2 )
+end
+
+reset_state{}
+do
+    -- cap enforced; overflow counted (non-silent)
+    local items = { }
+    for i = 1, 5 do items[ i ] = "10.0." .. i .. ".0/24" end
+    local ok, stats = bl.bulk_replace( "external", "big", items, { max = 3 } )
+    eq( "cap ok", ok, true )
+    eq( "cap added == max 3", stats.added, 3 )
+    eq( "cap capped == overflow 2", stats.capped, 2 )
+    eq( "cap feed count 3", feed_count( "external", "big" ), 3 )
+end
+
+reset_state{}
+do
+    -- per-item metadata preserved; feed key is authoritative (not spoofable)
+    bl.bulk_replace( "external", "spamhaus", {
+        { cidr = "77.88.99.0/24", meta = { sblid = "SBL123", feed = "SPOOF" } },
+    } )
+    local _, _, r = bl.check_ip( "77.88.99.5" )
+    eq( "per-item meta preserved (sblid)", r.meta and r.meta.sblid, "SBL123" )
+    eq( "feed key authoritative", r.meta and r.meta.feed, "spamhaus" )
+end
+
+reset_state{}
+do
+    -- feed-wide expires_at via opts + expired-sweep on a later bulk_replace
+    bl.bulk_replace( "external", "ttl", { "120.0.0.0/8" }, { expires_at = 2000 } )
+    eq( "ttl entry blocks before expiry", bl.check_ip( "120.1.2.3" ), true )
+    _now = 3000
+    eq( "ttl entry filtered after expiry", bl.check_ip( "120.1.2.3" ), false )
+    bl.bulk_replace( "external", "other", { "130.0.0.0/8" } )
+    eq( "expired row swept by later bulk_replace", feed_count( "external", "ttl" ), 0 )
+end
+
+reset_state{}
+do
+    -- save-failure rollback: no partial write, previous feed intact
+    bl.bulk_replace( "external", "tor", { "200.0.0.0/8", "201.0.0.0/8" } )
+    eq( "pre-rollback tor blocks", bl.check_ip( "200.1.2.3" ), true )
+    _fail_save = true
+    local ok, _, err = bl.bulk_replace( "external", "tor", { "222.0.0.0/8" } )
+    _fail_save = false
+    eq( "save-fail returns false", ok, false )
+    truthy( "save-fail err names save", err and err:find( "save failed" ) )
+    eq( "rollback: old feed IP still blocks", bl.check_ip( "200.1.2.3" ), true )
+    eq( "rollback: 2nd old feed IP still blocks", bl.check_ip( "201.1.2.3" ), true )
+    eq( "rollback: attempted-new IP does NOT block", bl.check_ip( "222.1.2.3" ), false )
+    eq( "rollback: feed count unchanged (2)", feed_count( "external", "tor" ), 2 )
+end
+
+reset_state{}
+do
+    -- input validation + empty-list clears the feed
+    local ok1, _, e1 = bl.bulk_replace( "", "tor", { } )
+    eq( "empty source rejected", ok1, false )
+    truthy( "empty source err", e1 and e1:find( "source" ) )
+    local ok2, _, e2 = bl.bulk_replace( "external", "", { } )
+    eq( "empty feed rejected", ok2, false )
+    truthy( "empty feed err", e2 and e2:find( "feed" ) )
+    local ok3, _, e3 = bl.bulk_replace( "external", "tor", "not-a-table" )
+    eq( "non-table entries rejected", ok3, false )
+    truthy( "non-table entries err", e3 and e3:find( "entries" ) )
+
+    bl.bulk_replace( "external", "tor", { "9.8.7.0/24" } )
+    eq( "feed present before clear", bl.check_ip( "9.8.7.1" ), true )
+    local okc, statsc = bl.bulk_replace( "external", "tor", { } )
+    eq( "empty-list replace ok", okc, true )
+    eq( "empty-list removed the row", statsc.removed, 1 )
+    eq( "empty-list cleared the feed", bl.check_ip( "9.8.7.1" ), false )
+end
+
+reset_state{}
+do
+    -- persistence: a bulk-added feed survives a reload from disk
+    bl.bulk_replace( "external", "tor", { "150.0.0.0/8", "151.0.0.0/8" } )
+    local bl2 = assert( loadfile( "core/blocklist.lua" ) )( )
+    bl2.init( )
+    eq( "post-reload feed total", bl2.count( ).total, 2 )
+    eq( "post-reload feed IP blocks", bl2.check_ip( "150.1.2.3" ), true )
+    local _, _, r = bl2.check_ip( "150.1.2.3" )
+    eq( "post-reload meta.feed survives", r.meta and r.meta.feed, "tor" )
+end
+
+reset_state{}
+do
+    -- per-item stealth override, incl. an explicit false against a
+    -- stealthy feed default (the `a and b or c` idiom would drop it)
+    bl.bulk_replace( "external", "s", {
+        { cidr = "70.0.0.0/8", stealth = false },   -- explicit false must win
+        { cidr = "71.0.0.0/8" },                     -- inherits opts.stealth = true
+    }, { stealth = true } )
+    local _, _, r1 = bl.check_ip( "70.1.2.3" )
+    eq( "per-item stealth=false honored (not overridden by opts)", r1.stealth, false )
+    local _, _, r2 = bl.check_ip( "71.1.2.3" )
+    eq( "item inherits opts.stealth=true", r2.stealth, true )
+end
+
+reset_state{}
+do
+    -- kept entries (manual pin + other feed) stay consistent through a
+    -- rolled-back bulk_replace: _rebuild_indices reassigns their _buckets
+    -- then the rollback restores the old bucket tables. A later match AND
+    -- a later remove() on a kept row must still work (bucket index intact).
+    bl.add( "88.88.88.88", { source = "manual", reason = "pin" } )
+    bl.bulk_replace( "external", "spamhaus", { "89.0.0.0/8" } )
+    bl.bulk_replace( "external", "tor", { "90.0.0.0/8" } )
+    _fail_save = true
+    local ok = bl.bulk_replace( "external", "tor", { "91.0.0.0/8" } )
+    _fail_save = false
+    eq( "rollback-with-kept returns false", ok, false )
+    eq( "kept manual pin still blocks after rollback", bl.check_ip( "88.88.88.88" ), true )
+    eq( "kept other-feed still blocks after rollback", bl.check_ip( "89.1.2.3" ), true )
+    eq( "old tor still blocks (new not committed)", bl.check_ip( "90.1.2.3" ), true )
+    eq( "attempted-new tor does NOT block", bl.check_ip( "91.1.2.3" ), false )
+    local rows = bl.list{ source = "manual" }
+    local pin_id = rows[ 1 ] and rows[ 1 ].id
+    eq( "kept entry removable after rollback (bucket index intact)", bl.remove( pin_id ), true )
+    eq( "manual pin gone after remove", bl.check_ip( "88.88.88.88" ), false )
+end
+
+reset_state{}
+do
+    -- over-broad prefixes rejected (bucket-cache-bomb guard). At/above
+    -- the floor (/8 v4, /16 v6) each entry is one bucket; below it a
+    -- single entry could enumerate tens of thousands of buckets.
+    local ok, stats = bl.bulk_replace( "external", "mix", {
+        "2001:db8::/32",     -- v6 /32  -> OK
+        "8000::/1",          -- v6 /1   -> too broad
+        "10.0.0.0/8",        -- v4 /8   -> OK (at floor)
+        "128.0.0.0/1",       -- v4 /1   -> too broad
+        "5.5.5.5",           -- v4 /32  -> OK
+    } )
+    eq( "over-broad ok", ok, true )
+    eq( "over-broad added 3", stats.added, 3 )
+    eq( "over-broad too_broad 2", stats.too_broad, 2 )
+    eq( "v6 /32 accepted blocks", bl.check_ip( "2001:db8::5" ), true )
+    eq( "v6 /1 rejected does NOT block", bl.check_ip( "8000::5" ), false )
+    eq( "v4 /8 at floor blocks", bl.check_ip( "10.1.2.3" ), true )
+    eq( "v4 /1 rejected does NOT block", bl.check_ip( "128.1.2.3" ), false )
+end
+
+reset_state{}
+do
+    -- a non-empty input that parses to ZERO valid rows must NOT wipe the
+    -- last-good feed (broken parser guard) and must not touch disk
+    bl.bulk_replace( "external", "tor", { "140.0.0.0/8" } )
+    eq( "good feed present", bl.check_ip( "140.1.2.3" ), true )
+    _save_count = 0
+    local ok, _, err = bl.bulk_replace( "external", "tor", { "garbage", "also-bad", "" } )
+    eq( "all-invalid refused", ok, false )
+    truthy( "all-invalid err mentions zero valid", err and err:find( "0 valid" ) )
+    eq( "all-invalid did NOT write to disk", _save_count, 0 )
+    eq( "good feed intact after refused refresh", bl.check_ip( "140.1.2.3" ), true )
 end
 
 ----------------------------------------------------------------------
