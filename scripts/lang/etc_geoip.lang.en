@@ -1,0 +1,26 @@
+return {
+
+    msg_denied      = "You are not allowed to use this command.",
+    msg_kick_reason = "Your region is not permitted on this hub.",
+    msg_report      = "[ GEOIP ]--> The user %s with IP %s (%s) is not permitted (%s). Action: %s.",
+
+    msg_db_missing  = "etc_geoip.lua: %s database not found at '%s' - GeoIP checks for it are disabled. Run geoipupdate (see docs/BLOCKLIST.md).",
+    msg_db_stale    = "etc_geoip.lua: %s database is older than 30 days (built %s) - run geoipupdate to refresh.",
+    msg_db_loaded   = "etc_geoip.lua: loaded %s database (%s, built %s).",
+
+    msg_status_header   = "\n=== GEOIP STATUS ===",
+    msg_status_footer   = "=== END ===\n",
+    msg_status_enabled  = "  enabled:            %s",
+    msg_status_action   = "  action:             %s",
+    msg_status_country  = "  country DB:         %s",
+    msg_status_asn      = "  ASN DB:             %s",
+    msg_status_bcountry = "  blocked countries:  %s",
+    msg_status_basn     = "  blocked ASNs:       %s",
+
+    help_title = "etc_geoip.lua - geoip",
+    help_usage = "[+!#]geoip",
+    help_desc  = "Show GeoIP status: DB load state, action mode, blocked countries / ASNs.",
+
+    ucmd_menu  = { "Hub", "GeoIP", "status" },
+
+}

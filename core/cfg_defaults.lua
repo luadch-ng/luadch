@@ -2768,6 +2768,152 @@ local defaults = {
     },
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_geoip.lua settings (#78 Phase D2)
+
+    -- Feature toggle. Plugin loads either way (so operators can flip
+    -- this + `+reload` without editing cfg.scripts); when false the
+    -- onConnect check returns immediately - zero lookup cost.
+    etc_geoip_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Paths to the MaxMind GeoLite2 databases. The operator installs +
+    -- refreshes these out-of-band with MaxMind's `geoipupdate` tool
+    -- (see docs/BLOCKLIST.md). A missing file is not an error - the
+    -- plugin logs once and stays inert for that DB. ASN is optional;
+    -- leave the path pointing at a non-existent file to disable ASN
+    -- checks.
+    etc_geoip_country_db_path = { "cfg/geoip/GeoLite2-Country.mmdb",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_geoip_asn_db_path = { "cfg/geoip/GeoLite2-ASN.mmdb",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Blocked ISO-3166-1 alpha-2 country codes, e.g. { "CN", "RU", "KP" }.
+    -- Case-insensitive (normalised to upper-case at load); entries that
+    -- are not two letters are ignored. Empty = no country is blocked.
+    etc_geoip_blocked_countries = { { },
+        function( value )
+            if not types_table( value ) then return false end
+            for _, v in ipairs( value ) do
+                if type( v ) ~= "string" or not v:upper( ):match( "^%u%u$" ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- Blocked autonomous-system numbers, e.g. { 4134, 4837 } (needs an
+    -- ASN DB configured). Empty = no ASN is blocked.
+    etc_geoip_blocked_asns = { { },
+        function( value )
+            if not types_table( value ) then return false end
+            for _, v in ipairs( value ) do
+                if not ( types_number( v, nil, true ) and v % 1 == 0 and v >= 0 ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- What to do on a match. "log_only" (default) audits + reports the
+    -- match but lets the user in - the safe starting mode so an operator
+    -- verifies the logs before enforcing. "block" kicks the connection.
+    etc_geoip_action = { "log_only",
+        function( value )
+            return value == "log_only" or value == "block"
+        end
+    },
+
+    -- Which user levels the GeoIP check applies to. Operators (55-80)
+    -- exempt by default so a misconfigured country list cannot lock
+    -- staff out; HUBOWNER (100) kept in scope (flip [100]=false to test
+    -- from a blocked region). Mirrors etc_clientblocker_check_levels.
+    etc_geoip_check_levels = { {
+        [ 0 ]   = true,
+        [ 10 ]  = true,
+        [ 20 ]  = true,
+        [ 30 ]  = true,
+        [ 40 ]  = true,
+        [ 50 ]  = true,
+        [ 55 ]  = false,
+        [ 60 ]  = false,
+        [ 70 ]  = false,
+        [ 80 ]  = false,
+        [ 100 ] = true,
+    },
+        function( value )
+            if not types_table( value ) then return false end
+            for level, allowed in pairs( value ) do
+                if not ( types_number( level, nil, true )
+                         and types_boolean( allowed, nil, true ) ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- How often (seconds) to re-read the .mmdb from disk so a
+    -- geoipupdate cron write is picked up without a manual +reload.
+    -- MaxMind releases twice weekly; hourly is ample. 60s floor keeps
+    -- the re-read off the per-tick hot path.
+    etc_geoip_recheck_interval_sec = { 3600,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 60
+                and value <= 604800
+        end
+    },
+
+    -- Kick message shown to a blocked user (block mode only).
+    etc_geoip_kick_reason = { "Your region is not permitted on this hub.",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Operator level that can run `+geoip` (read-only status).
+    etc_geoip_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    -- Opchat / hubbot report on every match (mirrors etc_clientblocker:
+    -- opchat ON, hubbot OFF).
+    etc_geoip_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_geoip_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_geoip_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_geoip_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_trafficmanager.lua settings
 
     etc_trafficmanager_activate = { true,

@@ -252,6 +252,12 @@ local SANDBOX_GLOBALS = {
     -- hold a direct reference to the engine's _entries array
     -- (trust contract documented in the engine header).
     "blocklist",
+    -- core/mmdb.lua (#78 Phase D1): pure-Lua MaxMind DB reader.
+    -- Phase D2's etc_geoip.lua calls mmdb.open(path) + reader:lookup(ip)
+    -- to resolve a connecting IP to its country / ASN. Read-only; the
+    -- reader degrades to (nil, err) on a missing / corrupt DB so a
+    -- plugin never crashes the hub on a bad operator drop.
+    "mmdb",
     "unicode",
     -- read-only program constants (PROGRAM_NAME / VERSION / FORK /
     -- COPYRIGHT / CONFIG_PATH). Static strings, no capability; lets

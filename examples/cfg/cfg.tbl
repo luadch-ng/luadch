@@ -1010,6 +1010,38 @@ return { -- the settings are a lua table, do not tough this!
     etc_blocklist_import_min_level = 100,  -- min level to run `+blocklist import <path>` - JSONL files may carry entries added by higher-level masters; default 100 = master-only so a mid-level op cannot import + take ownership of master-tier entries (integer)
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_geoip.lua settings | country / ASN blocking via MaxMind GeoLite2 (#78 Phase D2). Needs geoipupdate for the DB - see docs/BLOCKLIST.md
+
+    etc_geoip_enabled = false,  -- master toggle; plugin loads either way but the onConnect check is inert when false (boolean)
+    etc_geoip_country_db_path = "cfg/geoip/GeoLite2-Country.mmdb",  -- path to the GeoLite2 Country .mmdb (string). Missing file = country checks disabled (logged once)
+    etc_geoip_asn_db_path = "cfg/geoip/GeoLite2-ASN.mmdb",  -- path to the GeoLite2 ASN .mmdb (string, optional). Missing file = ASN checks disabled
+    etc_geoip_blocked_countries = { },  -- ISO-3166-1 alpha-2 codes to block, e.g. { "CN", "RU", "KP" } (case-insensitive table of strings)
+    etc_geoip_blocked_asns = { },  -- autonomous-system numbers to block, e.g. { 4134, 4837 } (table of integers; needs the ASN DB)
+    etc_geoip_action = "log_only",  -- "log_only" audits+reports a match but lets the user in (verify first); "block" kicks the connection (string)
+    etc_geoip_recheck_interval_sec = 3600,  -- how often to re-read the .mmdb so a geoipupdate cron write is picked up without +reload (integer 60..604800)
+    etc_geoip_kick_reason = "Your region is not permitted on this hub.",  -- kick message (block mode only) (string)
+    etc_geoip_oplevel = 80,  -- min level to run `+geoip` read-only status (integer)
+
+    etc_geoip_report = true,  -- on every match, fire etc_report.send with nick+ip+match so staff see it in chat (boolean)
+    etc_geoip_report_hubbot = false,  -- send the report as a hubbot PM to operators at or above etc_geoip_llevel (boolean)
+    etc_geoip_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_geoip_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
+    etc_geoip_check_levels = {  -- which levels the GeoIP check applies to (table of integer -> boolean); operators exempt by default
+        [ 0 ]   = true,
+        [ 10 ]  = true,
+        [ 20 ]  = true,
+        [ 30 ]  = true,
+        [ 40 ]  = true,
+        [ 50 ]  = true,
+        [ 55 ]  = false,
+        [ 60 ]  = false,
+        [ 70 ]  = false,
+        [ 80 ]  = false,
+        [ 100 ] = true,
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_log_cleaner.lua settings | this script adds a command to clean log files
 
     etc_log_cleaner_minlevel = 100,  -- min level to use this command? (integer)
@@ -1426,6 +1458,7 @@ return { -- the settings are a lua table, do not tough this!
         "hub_inf_manager.lua",
         { "etc_clientblocker.lua", enabled = true },  -- #81 client AP/VE blocklist. API-toggleable (#261). Must sit AFTER hub_inf_manager so structural BINF rejects (forbidden flags / identity spoofing) happen first; client-policy kicks then run on already-validated INFs.
         { "etc_blocklist.lua", enabled = true },  -- #78 Phase B `+blocklist` admin CLI for the unified pre-handshake IP/CIDR blocklist (engine = core/blocklist.lua, Phase A). API-toggleable (#261). Manages MANUAL entries; Phase D/E/F plugins (geoip / external feeds / proxydetect) will push auto-feed entries into the same store.
+        { "etc_geoip.lua", enabled = false },  -- #78 Phase D2 country / ASN blocking via MaxMind GeoLite2. OFF by default (needs a geoipupdate-managed DB - see docs/BLOCKLIST.md). Per-connection post-handshake lookup; must sit AFTER hub_inf_manager like etc_clientblocker. Enable here + set etc_geoip_enabled=true + populate etc_geoip_blocked_countries.
         { "hub_runtime.lua", enabled = true },  -- using report import; API-toggleable (#261)
         { "bot_regchat.lua", enabled = true },  -- API-toggleable (#261)
         { "bot_session_chat.lua", enabled = true },  -- API-toggleable (#261)

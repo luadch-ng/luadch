@@ -1,0 +1,26 @@
+return {
+
+    msg_denied      = "Du darfst diesen Befehl nicht verwenden.",
+    msg_kick_reason = "Deine Region ist auf diesem Hub nicht zugelassen.",
+    msg_report      = "[ GEOIP ]--> Der User %s mit IP %s (%s) ist nicht zugelassen (%s). Aktion: %s.",
+
+    msg_db_missing  = "etc_geoip.lua: %s-Datenbank unter '%s' nicht gefunden - GeoIP-Pruefungen dafuer sind deaktiviert. geoipupdate ausfuehren (siehe docs/BLOCKLIST.md).",
+    msg_db_stale    = "etc_geoip.lua: %s-Datenbank ist aelter als 30 Tage (erstellt %s) - geoipupdate ausfuehren zum Aktualisieren.",
+    msg_db_loaded   = "etc_geoip.lua: %s-Datenbank geladen (%s, erstellt %s).",
+
+    msg_status_header   = "\n=== GEOIP STATUS ===",
+    msg_status_footer   = "=== ENDE ===\n",
+    msg_status_enabled  = "  aktiv:               %s",
+    msg_status_action   = "  Aktion:              %s",
+    msg_status_country  = "  Country-DB:          %s",
+    msg_status_asn      = "  ASN-DB:              %s",
+    msg_status_bcountry = "  gesperrte Laender:   %s",
+    msg_status_basn     = "  gesperrte ASNs:      %s",
+
+    help_title = "etc_geoip.lua - geoip",
+    help_usage = "[+!#]geoip",
+    help_desc  = "Zeigt den GeoIP-Status: DB-Ladezustand, Aktionsmodus, gesperrte Laender / ASNs.",
+
+    ucmd_menu  = { "Hub", "GeoIP", "status" },
+
+}

@@ -280,6 +280,16 @@ do
     eq( "country 89.160.20.128 (v4) SE", se and se.country.iso_code, "SE" )
     eq( "country 2001:218::1 (v6) JP",   jp and jp.country.iso_code, "JP" )
 
+    -- v4-mapped IPv6 (::ffff:a.b.c.d) is how a dual-stack hub (a bare
+    -- `::` listener) delivers IPv4 clients (RFC 4291 2.5.5.2). MaxMind
+    -- DBs alias the v4-mapped range onto the v4 data, so both the
+    -- dotted and hex forms MUST resolve identically to the bare-v4
+    -- lookup - load-bearing for etc_geoip on dual-stack hubs (#78 D2).
+    local m1 = r:lookup( "::ffff:81.2.69.160" )
+    local m2 = r:lookup( "::ffff:5102:45a0" )    -- same address, hex form
+    eq( "country v4-mapped dotted -> GB", m1 and m1.country.iso_code, "GB" )
+    eq( "country v4-mapped hex -> GB",    m2 and m2.country.iso_code, "GB" )
+
     falsy( "country 10.0.0.1 miss",  r:lookup( "10.0.0.1" ) )
     falsy( "country 214.0.0.0 miss", r:lookup( "214.0.0.0" ) )
 end
