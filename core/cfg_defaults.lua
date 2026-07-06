@@ -2990,6 +2990,65 @@ local defaults = {
         end
     },
 
+    -- AbuseIPDB blacklist (top-N reported IPs, plaintext). Needs an API
+    -- key (see etc_blocklist_feeds_abuseipdb_key); free-tier blacklist
+    -- download is 5/day so the plugin floors the interval at 6 h.
+    etc_blocklist_feeds_abuseipdb_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_abuseipdb_url = { "https://api.abuseipdb.com/api/v2/blacklist?plaintext",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_abuseipdb_refresh_interval_sec = { 86400,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 60 and value <= 604800
+        end
+    },
+    etc_blocklist_feeds_abuseipdb_stealth = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    -- AbuseIPDB API key. Read env-var-first via core/secrets.lua
+    -- (LUADCH_ETC_BLOCKLIST_FEEDS_ABUSEIPDB_KEY) with this cfg value as the
+    -- fallback; registered as a secret so GET /v1/config redacts it (once
+    -- the plugin is loaded). The env var is never dumped - prefer it.
+    -- Empty = the abuseipdb feed stays disabled.
+    etc_blocklist_feeds_abuseipdb_key = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Generic operator-supplied line-list (IP/CIDR per line). No default
+    -- URL; an operator who enables it must set one. No API key.
+    etc_blocklist_feeds_generic_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_generic_url = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_generic_refresh_interval_sec = { 3600,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 60 and value <= 604800
+        end
+    },
+    etc_blocklist_feeds_generic_stealth = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
     -- Operator level that can run `+blfeeds` (read-only status).
     etc_blocklist_feeds_oplevel = { 80,
         function( value )

@@ -6776,6 +6776,43 @@ def test_blocklist_78_phase_b():
             raise TestFailure(f"+blocklist count (post-del) did not return zero: {reply!r}")
 
 
+def test_blocklist_feeds_status():
+    """#78 Phase E etc_blocklist_feeds `+blfeeds` read-only status smoke.
+
+    override_test_ports enables the plugin with NO feed active, so this
+    validates the real-hub operator surface end-to-end over an ADC
+    session: the onStart command + HTTP registration, get_status, and
+    format_status all run in the restricted sandbox. The fetch -> parse
+    -> bulk_replace path is unit-tested with mocked responses (86
+    checks); the full fetch-and-block end-to-end (a live mock feed
+    server + close-on-accept) is left as a follow-up.
+
+    Sequence:
+      1. Login as dummy (level 100 > etc_blocklist_feeds_oplevel=80).
+      2. `+blfeeds` -> DMSG reply with the status header + a feed row.
+    """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
+    def _dcontains(f, substr):
+        return substr in f.replace("\\s", " ")
+
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+
+        sock.sendall(f"BMSG {sid} +blfeeds\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "BLOCKLIST FEEDS STATUS")
+                and _dcontains(f, "[tor]"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blfeeds did not return status: {reply!r}")
+
+
 def test_http_aliases(staging_dir: Path, proc=None):
     """#327: HTTP API CRUD for etc_aliases.
 
@@ -11870,6 +11907,7 @@ TESTS = [
     ("+cmd routing (post-login +help)", test_command_routing),
     ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
     ("blocklist admin CLI (#78 Phase B)", test_blocklist_78_phase_b),
+    ("blocklist feeds status (#78 Phase E)", test_blocklist_feeds_status),
     ("S1: fragmented frame reassembled (phase8-io)", test_s1_fragmented_frame_reassembled),
     ("S1: two frames in one segment (phase8-io)", test_s1_two_frames_one_segment),
     ("literal [+!#] bracket hint + no-arg-echo (#137)", test_literal_bracket_command_hint),

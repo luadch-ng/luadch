@@ -57,6 +57,14 @@ local _cfg = {
     etc_blocklist_feeds_spamhaus_stealth = true,
     etc_blocklist_feeds_spamhaus_v6_enabled = false,
     etc_blocklist_feeds_spamhaus_v6_url = "https://feed.test/spamhaus6",
+    etc_blocklist_feeds_abuseipdb_enabled = false,
+    etc_blocklist_feeds_abuseipdb_url = "https://feed.test/abuseipdb",
+    etc_blocklist_feeds_abuseipdb_refresh_interval_sec = 86400,
+    etc_blocklist_feeds_abuseipdb_stealth = false,
+    etc_blocklist_feeds_generic_enabled = false,
+    etc_blocklist_feeds_generic_url = "https://feed.test/generic",
+    etc_blocklist_feeds_generic_refresh_interval_sec = 3600,
+    etc_blocklist_feeds_generic_stealth = false,
     etc_blocklist_feeds_oplevel = 80,
     etc_blocklist_feeds_report = false,
     etc_blocklist_feeds_report_hubbot = false,
@@ -66,9 +74,11 @@ local _cfg = {
 
 local _now = 100000
 local _bulk_ok = true    -- flip false to simulate a bulk_replace store failure
-local _listeners, _requests, _bulk, _store, _audit, _reports
+local _secrets = { }     -- key -> value, drives secrets.lookup
+local _listeners, _requests, _bulk, _store, _audit, _reports, _registered
 local function fresh( )
     _listeners = { }; _requests = { }; _bulk = { }; _store = { }; _audit = { }; _reports = { }
+    _registered = { }
     _bulk_ok = true; _G._sync_reject = false
 end
 fresh( )
@@ -85,6 +95,10 @@ _G.ipairs = ipairs
 _G.tonumber = tonumber
 _G.tostring = tostring
 _G.dkjson = dkjson
+_G.secrets = {
+    lookup   = function( key ) return _secrets[ key ] end,
+    register = function( key ) _registered[ key ] = true end,
+}
 
 _G.cfg = {
     get = function( k ) return _cfg[ k ] end,
@@ -312,14 +326,17 @@ do
     local st = p.get_status( )
     eq( "status: enabled", st.enabled, true )
     truthy( "status: feeds array", type( st.feeds ) == "table" )
-    -- tor enabled, spamhaus + spamhaus_v6 disabled -> 3 feed rows
-    eq( "status: three feed rows", #st.feeds, 3 )
+    -- tor / spamhaus / spamhaus_v6 / abuseipdb / generic all registered
+    -- (with test urls); only tor enabled -> 5 feed rows
+    eq( "status: five feed rows", #st.feeds, 5 )
     local by = { }
     for _, f in ipairs( st.feeds ) do by[ f.name ] = f end
     truthy( "status: tor present", by.tor )
     eq( "status: tor enabled", by.tor.enabled, true )
     eq( "status: spamhaus disabled", by.spamhaus.enabled, false )
     eq( "status: tor interval", by.tor.interval_sec, 3600 )
+    truthy( "status: abuseipdb present", by.abuseipdb )
+    truthy( "status: generic present", by.generic )
 end
 
 ----------------------------------------------------------------------
@@ -448,6 +465,98 @@ do
     end
     eq( "entry_count: tor reflects 3 fetched entries", tor.entries, 3 )
     eq( "entry_count: unpopulated spamhaus is 0", spam.entries, 0 )
+end
+
+----------------------------------------------------------------------
+-- AbuseIPDB adapter: API key via secrets -> Key header; keyless disable
+----------------------------------------------------------------------
+do
+    _cfg.etc_blocklist_feeds_tor_enabled = false
+    _cfg.etc_blocklist_feeds_abuseipdb_enabled = true
+    _secrets[ "etc_blocklist_feeds_abuseipdb_key" ] = "SECRET-KEY-123"
+    load_plugin( )
+    -- secrets.register called in onStart so GET /v1/config redacts it
+    eq( "abuseipdb: key registered as secret", _registered[ "etc_blocklist_feeds_abuseipdb_key" ], true )
+    _now = _now + 10
+    _listeners.onTimer( )
+    eq( "abuseipdb: request queued", #_requests, 1 )
+    eq( "abuseipdb: url from cfg", _requests[ 1 ].url, "https://feed.test/abuseipdb" )
+    truthy( "abuseipdb: Key header present", _requests[ 1 ].headers and _requests[ 1 ].headers.Key == "SECRET-KEY-123" )
+    eq( "abuseipdb: Accept text/plain", _requests[ 1 ].headers.Accept, "text/plain" )
+    fire_complete( 200, "203.0.113.5\n203.0.113.6\n" )
+    eq( "abuseipdb: bulk_replace feed=abuseipdb", last_bulk( ).feed, "abuseipdb" )
+    eq( "abuseipdb: parsed 2 IPs", #last_bulk( ).entries, 2 )
+    -- interval clamped UP to the 6h (21600s) floor even though cfg said 86400 (>floor, so stays 86400)
+    eq( "abuseipdb: TTL = 2 * interval", last_bulk( ).opts.expires_at, _now + 2 * 86400 )
+    _secrets[ "etc_blocklist_feeds_abuseipdb_key" ] = nil
+    _cfg.etc_blocklist_feeds_abuseipdb_enabled = false
+    _cfg.etc_blocklist_feeds_tor_enabled = true
+end
+
+-- keyless abuseipdb: enabled but no key -> feed disabled, no request
+do
+    _cfg.etc_blocklist_feeds_tor_enabled = false
+    _cfg.etc_blocklist_feeds_abuseipdb_enabled = true
+    -- no _secrets key set
+    load_plugin( )
+    _now = _now + 100
+    _listeners.onTimer( )
+    eq( "abuseipdb keyless: no request (feed disabled)", #_requests, 0 )
+    _cfg.etc_blocklist_feeds_abuseipdb_enabled = false
+    _cfg.etc_blocklist_feeds_tor_enabled = true
+end
+
+-- abuseipdb interval clamp: cfg below the 6h floor is raised
+do
+    _cfg.etc_blocklist_feeds_tor_enabled = false
+    _cfg.etc_blocklist_feeds_abuseipdb_enabled = true
+    _cfg.etc_blocklist_feeds_abuseipdb_refresh_interval_sec = 3600   -- 1h, below the 6h floor
+    _secrets[ "etc_blocklist_feeds_abuseipdb_key" ] = "K"
+    load_plugin( )
+    _now = _now + 10
+    _listeners.onTimer( )
+    fire_complete( 200, "1.2.3.4\n" )
+    eq( "abuseipdb: interval clamped to 6h floor (TTL reflects 21600)",
+        last_bulk( ).opts.expires_at, _now + 2 * 21600 )
+    _cfg.etc_blocklist_feeds_abuseipdb_refresh_interval_sec = 86400
+    _secrets[ "etc_blocklist_feeds_abuseipdb_key" ] = nil
+    _cfg.etc_blocklist_feeds_abuseipdb_enabled = false
+    _cfg.etc_blocklist_feeds_tor_enabled = true
+end
+
+----------------------------------------------------------------------
+-- generic adapter: operator URL -> shared line parser -> bulk_replace
+----------------------------------------------------------------------
+do
+    _cfg.etc_blocklist_feeds_tor_enabled = false
+    _cfg.etc_blocklist_feeds_generic_enabled = true
+    load_plugin( )
+    _now = _now + 10
+    _listeners.onTimer( )
+    eq( "generic: request queued", #_requests, 1 )
+    eq( "generic: no auth header", _requests[ 1 ].headers, nil )
+    fire_complete( 200, "198.51.100.7\n# comment\n198.51.100.0/24\n" )
+    eq( "generic: bulk_replace feed=generic", last_bulk( ).feed, "generic" )
+    eq( "generic: parsed 2 (comment skipped)", #last_bulk( ).entries, 2 )
+    _cfg.etc_blocklist_feeds_generic_enabled = false
+    _cfg.etc_blocklist_feeds_tor_enabled = true
+end
+
+-- generic with empty url -> feed not registered at all
+do
+    _cfg.etc_blocklist_feeds_tor_enabled = false
+    _cfg.etc_blocklist_feeds_generic_enabled = true
+    _cfg.etc_blocklist_feeds_generic_url = ""
+    local p = load_plugin( )
+    local has_generic = false
+    for _, f in ipairs( p.get_status( ).feeds ) do if f.name == "generic" then has_generic = true end end
+    falsy( "generic: empty url -> feed not registered", has_generic )
+    _now = _now + 100
+    _listeners.onTimer( )
+    eq( "generic: empty url -> no request", #_requests, 0 )
+    _cfg.etc_blocklist_feeds_generic_url = "https://feed.test/generic"
+    _cfg.etc_blocklist_feeds_generic_enabled = false
+    _cfg.etc_blocklist_feeds_tor_enabled = true
 end
 
 ----------------------------------------------------------------------
