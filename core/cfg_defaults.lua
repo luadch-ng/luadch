@@ -3080,6 +3080,193 @@ local defaults = {
     },
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_proxydetect.lua settings (#78 Phase F, closes #352)
+    --
+    -- Live proxy / VPN / Tor detection: on connect the client IP is
+    -- looked up against an external provider API and, if it is a
+    -- blocked type, the connection is kicked (action="block") or just
+    -- logged (action="log_only"). Non-blocking lookup (verdict arrives
+    -- in a callback, kick-later); a positive verdict in block mode is
+    -- ALSO pushed into the unified blocklist with a TTL so repeat
+    -- connections drop pre-handshake. Verdicts are cached to
+    -- scripts/data/etc_proxydetect.tbl to save provider quota. OFF by
+    -- default. See docs/BLOCKLIST.md.
+
+    -- Master toggle. The plugin loads either way (whitelisted in
+    -- cfg.scripts); when false the onConnect check is inert.
+    etc_proxydetect_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Detection provider (pick ONE). "proxycheck" is implemented in
+    -- Phase F1; "vpnapi" + "ipqs" land in F2. See docs/BLOCKLIST.md for
+    -- the free-tier / commercial-use terms of each before enabling.
+    etc_proxydetect_provider = { "proxycheck",
+        function( value )
+            return value == "proxycheck" or value == "vpnapi" or value == "ipqs"
+        end
+    },
+
+    -- Provider API key. Read env-var-first via core/secrets.lua
+    -- (LUADCH_ETC_PROXYDETECT_API_KEY) with this cfg value as the
+    -- fallback; registered as a secret so GET /v1/config redacts it
+    -- (once the plugin is loaded). The env var is never dumped - prefer
+    -- it. proxycheck works keyless (100/day); a key raises it to
+    -- 1000/day. vpnapi + ipqs require a key.
+    etc_proxydetect_api_key = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- What to do on a match. "log_only" (default) audits + reports but
+    -- lets the user in - the safe starting mode. "block" kicks the
+    -- connection AND pushes the IP into the pre-handshake blocklist.
+    etc_proxydetect_action = { "log_only",
+        function( value )
+            return value == "log_only" or value == "block"
+        end
+    },
+
+    -- Which detected types trigger a block (map of type -> boolean).
+    -- proxycheck reports proxy / vpn / tor. A detected type only counts
+    -- if it is present AND true here.
+    etc_proxydetect_block_types = { {
+        proxy = true,
+        vpn   = true,
+        tor   = true,
+    },
+        function( value )
+            if not types_table( value ) then return false end
+            for k, v in pairs( value ) do
+                if not ( type( k ) == "string"
+                         and types_boolean( v, nil, true ) ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- Which user levels the proxy check applies to (map of integer ->
+    -- boolean). Operators (55-80) exempt by default so a provider false
+    -- positive cannot lock staff out; HUBOWNER (100) kept in scope.
+    -- Mirrors etc_geoip_check_levels.
+    etc_proxydetect_check_levels = { {
+        [ 0 ]   = true,
+        [ 10 ]  = true,
+        [ 20 ]  = true,
+        [ 30 ]  = true,
+        [ 40 ]  = true,
+        [ 50 ]  = true,
+        [ 55 ]  = false,
+        [ 60 ]  = false,
+        [ 70 ]  = false,
+        [ 80 ]  = false,
+        [ 100 ] = true,
+    },
+        function( value )
+            if not types_table( value ) then return false end
+            for level, allowed in pairs( value ) do
+                if not ( types_number( level, nil, true )
+                         and types_boolean( allowed, nil, true ) ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- How long (seconds) a verdict stays cached AND how long a positive
+    -- IP stays in the pre-handshake blocklist. A proxy today may not be
+    -- one next week (dynamic IPs), so 1 day is a sane default.
+    etc_proxydetect_cache_ttl_sec = { 86400,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 60 and value <= 604800
+        end
+    },
+
+    -- Per-lookup HTTP timeout (seconds). Kept short - this runs in the
+    -- connect path; a slow provider must not stall the pending verdict.
+    etc_proxydetect_query_timeout_sec = { 5,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 1 and value <= 30
+        end
+    },
+
+    -- Behaviour when the provider errors / times out / quota is spent.
+    -- true (default) = fail-OPEN (let the user in) so a provider outage
+    -- does not lock every joining user out. false = fail-CLOSED (kick on
+    -- provider error) - stricter, but risky for hubs without 24/7 ops.
+    etc_proxydetect_fail_open = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Stealth flag for the pushed pre-handshake block: true = repeat
+    -- connections are silently dropped at accept (no visible kick); the
+    -- FIRST detection still gets a visible kick reason post-handshake.
+    etc_proxydetect_stealth = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Daily provider-query cap (quota / cost safety valve). A flood of
+    -- DISTINCT IPs (each a cache miss) could otherwise exhaust the free
+    -- tier or run up a paid bill. Over the cap -> skip the lookup and
+    -- fail-open. 0 = unlimited. Default matches the common 1000/day free
+    -- tier.
+    etc_proxydetect_max_queries_per_day = { 1000,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 0 and value <= 1000000
+        end
+    },
+
+    -- Kick message shown to a detected user (block mode only).
+    etc_proxydetect_kick_reason = { "Proxy / VPN / Tor connections are not permitted on this hub.",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Operator level that can run `+proxydetect` (read-only status).
+    etc_proxydetect_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    -- Opchat / hubbot report on every match (mirrors etc_geoip: opchat
+    -- ON, hubbot OFF).
+    etc_proxydetect_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_proxydetect_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_proxydetect_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_proxydetect_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_trafficmanager.lua settings
 
     etc_trafficmanager_activate = { true,

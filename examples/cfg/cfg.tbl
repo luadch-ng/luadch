@@ -1078,6 +1078,45 @@ return { -- the settings are a lua table, do not tough this!
     etc_blocklist_feeds_llevel = 60,  -- min level for the hubbot-PM report (integer)
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_proxydetect.lua settings | live proxy/VPN/Tor detection via a provider API on connect (#78 Phase F, closes #352). OFF by default - see docs/BLOCKLIST.md
+
+    etc_proxydetect_enabled = false,  -- master toggle; plugin loads either way but the onConnect check is inert when false (boolean)
+    etc_proxydetect_provider = "proxycheck",  -- detection provider, pick ONE: "proxycheck" (implemented); "vpnapi" / "ipqs" arrive in F2 (string). Review each provider's free-tier terms in docs/BLOCKLIST.md
+    etc_proxydetect_api_key = "",  -- provider API key (string). Prefer the env var LUADCH_ETC_PROXYDETECT_API_KEY (Docker, never dumped); a cfg.tbl key is redacted in GET /v1/config only once the plugin loads. proxycheck works keyless (100/day); a key raises it to 1000/day
+    etc_proxydetect_action = "log_only",  -- "log_only" audits+reports a match but lets the user in (verify first); "block" kicks + pushes the IP into the pre-handshake blocklist (string)
+    etc_proxydetect_block_types = {  -- which detected types trigger a block (table of type -> boolean); proxycheck reports proxy / vpn / tor
+        proxy = true,
+        vpn   = true,
+        tor   = true,
+    },
+    etc_proxydetect_cache_ttl_sec = 86400,  -- how long a verdict is cached AND a positive IP stays pre-handshake-blocked (integer 60..604800)
+    etc_proxydetect_query_timeout_sec = 5,  -- per-lookup HTTP timeout in the connect path (integer 1..30)
+    etc_proxydetect_fail_open = true,  -- provider error/timeout/quota: true = let the user in (fail-open, safe default); false = kick (fail-closed, risky without 24/7 ops) (boolean)
+    etc_proxydetect_stealth = true,  -- repeat connections silently dropped pre-handshake; the FIRST detection still gets a visible kick (boolean)
+    etc_proxydetect_max_queries_per_day = 1000,  -- daily provider-query cap (quota/cost safety valve); over the cap -> skip lookup + fail-open. 0 = unlimited (integer)
+    etc_proxydetect_kick_reason = "Proxy / VPN / Tor connections are not permitted on this hub.",  -- kick message (block mode only) (string)
+    etc_proxydetect_oplevel = 80,  -- min level to run `+proxydetect` read-only status (integer)
+
+    etc_proxydetect_report = true,  -- on every match, fire etc_report.send so staff see it in chat (boolean)
+    etc_proxydetect_report_hubbot = false,  -- send the report as a hubbot PM to operators at or above etc_proxydetect_llevel (boolean)
+    etc_proxydetect_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_proxydetect_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
+    etc_proxydetect_check_levels = {  -- which levels the proxy check applies to (table of integer -> boolean); operators exempt by default
+        [ 0 ]   = true,
+        [ 10 ]  = true,
+        [ 20 ]  = true,
+        [ 30 ]  = true,
+        [ 40 ]  = true,
+        [ 50 ]  = true,
+        [ 55 ]  = false,
+        [ 60 ]  = false,
+        [ 70 ]  = false,
+        [ 80 ]  = false,
+        [ 100 ] = true,
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_log_cleaner.lua settings | this script adds a command to clean log files
 
     etc_log_cleaner_minlevel = 100,  -- min level to use this command? (integer)
@@ -1496,6 +1535,7 @@ return { -- the settings are a lua table, do not tough this!
         { "etc_blocklist.lua", enabled = true },  -- #78 Phase B `+blocklist` admin CLI for the unified pre-handshake IP/CIDR blocklist (engine = core/blocklist.lua, Phase A). API-toggleable (#261). Manages MANUAL entries; Phase D/E/F plugins (geoip / external feeds / proxydetect) will push auto-feed entries into the same store.
         { "etc_geoip.lua", enabled = false },  -- #78 Phase D2 country / ASN blocking via MaxMind GeoLite2. OFF by default (needs a geoipupdate-managed DB - see docs/BLOCKLIST.md). Per-connection post-handshake lookup; must sit AFTER hub_inf_manager like etc_clientblocker. Enable here + set etc_geoip_enabled=true + populate etc_geoip_blocked_countries.
         { "etc_blocklist_feeds.lua", enabled = false },  -- #78 Phase E external IP/CIDR feeds (Tor exits, Spamhaus DROP) pulled over HTTPS into the blocklist store. OFF by default. Store WRITER (the engine blocks pre-handshake), so chain position is not load-bearing. Enable here + set etc_blocklist_feeds_enabled=true + turn on a feed - see docs/BLOCKLIST.md.
+        { "etc_proxydetect.lua", enabled = false },  -- #78 Phase F live proxy/VPN/Tor detection via a provider API on connect. OFF by default (needs a provider + API key - see docs/BLOCKLIST.md). Per-connection post-handshake lookup; must sit AFTER hub_inf_manager like etc_geoip. Enable here + set etc_proxydetect_enabled=true + etc_proxydetect_action="block".
         { "hub_runtime.lua", enabled = true },  -- using report import; API-toggleable (#261)
         { "bot_regchat.lua", enabled = true },  -- API-toggleable (#261)
         { "bot_session_chat.lua", enabled = true },  -- API-toggleable (#261)

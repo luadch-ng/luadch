@@ -1,0 +1,29 @@
+return {
+
+    -- NOTE: the blocked-user kick text is operator policy and lives in
+    -- the cfg key `etc_proxydetect_kick_reason`, NOT here.
+    msg_denied       = "You are not allowed to use this command.",
+    msg_report       = "[ PROXYDETECT ]--> The user %s with IP %s is a %s (%s). Action: %s.",
+
+    msg_provider_bad = "etc_proxydetect.lua: unknown provider '%s' - the plugin is inert. Set etc_proxydetect_provider to one of: %s.",
+    msg_key_missing  = "etc_proxydetect.lua: provider '%s' needs an API key (etc_proxydetect_api_key or LUADCH_ETC_PROXYDETECT_API_KEY) - the plugin is inert.",
+    msg_tos_note     = "etc_proxydetect.lua: provider '%s' - review its free-tier terms (see docs/BLOCKLIST.md): %s.",
+    msg_quota        = "etc_proxydetect.lua: daily query cap (%d) reached - skipping lookups (fail-open) until the window resets.",
+
+    msg_status_header   = "\n=== PROXYDETECT STATUS ===",
+    msg_status_footer   = "=== END ===\n",
+    msg_status_enabled  = "  enabled:          %s",
+    msg_status_provider = "  provider:         %s",
+    msg_status_action   = "  action:           %s",
+    msg_status_btypes   = "  blocked types:    %s",
+    msg_status_failopen = "  fail-open:        %s",
+    msg_status_cache    = "  cached verdicts:  %d",
+    msg_status_queries  = "  queries today:    %d / %s",
+
+    help_title = "etc_proxydetect.lua - proxy/VPN detection",
+    help_usage = "[+!#]proxydetect",
+    help_desc  = "Show proxy-detection status: provider, action mode, blocked types, cache + query count.",
+
+    ucmd_menu  = { "Hub", "Proxydetect", "status" },
+
+}

@@ -678,6 +678,52 @@ etc. in `cfg.tbl`, then `+reload`).
 `etc_geoip_oplevel`, `etc_geoip_report[_hubbot|_opchat]`,
 `etc_geoip_llevel`. See [`BLOCKLIST.md`](BLOCKLIST.md) for the table.
 
+### etc_proxydetect
+
+Live proxy / VPN / Tor detection via an external provider API on connect
+(#78 Phase F, closes [#352](https://github.com/luadch-ng/luadch/issues/352)).
+**Off by default** - needs a provider (`etc_proxydetect_provider`) and,
+for most, an API key. Full setup, the provider free-tier / commercial-use
+comparison, and the `log_only` -> `block` workflow are in
+[`BLOCKLIST.md`](BLOCKLIST.md).
+
+On each connect (post-handshake) it fires a **non-blocking** provider
+lookup of the client IP; the verdict arrives in a callback, which kicks
+the still-connected user (`etc_proxydetect_action = "block"`) or just
+logs it (`"log_only"`, the default). A positive verdict in block mode is
+**also pushed into the pre-handshake blocklist** with a TTL, so the next
+connection from that IP is dropped at accept (silently, by default) with
+no further query. Clean verdicts are cached to
+`scripts/data/etc_proxydetect.tbl`, and a daily query cap
+(`etc_proxydetect_max_queries_per_day`) protects the provider quota. On a
+provider error / timeout / spent quota the plugin **fails open** (allows
+the connection) unless `etc_proxydetect_fail_open = false`. Operators are
+exempt by default (`etc_proxydetect_check_levels`). Must sit AFTER
+`hub_inf_manager.lua` in `cfg.scripts`. Phase F1 ships the `proxycheck`
+provider; `vpnapi` + `ipqs` land in F2.
+
+**Command:**
+- `+proxydetect` - read-only status: provider, action mode, blocked
+  types, cached-verdict count, queries used today. Requires
+  `etc_proxydetect_oplevel` (default 80).
+
+**HTTP API:** `GET /v1/proxydetect` (read scope) mirrors `+proxydetect`.
+No write endpoint - the policy is cfg-driven.
+
+**Audit events:** `proxydetect.block` on every match (both modes, with
+`ip` / `provider` / `types` / `action` / `cached` meta),
+`proxydetect.query.fail` on a provider error / timeout.
+
+**Config keys:** `etc_proxydetect_enabled`, `etc_proxydetect_provider`,
+`etc_proxydetect_api_key` (prefer the `LUADCH_ETC_PROXYDETECT_API_KEY`
+env var), `etc_proxydetect_action`, `etc_proxydetect_block_types`,
+`etc_proxydetect_check_levels`, `etc_proxydetect_cache_ttl_sec`,
+`etc_proxydetect_query_timeout_sec`, `etc_proxydetect_fail_open`,
+`etc_proxydetect_stealth`, `etc_proxydetect_max_queries_per_day`,
+`etc_proxydetect_kick_reason`, `etc_proxydetect_oplevel`,
+`etc_proxydetect_report[_hubbot|_opchat]`, `etc_proxydetect_llevel`. See
+[`BLOCKLIST.md`](BLOCKLIST.md) for the table.
+
 ### etc_clientblocker
 
 Block clients by Lua-pattern match against the BINF `AP+VE` field

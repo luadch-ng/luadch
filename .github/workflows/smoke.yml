@@ -182,6 +182,13 @@ jobs:
       - name: Run etc_blocklist_feeds unit test
         run: lua5.4 tests/unit/etc_blocklist_feeds_test.lua
 
+      # #78 Phase F: proxy/VPN detection plugin. Drives query_ip SSRF
+      # validation, the proxycheck interpret, and the async lookup ->
+      # kick / store-push flow + SID-reuse / fail-open / quota guards
+      # via a mocked http_client / blocklist / hub.
+      - name: Run etc_proxydetect unit test
+        run: lua5.4 tests/unit/etc_proxydetect_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -317,6 +324,11 @@ jobs:
       - name: Run etc_blocklist_feeds unit test
         shell: msys2 {0}
         run: lua tests/unit/etc_blocklist_feeds_test.lua
+
+      # #78 Phase F: proxy/VPN detection plugin (see Linux job note).
+      - name: Run etc_proxydetect unit test
+        shell: msys2 {0}
+        run: lua tests/unit/etc_proxydetect_test.lua
 
       - name: Configure
         shell: msys2 {0}
