@@ -176,6 +176,11 @@ jobs:
       - name: Run etc_geoip unit test
         run: lua5.4 tests/unit/etc_geoip_test.lua
 
+      # #78 Phase D3: in-hub GeoLite2 auto-update orchestration + tar
+      # extractor (mocked http_client / sha256 / zlib_stream / mmdb).
+      - name: Run geoip_update unit test
+        run: lua5.4 tests/unit/geoip_update_test.lua
+
       # #78 Phase E: external-feed plugin. Drives the line + Spamhaus-JSON
       # parsers (real dkjson) and the fetch -> parse -> bulk_replace flow +
       # failure paths via a mocked http_client / blocklist.
@@ -333,6 +338,11 @@ jobs:
       - name: Run etc_geoip unit test
         shell: msys2 {0}
         run: lua tests/unit/etc_geoip_test.lua
+
+      # #78 Phase D3: in-hub GeoLite2 auto-update (see Linux job note).
+      - name: Run geoip_update unit test
+        shell: msys2 {0}
+        run: lua tests/unit/geoip_update_test.lua
 
       # #78 Phase E: external-feed plugin (see Linux job note).
       - name: Run etc_blocklist_feeds unit test

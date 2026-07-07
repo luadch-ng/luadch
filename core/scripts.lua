@@ -258,6 +258,10 @@ local SANDBOX_GLOBALS = {
     -- reader degrades to (nil, err) on a missing / corrupt DB so a
     -- plugin never crashes the hub on a bad operator drop.
     "mmdb",
+    -- core/geoip_update.lua (#78 Phase D3): in-hub MaxMind GeoLite2 DB
+    -- auto-update. etc_geoip.lua calls geoip_update.update{...} on its
+    -- update timer to fetch + refresh the .mmdb the reader reads.
+    "geoip_update",
     "unicode",
     -- read-only program constants (PROGRAM_NAME / VERSION / FORK /
     -- COPYRIGHT / CONFIG_PATH). Static strings, no capability; lets
