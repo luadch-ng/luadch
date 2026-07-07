@@ -15,6 +15,10 @@
 
 ]]--
 
+-- CWD-relative cpath - the install tree has lib/zlib_stream/zlib_stream.<so|dll>
+-- (same as adclib_unescape_test; run from build/install/luadch).
+local filetype = ( os.getenv "COMSPEC" and os.getenv "WINDIR" and ".dll" ) or ".so"
+package.cpath = "lib/?/?" .. filetype .. ";lib/?" .. filetype .. ";" .. package.cpath
 local zlib_stream = require( "zlib_stream" )
 
 local pass, fail = 0, 0
