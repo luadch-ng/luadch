@@ -1041,6 +1041,13 @@ return { -- the settings are a lua table, do not tough this!
         [ 100 ] = true,
     },
 
+    -- In-hub DB auto-update (#78 Phase D3): the hub downloads + refreshes the .mmdb itself, no geoipupdate cron / sidecar. OFF by default; needs a free MaxMind account + license key - see docs/BLOCKLIST.md
+    etc_geoip_auto_update = false,  -- master toggle for the in-hub downloader (boolean); requires etc_geoip_enabled + a license key
+    etc_geoip_account_id = "",  -- MaxMind account ID = HTTP Basic-auth username (string)
+    etc_geoip_license_key = "",  -- MaxMind license key (string). Prefer the env var LUADCH_ETC_GEOIP_LICENSE_KEY (Docker, never dumped); a cfg.tbl key is redacted in GET /v1/config once the plugin loads. Sent in an auth header, never the URL/log
+    etc_geoip_edition_ids = { "GeoLite2-Country", "GeoLite2-ASN" },  -- editions to fetch (table of "GeoLite2-*" strings); only Country + ASN map to the reader paths
+    etc_geoip_update_interval_sec = 86400,  -- auto-update cadence (integer 21600..2592000); daily default, 6h floor (MaxMind releases 2x/week)
+
     ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_blocklist_feeds.lua settings | pull external IP/CIDR blocklists (Tor, Spamhaus DROP) into the blocklist (#78 Phase E). All feeds OFF by default - see docs/BLOCKLIST.md
 

@@ -38,12 +38,50 @@ The database is **not bundled** (MaxMind's licence forbids
 redistribution, and it ships only as a `.tar.gz`). It is free:
 
 1. Create a free account at <https://www.maxmind.com/en/geolite2/signup>.
-2. Generate a **licence key** (Account -> Manage License Keys).
-3. Install MaxMind's `geoipupdate` tool and let it pull + refresh the
-   `.mmdb` files. MaxMind releases updates twice weekly.
+2. Generate a **licence key** (Account -> Manage License Keys); note your
+   **account ID** shown alongside it.
 
-Editions you want: `GeoLite2-Country` (required for country blocking),
-`GeoLite2-ASN` (optional, for ASN blocking).
+Editions: `GeoLite2-Country` (required for country blocking), `GeoLite2-ASN`
+(optional, for ASN blocking). MaxMind releases updates twice weekly.
+
+Then get the `.mmdb` onto disk one of two ways.
+
+#### Option A (recommended): let the hub download it
+
+Turn on the built-in updater - no `geoipupdate`, no cron, no sidecar; the
+same on bare-metal Linux / Windows and Docker. In `cfg/cfg.tbl`:
+
+```lua
+{ "etc_geoip.lua", enabled = true },      -- in cfg.scripts
+
+etc_geoip_enabled = true,
+etc_geoip_auto_update = true,
+etc_geoip_account_id = "123456",
+etc_geoip_license_key = "your_key_here",  -- prefer the env var below
+```
+
+```sh
+# preferred: the key never touches cfg.tbl and is never dumped by the API
+export LUADCH_ETC_GEOIP_LICENSE_KEY=your_key_here
+```
+
+`+reload` (or restart). The hub fetches each edition ~30 s after boot and
+then every `etc_geoip_update_interval_sec` (daily by default): it verifies
+the `.tar.gz` against MaxMind's published SHA-256, decompresses + extracts
+the `.mmdb`, sanity-checks it (`mmdb.open`), then atomically swaps it into
+`cfg/geoip/` - the live reader picks it up immediately. A failed fetch keeps
+the last-good DB, fires a `geoip.update.fail` audit + one op-chat alert. It
+re-downloads only when MaxMind's file actually changed (a tiny `.sha256`
+check first, which does not count against the download rate limit). The
+credential travels in an `Authorization` header - never the URL, so never a
+log - is read **env-var-first** via `core/secrets.lua`, and is redacted in
+`GET /v1/config` once the plugin is loaded (prefer the env var, which the
+config API never dumps). Auto-update runs only while `etc_geoip_enabled = true`.
+
+#### Option B: out-of-band with `geoipupdate`
+
+Already run MaxMind's official tool, or prefer it? Leave
+`etc_geoip_auto_update = false` and point the hub at the `.mmdb` it writes.
 
 #### Linux (bare metal)
 
@@ -159,6 +197,11 @@ snapshot is available read-only at `GET /v1/geoip`.
 | `etc_geoip_report_hubbot` | `false` | send the report as a hubbot PM to ops >= `etc_geoip_llevel` |
 | `etc_geoip_report_opchat` | `true` | send the report into op-chat |
 | `etc_geoip_llevel` | `60` | min level for the hubbot-PM report |
+| `etc_geoip_auto_update` | `false` | in-hub DB downloader (Option A above); needs `enabled` + a license key |
+| `etc_geoip_account_id` | `""` | MaxMind account ID (Basic-auth username) |
+| `etc_geoip_license_key` | `""` | MaxMind license key; prefer the `LUADCH_ETC_GEOIP_LICENSE_KEY` env var |
+| `etc_geoip_edition_ids` | `{Country, ASN}` | editions to fetch (only Country / ASN map to a reader path) |
+| `etc_geoip_update_interval_sec` | `86400` | auto-update cadence (21600..2592000; daily default, 6 h floor) |
 
 ### Troubleshooting
 

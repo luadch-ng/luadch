@@ -2913,6 +2913,59 @@ local defaults = {
         end
     },
 
+    -- In-hub DB auto-update (#78 Phase D3). When ON, the hub downloads +
+    -- refreshes the .mmdb itself (no geoipupdate cron / sidecar needed) on
+    -- every platform. OFF by default; needs a free MaxMind account_id +
+    -- license_key. See docs/BLOCKLIST.md.
+    etc_geoip_auto_update = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- MaxMind account ID (the HTTP Basic-auth username). "" = unset.
+    etc_geoip_account_id = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- MaxMind license key. SECRET: registered + resolved via core/secrets
+    -- (env-var-first LUADCH_ETC_GEOIP_LICENSE_KEY, cfg.tbl fallback), sent
+    -- in an Authorization header so it never touches the URL / the log.
+    -- "" = unset (auto-update stays inert).
+    etc_geoip_license_key = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Editions to fetch. Only GeoLite2-Country / GeoLite2-ASN map to the
+    -- two reader paths above; any other has no destination and is skipped
+    -- (never downloaded).
+    etc_geoip_edition_ids = { { "GeoLite2-Country", "GeoLite2-ASN" },
+        function( value )
+            if not types_table( value ) then return false end
+            for _, v in ipairs( value ) do
+                if type( v ) ~= "string" or not v:match( "^GeoLite2%-%w+$" ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- Auto-update cadence (seconds). Default daily; floor 6 h so we never
+    -- hammer download.maxmind.com faster than its 2x/week release cadence.
+    etc_geoip_update_interval_sec = { 86400,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 21600
+                and value <= 2592000
+        end
+    },
+
     ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_blocklist_feeds.lua settings (#78 Phase E)
     --

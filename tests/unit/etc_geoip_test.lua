@@ -108,6 +108,35 @@ _G.audit = {
     fire = function( ev ) _audit[ #_audit + 1 ] = ev end,
 }
 _G.mmdb = mmdb
+
+-- Auto-update (#78 Phase D3) sandbox stubs, driven by the control vars below.
+local _geoip_state = { }          -- persisted per-edition sha256 (util.loadtable/savetable)
+local _license = ""               -- what secrets.lookup returns
+local _registered = { }           -- secret keys the plugin registered
+local _update_cb = nil            -- function(opts) -> result; drives geoip_update.update
+local _updates = { }              -- captured update() opts
+_G.util = {
+    loadtable = function( ) return _geoip_state end,
+    savetable = function( t ) _geoip_state = t end,
+}
+_G.secrets = {
+    register = function( k ) _registered[ k ] = true end,
+    lookup   = function( ) return _license end,
+}
+_G.geoip_update = {
+    update = function( opts, on_done )
+        _updates[ #_updates + 1 ] = opts
+        on_done( _update_cb and _update_cb( opts ) or { status = "unchanged" } )
+    end,
+}
+-- io.open must succeed for the state-file peek so util.loadtable is consulted;
+-- everything else (io.stderr / io.write in the harness) falls through to real io.
+local _real_io = io
+_G.io = setmetatable( { open = function( path, mode )
+    if path == "scripts/data/etc_geoip.tbl" then return { close = function( ) end } end
+    return _real_io.open( path, mode )
+end }, { __index = _real_io } )
+
 _G.hub = {
     setlistener   = function( ev, _opts, fn ) _listeners[ ev ] = fn end,
     debug         = function( ) end,
@@ -334,6 +363,73 @@ do
 
     _G.os = real_os
     _cfg.etc_geoip_country_db_path = FIX
+end
+
+----------------------------------------------------------------------
+-- Phase D3: in-hub auto-update integration (run_update cycle)
+----------------------------------------------------------------------
+
+local function _has_audit( action )
+    for _, a in ipairs( _audit ) do if a.action == action then return true end end
+    return false
+end
+
+do
+    local real_os = _real.os
+    local clock = { t = 1000000 }
+    _G.os = { time = function( ) return clock.t end,
+              date = real_os.date, difftime = real_os.difftime, clock = real_os.clock }
+
+    _cfg.etc_geoip_country_db_path = FIX
+    _cfg.etc_geoip_auto_update = true
+    _cfg.etc_geoip_account_id = "12345"
+    _cfg.etc_geoip_edition_ids = { "GeoLite2-Country" }
+    _cfg.etc_geoip_update_interval_sec = 86400
+    _license = "LICKEY"; _geoip_state = { }; _update_cb = nil
+
+    load_plugin( )
+    truthy( "autoupdate: license secret registered", _registered.etc_geoip_license_key )
+
+    _updates = { }
+    _listeners.onTimer( )                          -- clock < next_update (onStart set now+30)
+    eq( "autoupdate: no update before deadline", #_updates, 0 )
+
+    _update_cb = function( ) return { status = "updated", sha256 = string.rep( "e", 64 ), bytes = 4321 } end
+    clock.t = clock.t + 31
+    _listeners.onTimer( )
+    eq( "autoupdate: update() fired past deadline", #_updates, 1 )
+    eq( "autoupdate: edition", _updates[ 1 ].edition, "GeoLite2-Country" )
+    eq( "autoupdate: dest = country_db_path", _updates[ 1 ].dest, FIX )
+    eq( "autoupdate: account_id passed", _updates[ 1 ].account_id, "12345" )
+    eq( "autoupdate: license passed", _updates[ 1 ].license_key, "LICKEY" )
+    falsy( "autoupdate: known_sha256 nil on first run", _updates[ 1 ].known_sha256 )
+    eq( "autoupdate: new sha256 persisted", _geoip_state[ "GeoLite2-Country" ], string.rep( "e", 64 ) )
+    truthy( "autoupdate: geoip.update.success audited", _has_audit( "geoip.update.success" ) )
+
+    _updates = { }
+    _update_cb = function( ) return { status = "unchanged", sha256 = string.rep( "e", 64 ) } end
+    clock.t = clock.t + 86401
+    _listeners.onTimer( )
+    eq( "autoupdate: next cycle sends the stored sha256", _updates[ 1 ] and _updates[ 1 ].known_sha256, string.rep( "e", 64 ) )
+
+    _updates = { }; _audit = { }
+    _update_cb = function( ) return { status = "failed", err = "download 500" } end
+    clock.t = clock.t + 86401
+    _listeners.onTimer( )
+    truthy( "autoupdate: geoip.update.fail audited", _has_audit( "geoip.update.fail" ) )
+
+    -- no credentials -> run_update is a no-op
+    _license = ""
+    load_plugin( )
+    _updates = { }
+    clock.t = clock.t + 86401
+    _listeners.onTimer( )
+    eq( "autoupdate: no license -> no update fired", #_updates, 0 )
+
+    _G.os = real_os
+    _cfg.etc_geoip_auto_update = nil
+    _cfg.etc_geoip_account_id = nil
+    _cfg.etc_geoip_edition_ids = nil
 end
 
 ----------------------------------------------------------------------

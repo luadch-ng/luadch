@@ -157,6 +157,14 @@ _core = {    -- luadch core, order is important
     -- non-blocking socket on the existing ~1s timer so the
     -- single-threaded hub never blocks on an outbound request.
     "http_client",
+    -- core/geoip_update.lua: in-hub MaxMind GeoLite2 auto-update
+    -- (download .tar.gz -> verify sha256 -> gunzip -> untar -> atomic
+    -- place). Infrastructure the etc_geoip plugin drives by import - it
+    -- needs sha256 (not in the plugin sandbox), full os.rename and
+    -- server.addtimer, so it cannot live in the plugin. Loaded AFTER
+    -- http_client / sha256 / mmdb (its top-level use deps) and BEFORE
+    -- scripts so it is in _G when the plugin sandbox iterates the whitelist.
+    "geoip_update",
     -- #206 Tier-2 Sub-PR-3: host OS / CPU / RAM detection
     -- helpers. Lives in core (not in a plugin) so the bundled
     -- `cmd_hubinfo` plugin can use `sysinfo.os_name()` etc. via
