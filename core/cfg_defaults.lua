@@ -4230,7 +4230,6 @@ local defaults = {
         "cmd_nickchange.lua",
         "cmd_mass.lua",
         "cmd_talk.lua",
-        "cmd_pm2offliners.lua",
         "cmd_topic.lua",
         "cmd_userlist.lua",
         "cmd_disconnect.lua",
