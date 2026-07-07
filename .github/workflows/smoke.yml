@@ -208,6 +208,14 @@ jobs:
           cd build/install/luadch
           LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/adclib_unescape_test.lua
 
+      # zlib_stream.gunzip() C round-trip (GeoIP auto-update precursor).
+      # Same install-tree + bundled-liblua requirement as adclib above, so
+      # Linux-only (msys2 lua segfaults loading our C modules).
+      - name: Run zlib_stream unit test
+        run: |
+          cd build/install/luadch
+          LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/zlib_stream_test.lua
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
