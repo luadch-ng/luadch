@@ -129,6 +129,8 @@ _G.geoip_update = {
         on_done( _update_cb and _update_cb( opts ) or { status = "unchanged" } )
     end,
 }
+local _out_puts = { }             -- captured out.put(event.log) lines
+_G.out = { put = function( m ) _out_puts[ #_out_puts + 1 ] = m end }
 -- io.open must succeed for the state-file peek so util.loadtable is consulted;
 -- everything else (io.stderr / io.write in the harness) falls through to real io.
 local _real_io = io
@@ -390,7 +392,7 @@ do
     load_plugin( )
     truthy( "autoupdate: license secret registered", _registered.etc_geoip_license_key )
 
-    _updates = { }
+    _updates = { }; _out_puts = { }
     _listeners.onTimer( )                          -- clock < next_update (onStart set now+30)
     eq( "autoupdate: no update before deadline", #_updates, 0 )
 
@@ -398,6 +400,8 @@ do
     clock.t = clock.t + 31
     _listeners.onTimer( )
     eq( "autoupdate: update() fired past deadline", #_updates, 1 )
+    truthy( "autoupdate: fetch-start logged to event.log (names the edition)",
+        _out_puts[ 1 ] and _out_puts[ 1 ]:find( "GeoLite2-Country", 1, true ) ~= nil )
     eq( "autoupdate: edition", _updates[ 1 ].edition, "GeoLite2-Country" )
     eq( "autoupdate: dest = country_db_path", _updates[ 1 ].dest, FIX )
     eq( "autoupdate: account_id passed", _updates[ 1 ].account_id, "12345" )

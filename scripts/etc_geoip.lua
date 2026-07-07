@@ -119,6 +119,7 @@ local table_sort   = table.sort
 local util_loadtable = util.loadtable
 local util_savetable = util.savetable
 local io_open      = io.open
+local out_put      = out.put
 
 
 --// lang
@@ -137,6 +138,7 @@ local msg_update_ok   = lang.msg_update_ok   or "[ GEOIP ]--> %d database(s) aut
 local msg_update_fail = lang.msg_update_fail or "[ GEOIP ]--> database auto-update failed: %s (keeping the last-good database)."
 local msg_update_recovered = lang.msg_update_recovered or "[ GEOIP ]--> database auto-update recovered."
 local msg_update_missing_key = lang.msg_update_missing_key or "etc_geoip.lua: auto-update is on but no MaxMind account_id / license_key is set - see docs/BLOCKLIST.md."
+local msg_update_start = lang.msg_update_start or "[ GEOIP ]--> auto-update: checking %s for updates at MaxMind..."
 
 -- +geoip status lines
 local msg_status_header   = lang.msg_status_header   or "\n=== GEOIP STATUS ==="
@@ -438,6 +440,14 @@ local function run_update( )
         if type( dest ) == "string" and dest ~= "" then
             queue[ #queue + 1 ] = { edition = ed, dest = dest }
         end
+    end
+
+    -- Announce the cycle start to event.log (out.put, gated on log_events)
+    -- so the operator sees the fetch kick off, not just the result.
+    if #queue > 0 then
+        local names = { }
+        for _, it in ipairs( queue ) do names[ #names + 1 ] = it.edition end
+        out_put( utf_format( msg_update_start, table_concat( names, ", " ) ) )
     end
 
     local i, updated_count, last_err = 0, 0, nil
