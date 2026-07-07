@@ -40,8 +40,12 @@ On first start the container's entrypoint will:
 
 1. **Seed empty mounts** from `/defaults`: `cfg/`, `scripts/`, `certs/`
    are populated from the bundled defaults if you mounted them empty.
-2. **Generate a TLS cert** by running `certs/make_cert.sh` if no
-   `servercert.pem` / `serverkey.pem` exists.
+   If `cfg/` is only *partially* populated (e.g. the hub already wrote
+   `cfg/geoip/` or a `blocklist-export`), a missing `cfg.tbl` / `user.tbl`
+   is still restored from the defaults - add-only, so your own edits are
+   never overwritten.
+2. **Auto-generate a TLS cert** in-hub (`core/cert_bootstrap.lua`, #77) as
+   a self-signed P-256 ECDSA pair if none exists.
 3. **Log the keyprint** so you can build the `adcs://` URL.
 
 Pull the keyprint from the logs:

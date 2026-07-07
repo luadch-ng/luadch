@@ -117,6 +117,28 @@ if [ "${LUADCH_AUTOSYNC_SCRIPTS:-1}" = "1" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 1d. Recover the core config files on a PARTIALLY-populated cfg/
+# ---------------------------------------------------------------------------
+# Block 1 only seeds cfg/ when it is ENTIRELY empty. But the hub writes
+# operator-facing artifacts INTO cfg/ - e.g. cfg/geoip/ for the GeoIP
+# database (#78 Phase D) and cfg/blocklist-export-*.jsonl (#78 Phase B) -
+# so a cfg/ that has lost its cfg.tbl / user.tbl but still holds one of
+# those stays non-empty, the full seed never re-fires, and the hub boots
+# on the in-memory default cfg with no cfg.tbl on disk for the operator to
+# edit (and no user.tbl, so no login).
+#
+# Close that gap: add cfg.tbl and user.tbl from /defaults when they are
+# missing. STRICTLY ADD-ONLY - an existing file is never overwritten
+# (operator edits are sacred), the same rule as the lang autosync in 1c.
+for f in cfg.tbl user.tbl; do
+    target="${LUADCH_HOME}/cfg/${f}"
+    if [ ! -e "$target" ] && [ -f "${DEFAULTS}/cfg/${f}" ]; then
+        cp "${DEFAULTS}/cfg/${f}" "$target"
+        log "seeded missing ${f} from ${DEFAULTS}/cfg/"
+    fi
+done
+
+# ---------------------------------------------------------------------------
 # 2. Cert generation + keyprint (handled by the hub)
 # ---------------------------------------------------------------------------
 # As of v3.1.6, cert generation and keyprint logging are handled by
