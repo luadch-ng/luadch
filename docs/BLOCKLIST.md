@@ -309,10 +309,23 @@ etc_blocklist_feeds_tor_enabled = true,
 etc_blocklist_feeds_spamhaus_enabled = true,
 ```
 
-`+reload` (or restart). Each enabled feed refreshes a few seconds after
+`+reload` (or restart). A newly-enabled feed refreshes a few seconds after
 boot and then on its interval. Check state with `+blfeeds` (or
 `GET /v1/blocklist/feeds`): it shows each feed's enabled state, interval,
 current entry count, and the last refresh result.
+
+The last-fetch time of each feed is persisted to
+`scripts/data/etc_blocklist_feeds.tbl` and survives `+reload`, so reloading
+does NOT re-pull a feed that was fetched less than its interval ago - the
+next pull is scheduled at `last_fetch + interval`. This matters because
+providers rate-limit: Spamhaus firewalls IPs that fetch more than once per
+12 h, and AbuseIPDB has a daily quota, so an operator making several config
+edits and reloading each time must not hammer them into an IP ban. One
+consequence: if you re-point an *already-enabled* feed at a new URL, the new
+URL is not fetched until that feed's interval elapses. To force an immediate
+refresh, delete `scripts/data/etc_blocklist_feeds.tbl` and `+reload` (a
+`+blfeeds refresh` command is tracked in
+[#385](https://github.com/luadch-ng/luadch/issues/385)).
 
 ### Stealth
 

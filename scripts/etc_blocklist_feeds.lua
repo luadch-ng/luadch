@@ -52,6 +52,14 @@
       +blfeeds                show each feed's state + last refresh
       GET /v1/blocklist/feeds same, read-only (policy is cfg-driven)
 
+    v0.02:
+      - +reload no longer re-pulls a feed that was fetched less than its
+        interval ago. The last-fetch time is now persisted to
+        scripts/data/etc_blocklist_feeds.tbl, and onStart schedules the
+        next pull at last_fetch + interval instead of a few seconds after
+        boot - so an operator making several config edits + reloading each
+        time can no longer hammer the provider into an IP ban.
+
     v0.01:
       - initial: tor + spamhaus(+v6) + abuseipdb (API key via secrets) +
         generic operator-URL adapters, RAM-mode fetch, bulk_replace
@@ -64,7 +72,7 @@
 --------------
 
 local scriptname = "etc_blocklist_feeds"
-local scriptversion = "0.01"
+local scriptversion = "0.02"
 
 local cmd_status = "blfeeds"
 
@@ -92,7 +100,11 @@ local utf_format   = utf.format
 local os_time      = os.time
 local table_concat = table.concat
 local math_max     = math.max
+local math_min     = math.min
 local math_floor   = math.floor
+local util_savetable = util.savetable
+local util_loadtable = util.loadtable
+local io_open      = io.open
 
 --// lang
 local msg_denied       = lang.msg_denied       or "You are not allowed to use this command."
@@ -123,6 +135,31 @@ local ucmd_menu  = lang.ucmd_menu  or { "Hub", "Blocklist", "Feeds status" }
 -- name, enabled, url, interval (clamped), stealth, parse fn, max_response,
 -- next_refresh (os.time deadline), in_flight, last (last-refresh status).
 local feeds = { }
+
+-- Persisted per-feed last-fetch timestamp (unix epoch). The in-memory
+-- next_refresh is wiped on +reload, so WITHOUT this a reload would re-pull
+-- every feed a few seconds after boot - and an operator making several
+-- config edits + reloading each time would hammer the provider (Spamhaus
+-- firewalls IPs that fetch more than once per 12 h; AbuseIPDB has a daily
+-- quota). This small table survives reload so onStart can schedule the
+-- NEXT pull at last_fetch + interval instead of re-pulling now.
+local STATE_FILE = "scripts/data/etc_blocklist_feeds.tbl"
+local fetched_at = { }    -- { [feedname] = epoch }, (re)loaded in onStart
+
+local function load_fetched_at( )
+    -- peek with io.open first to avoid a first-run checkfile log line
+    -- (mirrors etc_geoip's load_update_state)
+    local f = io_open( STATE_FILE, "r" )
+    if not f then return { } end
+    f:close( )
+    local t = util_loadtable( STATE_FILE )
+    return ( type( t ) == "table" ) and t or { }
+end
+
+local function mark_fetched( name )
+    fetched_at[ name ] = os_time( )
+    util_savetable( fetched_at, "fetched_at", STATE_FILE )
+end
 
 
 ------------------
@@ -291,6 +328,15 @@ local function refresh_feed( f )
     if not ok then
         f.in_flight = false
         _fail( f, tostring( rerr or "request rejected" ) )
+    else
+        -- a request actually went out to the provider; record the time so
+        -- a +reload within the interval reschedules instead of re-pulling.
+        -- The synchronous-rejection branch above sent nothing to the
+        -- provider, so it does NOT mark - a reload then re-pulls promptly
+        -- (there was no real fetch to throttle). Note this marks on a
+        -- FAILED fetch too (429/500/timeout still hit the provider), which
+        -- is deliberate: those are exactly who a reload-loop must not hammer.
+        mark_fetched( f.name )
     end
 end
 
@@ -478,15 +524,26 @@ hub.setlistener( "onStart", { },
         -- way, so it is the safer place for the key.
         if secrets.register then secrets.register( "etc_blocklist_feeds_abuseipdb_key" ) end
 
-        -- Seed each enabled feed to refresh shortly after boot (staggered
-        -- a few seconds apart so they do not all fetch at once), then on
-        -- its own interval. Disabled feeds are never scheduled.
+        -- Seed each enabled feed's next refresh. Honour the PERSISTED last
+        -- fetch across +reload: a feed pulled less than its interval ago is
+        -- scheduled at last_fetch + interval (in the future) rather than
+        -- re-pulled now, so repeated reloads never hammer the provider. A
+        -- feed never fetched, overdue, or carrying a bogus future timestamp
+        -- (clock skew / a corrupt state file) is staggered a few seconds
+        -- after boot - the min() caps a future value to one interval so it
+        -- can never freeze the feed indefinitely.
+        fetched_at = load_fetched_at( )
         local now = os_time( )
         local stagger = 0
         for _, f in ipairs( feeds ) do
             if f.enabled then
-                stagger = stagger + 3
-                f.next_refresh = now + stagger
+                local last = tonumber( fetched_at[ f.name ] )
+                if last and last + f.interval > now then
+                    f.next_refresh = math_min( last + f.interval, now + f.interval )
+                else
+                    stagger = stagger + 3
+                    f.next_refresh = now + stagger
+                end
             end
         end
 

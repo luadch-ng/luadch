@@ -75,11 +75,13 @@ local _cfg = {
 local _now = 100000
 local _bulk_ok = true    -- flip false to simulate a bulk_replace store failure
 local _secrets = { }     -- key -> value, drives secrets.lookup
+local _persist = { }     -- path -> saved table (simulated on-disk state); survives a reload, cleared by fresh()
 local _listeners, _requests, _bulk, _store, _audit, _reports, _registered
 local function fresh( )
     _listeners = { }; _requests = { }; _bulk = { }; _store = { }; _audit = { }; _reports = { }
     _registered = { }
     _bulk_ok = true; _G._sync_reject = false
+    _persist = { }       -- a fresh boot starts with no on-disk state
 end
 fresh( )
 
@@ -99,6 +101,22 @@ _G.secrets = {
     lookup   = function( key ) return _secrets[ key ] end,
     register = function( key ) _registered[ key ] = true end,
 }
+-- Simulated on-disk state for the reload-throttle persistence. util is not
+-- otherwise used by the harness, so a full replacement is safe. io.open is
+-- only OVERRIDDEN (the harness itself uses io.stderr/io.write/loadfile,
+-- which stay real); the plugin reads its state file via io.open.
+_G.util = {
+    savetable = function( tbl, _name, path )
+        local snap = { }; for k, v in pairs( tbl ) do snap[ k ] = v end   -- snapshot, not a live ref
+        _persist[ path ] = snap
+        return true
+    end,
+    loadtable = function( path ) return _persist[ path ] end,
+}
+io.open = function( path, _mode )
+    if _persist[ path ] then return { close = function( ) end } end
+    return nil
+end
 
 _G.cfg = {
     get = function( k ) return _cfg[ k ] end,
@@ -159,6 +177,17 @@ _G.hub = {
 
 local function load_plugin( )
     fresh( )
+    local p = assert( loadfile( "scripts/etc_blocklist_feeds.lua" ) )( )
+    if _listeners.onStart then _listeners.onStart( ) end
+    return p
+end
+
+-- Simulate a +reload: a new process re-runs the chunk + onStart with the
+-- in-memory captures reset, but the on-disk persist store (_persist) and
+-- the blocklist store (_store) SURVIVE - as they do across a real restart.
+local function reload_plugin( )
+    _listeners = { }; _requests = { }; _bulk = { }; _audit = { }; _reports = { }; _registered = { }
+    _bulk_ok = true; _G._sync_reject = false
     local p = assert( loadfile( "scripts/etc_blocklist_feeds.lua" ) )( )
     if _listeners.onStart then _listeners.onStart( ) end
     return p
@@ -557,6 +586,89 @@ do
     _cfg.etc_blocklist_feeds_generic_url = "https://feed.test/generic"
     _cfg.etc_blocklist_feeds_generic_enabled = false
     _cfg.etc_blocklist_feeds_tor_enabled = true
+end
+
+----------------------------------------------------------------------
+-- reload throttle: a +reload does NOT re-pull a feed fetched < interval
+-- ago (the persisted last-fetch survives the reload). FAIL-PRE-FIX:
+-- pre-fix onStart set next_refresh = boot + stagger, so a reload re-pulled
+-- within seconds and repeated reloads could hammer the provider into a ban.
+----------------------------------------------------------------------
+do
+    load_plugin( )                       -- fresh boot: empty persist, tor scheduled +stagger
+    _now = _now + 10
+    _listeners.onTimer( )                -- tor fetches -> request sent -> mark_fetched persists _now
+    eq( "throttle: initial fetch happened", #_requests, 1 )
+    fire_complete( 200, "1.2.3.4\n" )
+    truthy( "throttle: last-fetch persisted to disk",
+        _persist[ "scripts/data/etc_blocklist_feeds.tbl" ] ~= nil )
+    local fetch_time = _now
+
+    -- +reload 60 s later (well within tor's 3600 s interval); disk survives
+    _now = fetch_time + 60
+    reload_plugin( )                     -- onStart re-seeds from the persisted last-fetch
+    _now = _now + 10                     -- advance past any onStart stagger window
+    _listeners.onTimer( )
+    eq( "throttle: reload within interval does NOT re-pull", #_requests, 0 )
+
+    -- once the interval genuinely elapses, it pulls again
+    _now = fetch_time + 3600 + 5
+    _listeners.onTimer( )
+    eq( "throttle: re-pulls once the interval elapses", #_requests, 1 )
+end
+
+-- a corrupt future last-fetch timestamp must NOT freeze the feed: the
+-- min() cap schedules it at most one interval out, so it recovers.
+do
+    load_plugin( )
+    _now = _now + 10
+    _listeners.onTimer( ); fire_complete( 200, "1.2.3.4\n" )   -- seed persist
+    -- poison the persisted timestamp with a far-future value
+    _persist[ "scripts/data/etc_blocklist_feeds.tbl" ].tor = _now + 999999999
+    local base = _now
+    reload_plugin( )
+    -- one interval later it must pull despite the bogus future timestamp
+    _now = base + 3600 + 5
+    _listeners.onTimer( )
+    eq( "throttle: bogus future timestamp capped to one interval", #_requests, 1 )
+end
+
+-- a FAILED fetch (429/500/timeout) still hit the provider, so it MUST also
+-- persist + throttle the next reload - otherwise a reload-loop against a
+-- rate-limiting provider is exactly the ban scenario. Contract guard: a
+-- future refactor moving mark_fetched into the 200-only branch would break
+-- this and reintroduce the hammer.
+do
+    load_plugin( )
+    _now = _now + 10
+    _listeners.onTimer( )                     -- tor request SENT -> mark_fetched fires here
+    fire_complete( 500, "server error" )      -- ... but the fetch then FAILS
+    eq( "throttle(fail): failed fetch fired refresh.fail", last_audit( ).action, "feed.refresh.fail" )
+    truthy( "throttle(fail): a failed fetch still persisted last-fetch",
+        _persist[ "scripts/data/etc_blocklist_feeds.tbl" ] ~= nil )
+    local fetch_time = _now
+    _now = fetch_time + 60
+    reload_plugin( )
+    _now = _now + 10
+    _listeners.onTimer( )
+    eq( "throttle(fail): reload after a failure does NOT re-pull within interval", #_requests, 0 )
+end
+
+-- a SYNCHRONOUS request rejection sent NOTHING to the provider, so it does
+-- NOT persist - a reload then re-pulls promptly (nothing to throttle).
+do
+    load_plugin( )
+    _G._sync_reject = true
+    _now = _now + 10
+    _listeners.onTimer( )                     -- request rejected synchronously (no send)
+    _G._sync_reject = false
+    falsy( "throttle(reject): sync-reject did NOT persist",
+        _persist[ "scripts/data/etc_blocklist_feeds.tbl" ] )
+    _now = _now + 60
+    reload_plugin( )                          -- reload with no persisted timestamp
+    _now = _now + 10                          -- past the onStart stagger
+    _listeners.onTimer( )
+    eq( "throttle(reject): reload after sync-reject re-pulls promptly", #_requests, 1 )
 end
 
 ----------------------------------------------------------------------
