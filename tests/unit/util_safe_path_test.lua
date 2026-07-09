@@ -134,6 +134,8 @@ reject( "reject: parent-dir mid-path",                  "log/../etc/passwd" )
 reject( "reject: parent-dir end",                       "log/.."          )
 reject( "reject: parent-dir backslash separator",       "log\\..\\etc\\shadow" )
 reject( "reject: bare ..",                              ".."              )
+reject( "reject: embedded NUL byte",                    "log/error.log\0.."  )
+reject( "reject: NUL then traversal",                   "cfg/\0../secret" )
 
 ----------------------------------------------------------------------
 -- 3. safe_path: type validation

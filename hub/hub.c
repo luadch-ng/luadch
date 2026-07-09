@@ -21,6 +21,9 @@
 #endif
 #ifdef _WIN32
 #include <windows.h>
+#include <direct.h>   /* _mkdir */
+#include <errno.h>
+#include <string.h>
 #endif
 
 #include "lua.h"
@@ -170,6 +173,61 @@ static int doexit(lua_State *L)
   return 1;
 }
 
+/*
+ * makedir(path) -> true | nil, errmsg
+ *
+ * Creates `path` and every missing parent component (mkdir -p semantics);
+ * an already-existing component is not an error (EEXIST is tolerated).
+ * Registered as a global so core Lua can materialise its own runtime
+ * directories (log/, cfg/, certs/, scripts/data/, cfg/geoip/, an operator's
+ * master.key dir) instead of relying on the CMake install / Docker
+ * entrypoint to have created them. A Windows drive root ("C:") component is
+ * skipped rather than passed to _mkdir. Path length is bounded.
+ */
+static int makedir(lua_State *L)
+{
+  const char *path = luaL_checkstring(L, 1);
+  size_t len = strlen(path);
+  char buf[1024];
+  size_t i;
+  if (len == 0 || len >= sizeof(buf))
+  {
+    lua_pushnil(L);
+    lua_pushstring(L, "makedir: path empty or too long");
+    return 2;
+  }
+  memcpy(buf, path, len + 1);   /* copy including the terminating NUL */
+  for (i = 1; i <= len; i++)
+  {
+    if (buf[i] == '/' || buf[i] == '\\' || i == len)
+    {
+      char sep = buf[i];
+      buf[i] = '\0';
+      /* skip a Windows drive root ("C:") - _mkdir would fail on it. The
+         loop starts at i=1, so a leading separator never yields an empty
+         segment (no mkdir("")). */
+      if (!(i >= 2 && buf[i - 1] == ':'))
+      {
+#ifdef _WIN32
+        int mkrc = _mkdir(buf);
+#else
+        int mkrc = mkdir(buf, 0777);   /* 0777 & umask */
+#endif
+        int e = errno;   /* capture immediately: only valid right after the call */
+        if (mkrc != 0 && e != EEXIST)
+        {
+          lua_pushnil(L);
+          lua_pushfstring(L, "makedir: cannot create '%s' (errno %d)", buf, e);
+          return 2;
+        }
+      }
+      buf[i] = sep;
+    }
+  }
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 static void run_lua(void);
 
 static int restart(lua_State *L)
@@ -212,6 +270,7 @@ static void run_lua(void)
   lua_register(L, "tablesize", tablesize);
   lua_register(L, "doexit", doexit);
   lua_register(L, "requestexit", requestexit);
+  lua_register(L, "makedir", makedir);
   int err = luaL_loadfile(L, "core/init.lua") || lua_pcall(L, 0, 0, 0);
   if (err)
   {
