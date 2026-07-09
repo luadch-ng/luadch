@@ -331,6 +331,18 @@ local function update( opts, on_done )
         return finish( { status = "failed", err = "credential contains control bytes" } )
     end
 
+    -- Ensure the destination directory exists before any write. The
+    -- default cfg/geoip/ is created by nothing else (CMake/Docker seed
+    -- only the top-level cfg/), and an operator can point *_db_path at a
+    -- custom - possibly absolute - dir. Use the RAW makedir primitive
+    -- (not util.makedir, which safe_path-rejects absolute paths). Best-
+    -- effort - a genuine failure surfaces at the download/extract write.
+    local dest_dir = string_match( dest, "^(.*)[/\\][^/\\]+$" )
+    if dest_dir and dest_dir ~= "" then
+        local mok, mkdir = pcall( use, "makedir" )
+        if mok and type( mkdir ) == "function" then pcall( mkdir, dest_dir ) end
+    end
+
     local host   = ( type( opts.host ) == "string" and opts.host ~= "" ) and opts.host or DEFAULT_HOST
     local verify = opts.verify or "peer"
     local base   = "https://" .. host .. "/geoip/databases/" .. edition .. "/download"

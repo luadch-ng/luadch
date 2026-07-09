@@ -77,6 +77,11 @@ credential travels in an `Authorization` header - never the URL, so never a
 log - is read **env-var-first** via `core/secrets.lua`, and is redacted in
 `GET /v1/config` once the plugin is loaded (prefer the env var, which the
 config API never dumps). Auto-update runs only while `etc_geoip_enabled = true`.
+No manual directory setup is needed for this path: the hub creates
+`cfg/geoip/` itself at boot (`core/ensuredirs.lua`), and the updater also
+creates the destination's parent dir before writing. The `mkdir -p ...
+cfg/geoip` in the Option B recipes below is only for the external
+`geoipupdate` tool, which may run before the hub's first boot.
 
 #### Option B: out-of-band with `geoipupdate`
 
