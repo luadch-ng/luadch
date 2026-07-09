@@ -243,12 +243,12 @@ local function never_expired() return false end
 -- Run stream_transfer against a scripted socket, capturing the bytes it
 -- wrote to a real temp file. Returns ok, res, nbytes, file_content.
 local ST_PATH = "http_client_st_test.out"
-local function run_transfer( script, max_body, max_head, expired_fn, tick_budget )
+local function run_transfer( script, max_body, max_head, expired_fn, tick_budget, follow )
     os.remove( ST_PATH )
     local f = assert( io.open( ST_PATH, "wb" ) )
     local sock = mock_sock( script )
     local ok_, res, nbytes = drive_coro( function()
-        return hc._stream_transfer( sock, expired_fn or never_expired, f, max_body, max_head, tick_budget )
+        return hc._stream_transfer( sock, expired_fn or never_expired, f, max_body, max_head, tick_budget, follow )
     end )
     f:close()
     local fh = io.open( ST_PATH, "rb" )
@@ -573,6 +573,323 @@ do
     end
     local blob3 = table.concat( _logged, "\n", start3 + 1 )
     ok( "log_url: empty string falls back to url", blob3:find( "host.example/path", 1, true ) ~= nil )
+end
+
+----------------------------------------------------------------------
+-- Redirect following (opt-in max_redirects) - the GeoIP 302 fix.
+-- MaxMind's download endpoint 302s to a signed Cloudflare-R2 URL on a
+-- DIFFERENT host; the client must follow it AND drop the Basic-auth
+-- header on that cross-origin hop so the credential never leaks.
+----------------------------------------------------------------------
+
+-- resolve_location: pure reference-resolution of a Location value.
+do
+    eq( "rl: absolute passes through",
+        hc._resolve_location( "https", "h.example", 443, "/download", "https://cdn.example/x?y=1" ),
+        "https://cdn.example/x?y=1" )
+    eq( "rl: absolute-path, default port omitted",
+        hc._resolve_location( "https", "h.example", 443, "/a/b", "/c/d" ),
+        "https://h.example/c/d" )
+    eq( "rl: absolute-path, non-default port kept",
+        hc._resolve_location( "https", "h.example", 8443, "/a/b", "/c" ),
+        "https://h.example:8443/c" )
+    eq( "rl: scheme-relative inherits scheme",
+        hc._resolve_location( "https", "h", 443, "/x", "//cdn.example/y" ),
+        "https://cdn.example/y" )
+    eq( "rl: relative replaces last path segment",
+        hc._resolve_location( "https", "h.example", 443, "/dir/file", "next" ),
+        "https://h.example/dir/next" )
+    eq( "rl: relative from root path",
+        hc._resolve_location( "http", "h", 80, "/", "x" ),
+        "http://h/x" )
+    eq( "rl: ipv6 authority re-bracketed",
+        hc._resolve_location( "https", "2001:db8::1", 443, "/a", "/b" ),
+        "https://[2001:db8::1]/b" )
+    ok( "rl: empty Location rejected", ( hc._resolve_location( "https", "h", 443, "/", "" ) ) == nil )
+    ok( "rl: control-byte Location rejected", ( hc._resolve_location( "https", "h", 443, "/", "/a\r\nb" ) ) == nil )
+end
+
+-- strip_sensitive: drops auth/cookie headers case-insensitively.
+do
+    local h = { Authorization = "Basic xxx", [ "X-Keep" ] = "1", Cookie = "a=b" }
+    local s = hc._strip_sensitive( h )
+    ok( "ss: Authorization dropped", s.Authorization == nil )
+    ok( "ss: Cookie dropped", s.Cookie == nil )
+    eq( "ss: unrelated header kept", s[ "X-Keep" ], "1" )
+    ok( "ss: original table not mutated", h.Authorization == "Basic xxx" )
+
+    local h2 = { [ "authorization" ] = "x", [ "PROXY-AUTHORIZATION" ] = "y", z = "keep" }
+    local s2 = hc._strip_sensitive( h2 )
+    ok( "ss: lowercase authorization dropped", s2[ "authorization" ] == nil )
+    ok( "ss: uppercase proxy-authorization dropped", s2[ "PROXY-AUTHORIZATION" ] == nil )
+    eq( "ss: other kept", s2.z, "keep" )
+
+    ok( "ss: nil passes through", hc._strip_sensitive( nil ) == nil )
+    local h3 = { a = 1 }
+    ok( "ss: nothing sensitive returns same table", hc._strip_sensitive( h3 ) == h3 )
+end
+
+-- prepare_redirect: resolve + validate + cross-origin auth-strip.
+do
+    local hdr = { Authorization = "Basic SECRET", [ "User-Agent" ] = "x" }
+
+    -- the real MaxMind case: cross-host -> Basic auth stripped
+    local nurl, nh = hc._prepare_redirect(
+        "https://download.maxmind.com/geoip/databases/GeoLite2-Country/download?suffix=tar.gz.sha256",
+        hdr,
+        "https://mm-prod-geoip-databases.r2.cloudflarestorage.com/downloads/x.tar.gz.sha256?X-Amz-Signature=abc" )
+    eq( "pr: cross-host target url",
+        nurl, "https://mm-prod-geoip-databases.r2.cloudflarestorage.com/downloads/x.tar.gz.sha256?X-Amz-Signature=abc" )
+    ok( "pr: cross-host strips Authorization", nh.Authorization == nil )
+    eq( "pr: cross-host keeps User-Agent", nh[ "User-Agent" ], "x" )
+    ok( "pr: original header table untouched", hdr.Authorization == "Basic SECRET" )
+
+    -- same-host absolute -> auth kept
+    local nurl2, nh2 = hc._prepare_redirect( "https://h.example/a", hdr, "https://h.example/b" )
+    eq( "pr: same-host target url", nurl2, "https://h.example/b" )
+    eq( "pr: same-host keeps auth", nh2.Authorization, "Basic SECRET" )
+
+    -- same-host relative -> resolved, auth kept
+    local nurl3, nh3 = hc._prepare_redirect( "https://h.example/dir/a", hdr, "b" )
+    eq( "pr: relative resolved", nurl3, "https://h.example/dir/b" )
+    eq( "pr: relative keeps auth", nh3.Authorization, "Basic SECRET" )
+
+    -- different port same host -> cross-origin -> auth stripped
+    local _, nh4 = hc._prepare_redirect( "https://h.example/a", hdr, "https://h.example:8443/a" )
+    ok( "pr: different port strips auth", nh4.Authorization == nil )
+
+    -- absolute IPv6 target resolves + validates through parse_url
+    local nurl6, nh6 = hc._prepare_redirect( "https://h.example/a", hdr, "https://[2001:db8::5]/b" )
+    eq( "pr: ipv6 absolute target url", nurl6, "https://[2001:db8::5]/b" )
+    ok( "pr: ipv6 cross-host strips auth", nh6.Authorization == nil )
+
+    -- https -> http downgrade refused
+    local bad, berr = hc._prepare_redirect( "https://h.example/a", hdr, "http://h.example/a" )
+    ok( "pr: downgrade refused", bad == nil )
+    ok( "pr: downgrade err names downgrade", tostring( berr ):match( "downgrade" ) ~= nil )
+
+    -- unsupported-scheme target refused
+    ok( "pr: ftp target refused", ( hc._prepare_redirect( "https://h.example/a", hdr, "ftp://h.example/a" ) ) == nil )
+
+    -- an error string must NEVER echo the signature-bearing target URL
+    local _, berr2 = hc._prepare_redirect( "https://h.example/a", hdr, "http://cdn.example/x?X-Amz-Signature=LEAK" )
+    ok( "pr: downgrade err omits signature", tostring( berr2 ):find( "LEAK", 1, true ) == nil )
+end
+
+-- download mode: stream_transfer surfaces the 302 as a redirect signal
+-- when follow is on; without follow a 302 is a plain non-2xx failure
+-- (unchanged behaviour). This is the download-side of the fix.
+do
+    local ok_, sig = run_transfer( {
+        { data = "HTTP/1.1 302 Found\r\nLocation: https://cdn.example/x\r\nContent-Length: 0\r\n\r\n", err = "closed" },
+    }, nil, nil, nil, nil, true )
+    eq( "st: 302 with follow returns redirect signal", ok_, "redirect" )
+    eq( "st: 302 redirect location surfaced", sig, "https://cdn.example/x" )
+
+    local okN, errN = run_transfer{
+        { data = "HTTP/1.1 302 Found\r\nLocation: https://cdn.example/x\r\n\r\n", err = "closed" },
+    }
+    ok( "st: 302 without follow still fails (unchanged)", okN == false )
+    ok( "st: 302 no-follow err names status", tostring( errN ):match( "302" ) ~= nil )
+
+    -- follow on, but a 3xx with NO Location cannot be followed -> failure
+    local okL = run_transfer( {
+        { data = "HTTP/1.1 304 Not Modified\r\n\r\n", err = "closed" },
+    }, nil, nil, nil, nil, true )
+    ok( "st: 3xx without Location not followed", okL == false )
+end
+
+-- stream_to_file propagates the redirect signal, drops the empty temp,
+-- and leaves any existing good file untouched.
+do
+    cleanup_dl()
+    local pf = assert( io.open( DL_PATH, "wb" ) ); pf:write( "GOODFEED" ); pf:close()
+    local sock = mock_sock{
+        { data = "HTTP/1.1 302 Found\r\nLocation: https://cdn.example/x\r\nContent-Length: 0\r\n\r\n", err = "closed" },
+    }
+    local ok_, sig = drive_coro( function()
+        return hc._stream_to_file( sock, { download_to_file = DL_PATH }, never_expired, true )
+    end )
+    eq( "dl: redirect signal propagated", ok_, "redirect" )
+    eq( "dl: redirect location", sig, "https://cdn.example/x" )
+    local fh = io.open( DL_PATH, "rb" ); local c = fh:read( "*a" ); fh:close()
+    eq( "dl: existing file preserved on redirect", c, "GOODFEED" )
+    ok( "dl: tmp removed after redirect", io.open( DL_PATH .. ".tmp", "rb" ) == nil )
+    ok( "dl: socket closed after redirect", sock.closed == true )
+    cleanup_dl()
+end
+
+-- full drive() loop via a scripted mock tcp: prove the loop RE-ISSUES
+-- each hop and completes a 302 -> 200, and that it CAPS at max_redirects.
+-- http:// avoids the TLS branch. (This is the integration-level fix
+-- demonstration: pre-fix, request() returned the 302 to on_complete.)
+do
+    -- 302 -> 200 completes with the final body
+    local which = 0
+    _real.socket.tcp = function()
+        which = which + 1
+        local first = ( which == 1 )
+        local served = false
+        return {
+            settimeout = function() end, setoption = function() end,
+            connect = function() return 1 end,
+            send = function( self, p ) return #p end,
+            receive = function()
+                if not served then
+                    served = true
+                    if first then
+                        return "HTTP/1.1 302 Found\r\nLocation: http://h.example/final\r\nContent-Length: 0\r\n\r\n", nil
+                    end
+                    return "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nHI", nil
+                end
+                return nil, "closed"
+            end,
+            close = function() end,
+        }
+    end
+    local captured, res
+    _real.server = { addtimer = function( co ) captured = co end }
+    hc.request{
+        url = "http://h.example/a", max_redirects = 3,
+        on_complete = function( r ) res = r end,
+        on_error = function( e ) res = { err = e } end,
+    }
+    if captured then
+        for _ = 1, 200 do
+            if coroutine.status( captured ) == "dead" then break end
+            if not coroutine.resume( captured ) then break end
+        end
+    end
+    ok( "loop: 302 -> 200 completes", res ~= nil and res.status == 200 )
+    eq( "loop: final body returned", res and res.body, "HI" )
+
+    -- always-302 (same host) trips the hop cap; count the re-issues
+    local sends = 0
+    _real.socket.tcp = function()
+        local served = false
+        return {
+            settimeout = function() end, setoption = function() end,
+            connect = function() return 1 end,
+            send = function( self, p ) sends = sends + 1; return #p end,
+            receive = function()
+                if not served then
+                    served = true
+                    return "HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\n\r\n", nil
+                end
+                return nil, "closed"
+            end,
+            close = function() end,
+        }
+    end
+    local captured2, err2
+    _real.server = { addtimer = function( co ) captured2 = co end }
+    hc.request{
+        url = "http://h.example/a", max_redirects = 2,
+        on_complete = function() err2 = "UNEXPECTED COMPLETE" end,
+        on_error = function( e ) err2 = e end,
+    }
+    if captured2 then
+        for _ = 1, 200 do
+            if coroutine.status( captured2 ) == "dead" then break end
+            if not coroutine.resume( captured2 ) then break end
+        end
+    end
+    ok( "loop: redirect cap enforced", tostring( err2 ):match( "too many redirects" ) ~= nil )
+    ok( "loop: re-issued initial + 2 follows before cap", sends == 3 )
+    _real.socket.tcp = nil
+end
+
+-- Finding-1 regression: an intermediate 3xx whose headers (a big signed
+-- Location) exceed the caller's SMALL max_response must STILL be followed
+-- (read up to MAX_HEADER_SIZE), while the final response stays capped.
+-- The geoip sidecar runs exactly this shape (max_response = 4 KiB).
+do
+    local bigloc = "http://h.example/final?sig=" .. string.rep( "x", 400 )
+    local which = 0
+    _real.socket.tcp = function()
+        which = which + 1
+        local first = ( which == 1 )
+        local served = false
+        return {
+            settimeout = function() end, setoption = function() end,
+            connect = function() return 1 end,
+            send = function( self, p ) return #p end,
+            receive = function()
+                if not served then
+                    served = true
+                    if first then
+                        return "HTTP/1.1 302 Found\r\nLocation: " .. bigloc .. "\r\nContent-Length: 0\r\n\r\n", nil
+                    end
+                    return "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nHI", nil
+                end
+                return nil, "closed"
+            end,
+            close = function() end,
+        }
+    end
+    local captured, res
+    _real.server = { addtimer = function( co ) captured = co end }
+    hc.request{
+        url = "http://h.example/a", max_redirects = 3, max_response = 100,
+        on_complete = function( r ) res = r end,
+        on_error = function( e ) res = { err = e } end,
+    }
+    if captured then
+        for _ = 1, 200 do
+            if coroutine.status( captured ) == "dead" then break end
+            if not coroutine.resume( captured ) then break end
+        end
+    end
+    ok( "loop: 3xx headers over small max_response still followed", res ~= nil and res.status == 200 )
+    _real.socket.tcp = nil
+end
+
+-- download_to_file end-to-end across a redirect: 302 -> 200 streams the
+-- FINAL body to disk (the loop is mode-agnostic; this closes the gap
+-- between the stream_to_file signal test and the RAM loop test).
+do
+    local DL2 = "http_client_dlredir_test.out"
+    os.remove( DL2 ); os.remove( DL2 .. ".tmp" )
+    local which = 0
+    _real.socket.tcp = function()
+        which = which + 1
+        local first = ( which == 1 )
+        local served = false
+        return {
+            settimeout = function() end, setoption = function() end,
+            connect = function() return 1 end,
+            send = function( self, p ) return #p end,
+            receive = function()
+                if not served then
+                    served = true
+                    if first then
+                        return "HTTP/1.1 302 Found\r\nLocation: http://h.example/final\r\nContent-Length: 0\r\n\r\n", nil
+                    end
+                    return "HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nFEEDDATA", nil
+                end
+                return nil, "closed"
+            end,
+            close = function() end,
+        }
+    end
+    local captured, res
+    _real.server = { addtimer = function( co ) captured = co end }
+    hc.request{
+        url = "http://h.example/a", max_redirects = 3, download_to_file = DL2,
+        on_complete = function( r ) res = r end,
+        on_error = function( e ) res = { err = e } end,
+    }
+    if captured then
+        for _ = 1, 200 do
+            if coroutine.status( captured ) == "dead" then break end
+            if not coroutine.resume( captured ) then break end
+        end
+    end
+    ok( "dl-loop: 302 -> 200 download completes", res ~= nil and res.downloaded_bytes == 8 )
+    local fh = io.open( DL2, "rb" ); local c = fh and fh:read( "*a" ); if fh then fh:close() end
+    eq( "dl-loop: final file content", c, "FEEDDATA" )
+    os.remove( DL2 ); os.remove( DL2 .. ".tmp" )
+    _real.socket.tcp = nil
 end
 
 io.write( string.format( "\n%d checks, %d failures\n", checks, failures ) )

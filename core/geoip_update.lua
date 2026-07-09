@@ -105,6 +105,7 @@ local READ_CHUNK       = 256 * 1024         -- compressed bytes read from disk p
 local FLUSH_BUDGET     = 1024 * 1024        -- decompressed bytes per coroutine tick before yielding
 local SHA_MAX_RESP     = 4096               -- the .sha256 sidecar is ~80 bytes
 local DOWNLOAD_TIMEOUT = 120                -- seconds; a few-MB body over the 1 Hz drain
+local MAX_REDIRECTS    = 5                  -- MaxMind 302s to a signed Cloudflare-R2 URL (one hop); headroom for a CDN chain
 
 local ZERO_BLOCK = string_rep( "\0", TAR_BLOCK )
 
@@ -358,6 +359,7 @@ local function update( opts, on_done )
             method       = "GET",
             headers      = headers,
             verify       = verify,
+            max_redirects = MAX_REDIRECTS,   -- MaxMind 302s to a signed R2 URL
             download_to_file = dl,
             timeout      = DOWNLOAD_TIMEOUT,
             on_complete  = function( ) have_download( expected ) end,
@@ -374,6 +376,7 @@ local function update( opts, on_done )
         method       = "GET",
         headers      = headers,
         verify       = verify,
+        max_redirects = MAX_REDIRECTS,   -- MaxMind 302s to a signed R2 URL
         max_response = SHA_MAX_RESP,
         timeout      = 30,
         on_complete  = function( res )

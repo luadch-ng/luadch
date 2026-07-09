@@ -52,6 +52,9 @@
           max_response = 65536,        -- response byte cap (default 64 KiB)
           verify      = "peer",        -- "peer" (default) | "none" (TLS only)
           cafile      = "certs/ca-bundle.pem", -- CA bundle path; default = bundled
+          max_redirects = 5,           -- optional: follow up to N HTTP
+                                       -- redirects (default 0 = do not
+                                       -- follow; see "Redirects" below)
           download_to_file = "cfg/feed.json", -- optional: stream the body
                                        -- to this path instead of RAM (see below)
           log_url     = "https://host/path",  -- optional: a key-free URL to
@@ -98,6 +101,41 @@
     The caller owns the path (same trust model as the URL - do NOT
     derive it from untrusted input).
 
+    Redirects (opt-in):
+    pass max_redirects = N (N > 0) to follow up to N HTTP 3xx redirects
+    that carry a Location header. Default is 0 - a 3xx is then returned
+    as-is in RAM mode (res.status = 302) / fails a download, exactly as
+    before, so this is a non-breaking addition. Needed because some
+    endpoints 302 to a signed CDN URL on a DIFFERENT host (MaxMind's
+    GeoLite2 download redirects to a Cloudflare-R2 pre-signed URL). Both
+    RAM and download_to_file modes follow. Security rules on every hop:
+      - the target is re-parsed with the same validation as the initial
+        url (http/https only, no control bytes, no embedded credentials);
+      - a Location that DOWNGRADES https -> http is refused (never leak a
+        request that started encrypted onto cleartext);
+      - the `Authorization` / `Cookie` / `Proxy-Authorization` headers are
+        DROPPED when the redirect crosses to a different origin
+        (scheme/host/port), so a credential (e.g. the MaxMind Basic auth)
+        is never sent to the third-party host it redirects to. NOTE: only
+        those three header names are dropped - a credential carried in a
+        custom header (e.g. `X-Api-Key`) would SURVIVE a cross-origin hop,
+        so do not combine such a header with max_redirects;
+      - the request method + body are RE-SENT unchanged on every hop
+        (correct for 307/308; a 303/POST->GET rewrite is NOT performed).
+        No current caller combines max_redirects with a POST body; add
+        that handling before doing so;
+      - hops are capped at max_redirects (and a hard MAX_REDIRECT_CEIL).
+    RAM-mode size note: an intermediate 3xx is read up to MAX_HEADER_SIZE,
+    NOT the caller's max_response, so a signed-CDN Location that is larger
+    than a small max_response is still followed; the FINAL response is
+    still bounded by max_response. (download_to_file mode already bounds
+    headers separately, so it is unaffected.)
+    SSRF note: a redirect TARGET is chosen by the server, not the caller,
+    so following redirects widens the trust boundary from "caller passes a
+    trusted url" to "that url's server picks the next host". Keep this
+    opt-in and only for operator-configured endpoints; do NOT enable it
+    for a url derived from untrusted (ADC-client) input.
+
 ]]--
 
 local use = use
@@ -139,6 +177,7 @@ local MAX_TIMEOUT       = 120
 local DEFAULT_MAX_RESP  = 64 * 1024
 local MAX_RESP_CEIL     = 1024 * 1024   -- hard ceiling even if caller asks for more
 local MAX_INFLIGHT      = 16            -- global cap on concurrent requests
+local MAX_REDIRECT_CEIL = 10            -- hard cap on followed redirects even if caller asks for more
 
 -- // TLS defaults (Precursor 0b + 0d of #78 arc) //
 -- Bundled CA bundle ships at `<install>/certs/ca-bundle.pem` (Mozilla
@@ -284,6 +323,75 @@ local function parse_response( raw )
     return { status = status, headers = headers, body = body }
 end
 
+-- Request headers that must NOT survive a redirect to a DIFFERENT origin
+-- (RFC 9110 s15.4 / browser + curl behaviour). Forwarding the MaxMind
+-- Basic credential to the Cloudflare-R2 signed URL it 302s to would leak
+-- it to a third party. Keys are compared case-insensitively.
+local SENSITIVE_HEADERS = {
+    [ "authorization" ]       = true,
+    [ "cookie" ]              = true,
+    [ "proxy-authorization" ] = true,
+}
+
+-- Return a copy of `headers` with the sensitive keys removed. If nothing
+-- sensitive was present the original table is returned unchanged (a nil
+-- table passes straight through).
+local function strip_sensitive( headers )
+    if type( headers ) ~= "table" then return headers end
+    local kept, dropped = {}, false
+    for k, v in pairs( headers ) do
+        if SENSITIVE_HEADERS[ string_lower( k ) ] then
+            dropped = true
+        else
+            kept[ k ] = v
+        end
+    end
+    if not dropped then return headers end
+    return kept
+end
+
+-- Resolve a redirect Location against the base request URL into an
+-- absolute URL string, or (nil, err). Handles the four forms our feeds
+-- actually emit: absolute (scheme://...), scheme-relative (//host/path),
+-- absolute-path (/path) and a plain relative path. Deliberately minimal -
+-- just enough RFC 3986 reference resolution for operator endpoints.
+local function resolve_location( scheme, host, port, path, loc )
+    if type( loc ) ~= "string" or loc == "" then return nil, "empty Location" end
+    if has_ctrl( loc ) then return nil, "Location contains control bytes" end
+    if string_find( loc, "^%w+://" ) then return loc end          -- absolute
+    local authority = string_find( host, ":", 1, true ) and ( "[" .. host .. "]" ) or host
+    if ( scheme == "https" and port ~= 443 ) or ( scheme == "http" and port ~= 80 ) then
+        authority = authority .. ":" .. port
+    end
+    if string_find( loc, "^//" ) then return scheme .. ":" .. loc end          -- scheme-relative
+    if string_sub( loc, 1, 1 ) == "/" then return scheme .. "://" .. authority .. loc end   -- absolute path
+    local dir = string_match( path, "^(.*/)" ) or "/"             -- relative path
+    return scheme .. "://" .. authority .. dir .. loc
+end
+
+-- Given the current hop's url + headers and a raw Location value, produce
+-- the ( next_url, next_headers ) to request, or ( nil, err ). Re-validates
+-- the target with parse_url, refuses an https->http downgrade, and drops
+-- the sensitive headers on a cross-origin hop. Error strings deliberately
+-- name only the host, never the full (possibly signature-bearing) target
+-- URL, so nothing sensitive reaches the log.
+local function prepare_redirect( cur_url, headers, loc )
+    local cs, ch, cp, cpath = parse_url( cur_url )
+    if not cs then return nil, "cannot parse current url for redirect" end
+    local nurl, rerr = resolve_location( cs, ch, cp, cpath, loc )
+    if not nurl then return nil, "bad redirect Location: " .. tostring( rerr ) end
+    local ns, nh, np = parse_url( nurl )
+    if not ns then return nil, "invalid redirect target (" .. tostring( nh ) .. ")" end
+    if cs == "https" and ns == "http" then
+        return nil, "refusing https->http redirect downgrade to host " .. nh
+    end
+    local nheaders = headers
+    if ns ~= cs or nh ~= ch or np ~= cp then
+        nheaders = strip_sensitive( headers )
+    end
+    return nurl, nheaders
+end
+
 local function safe_cb( fn, arg )
     if type( fn ) == "function" then
         local ok, err = pcall( fn, arg )
@@ -324,7 +432,7 @@ end
 --   false, err              on any handled failure
 -- Does NOT close `f` / the socket and does NOT rename - the caller
 -- (stream_to_file) owns those so cleanup is guaranteed on every path.
-local function stream_transfer( sock, expired, f, max_body, max_head, tick_budget )
+local function stream_transfer( sock, expired, f, max_body, max_head, tick_budget, follow )
     max_body     = max_body or MAX_DOWNLOAD_CEIL
     max_head     = max_head or MAX_HEADER_SIZE
     tick_budget  = tick_budget or DOWNLOAD_TICK_BUDGET
@@ -368,6 +476,17 @@ local function stream_transfer( sock, expired, f, max_body, max_head, tick_budge
                     res = parse_response( string_sub( joined, 1, he ) )
                     res.body = nil
                     local st = res.status
+                    -- follow a redirect (opt-in) BEFORE the 2xx gate: a
+                    -- 3xx with a Location is not a failure, it is the next
+                    -- hop. Signalled up so the caller re-issues; no byte of
+                    -- the (empty) 3xx body is written, so the last-good file
+                    -- is untouched.
+                    if follow and type( st ) == "number" and st >= 300 and st <= 399 then
+                        local loc = res.headers[ "location" ]
+                        if loc and loc ~= "" then
+                            return "redirect", loc
+                        end
+                    end
                     if type( st ) ~= "number" or st < 200 or st > 299 then
                         return false, "server returned HTTP status " .. tostring( st )
                     end
@@ -430,7 +549,7 @@ end
 -- or close + remove on any failure. Concurrent downloads to the same
 -- final path are refused up front in request(), so the fixed .tmp name is
 -- collision-free.
-local function stream_to_file( sock, req, expired )
+local function stream_to_file( sock, req, expired, follow )
     local final_path = req.download_to_file
     local tmp_path   = final_path .. ".tmp"
     local f, ferr = io_open( tmp_path, "wb" )
@@ -439,7 +558,7 @@ local function stream_to_file( sock, req, expired )
         return false, "cannot open download temp '" .. tmp_path .. "': " .. tostring( ferr )
     end
 
-    local pok, ok, res_or_err, nbytes = pcall( stream_transfer, sock, expired, f )
+    local pok, ok, res_or_err, nbytes = pcall( stream_transfer, sock, expired, f, nil, nil, nil, follow )
 
     -- Always release the handle. A failed flush at close (e.g. the disk
     -- filled and the last buffered bytes never landed) must FAIL the
@@ -451,6 +570,13 @@ local function stream_to_file( sock, req, expired )
     if not pok then
         os_remove( tmp_path )
         return false, "download crashed: " .. tostring( ok )
+    end
+    -- redirect: nothing was written (the 3xx is caught before the body),
+    -- so drop the empty temp and hand the Location up for the caller to
+    -- follow - the existing file on disk is left untouched.
+    if ok == "redirect" then
+        os_remove( tmp_path )
+        return "redirect", res_or_err
     end
     if not ok then
         os_remove( tmp_path )
@@ -495,14 +621,20 @@ local function stream_to_file( sock, req, expired )
     return true, res_or_err
 end
 
--- The non-blocking state machine, run inside a coroutine that yields
--- back to the select loop between I/O steps. Never blocks.
-local function drive( req )
-    local deadline = socket_gettime( ) + req.timeout
-    local function expired( ) return socket_gettime( ) > deadline end
+-- One HTTP exchange to `url` with `headers`, driven by the shared
+-- `expired` deadline. Never blocks. Returns one of:
+--   true, res            success (RAM: res.body set / download: res meta)
+--   false, err           handled failure
+--   "redirect", location  a 3xx with a Location header, when the caller
+--                        opted into following (req.max_redirects > 0) - the
+--                        outer drive() loop resolves + re-issues.
+-- Splitting the single exchange out of the redirect loop keeps ONE
+-- deadline across all hops (a chain cannot exceed req.timeout total).
+local function drive_once( req, url, headers, expired )
+    local follow = ( req.max_redirects or 0 ) > 0
 
-    local scheme, host, port, path = parse_url( req.url )
-    -- (parse already validated in request(); re-deriving here is cheap)
+    local scheme, host, port, path = parse_url( url )
+    -- (parse already validated by request()/prepare_redirect; cheap to redo)
 
     -- IPv6 literal (host carries a ":") needs an AF_INET6 socket;
     -- everything else (IPv4 literal / hostname) uses AF_INET.
@@ -611,7 +743,7 @@ local function drive( req )
     end
 
     -- // send request (handle partial writes) //
-    local payload = build_request( req.method, host, port, path, req.body, req.headers )
+    local payload = build_request( req.method, host, port, path, req.body, headers )
     local sent = 0
     local total = string_len( payload )
     while sent < total do
@@ -629,10 +761,18 @@ local function drive( req )
 
     -- // receive: stream the body to disk, or accumulate in RAM //
     if req.download_to_file then
-        return stream_to_file( sock, req, expired )
+        return stream_to_file( sock, req, expired, follow )
     end
 
     -- // receive response (accumulate until close or cap) //
+    -- When following redirects, read an intermediate 3xx up to
+    -- MAX_HEADER_SIZE rather than the caller's max_response: a signed CDN
+    -- Location plus provider headers can exceed a small body cap (the
+    -- geoip sidecar sets max_response = 4 KiB), and that 3xx is not the
+    -- body the caller asked to size. The FINAL (non-redirect) response is
+    -- re-checked against the caller's real max_response after parsing.
+    local read_cap = req.max_response
+    if follow and MAX_HEADER_SIZE > read_cap then read_cap = MAX_HEADER_SIZE end
     local chunks = {}
     local got = 0
     while true do
@@ -641,7 +781,7 @@ local function drive( req )
         local piece = data or partial
         if piece and piece ~= "" then
             got = got + string_len( piece )
-            if got > req.max_response then
+            if got > read_cap then
                 sock:close( ); return false, "response exceeds max_response cap"
             end
             chunks[ #chunks + 1 ] = piece
@@ -661,7 +801,54 @@ local function drive( req )
     end
     sock:close( )
 
-    return true, parse_response( table_concat( chunks ) )
+    local res = parse_response( table_concat( chunks ) )
+    -- follow a redirect (opt-in): a 3xx with a Location is the next hop,
+    -- not the final response. Without follow, the 3xx is returned as-is
+    -- (unchanged behaviour). A 3xx WITHOUT a Location (e.g. 304) falls
+    -- through and is returned to the caller.
+    if follow then
+        local st = res.status
+        if type( st ) == "number" and st >= 300 and st <= 399 then
+            local loc = res.headers[ "location" ]
+            if loc and loc ~= "" then
+                return "redirect", loc
+            end
+        end
+        -- not a redirect: this is the final response, so the raised
+        -- read_cap no longer applies - re-assert the caller's real cap.
+        if got > req.max_response then
+            return false, "response exceeds max_response cap"
+        end
+    end
+    return true, res
+end
+
+-- Redirect-following wrapper around drive_once. Owns the shared deadline
+-- (so a redirect chain cannot exceed req.timeout in total), the hop
+-- counter, and the per-hop URL resolution + cross-origin auth-strip. Only
+-- ever returns the true/false outcomes drive_once yields - a "redirect"
+-- signal is consumed here, never escapes to request()'s coroutine wrapper.
+local function drive( req )
+    local deadline = socket_gettime( ) + req.timeout
+    local function expired( ) return socket_gettime( ) > deadline end
+
+    local url          = req.url
+    local headers      = req.headers
+    local max_redirects = req.max_redirects or 0
+    local hops = 0
+    while true do
+        local outcome, a, b = drive_once( req, url, headers, expired )
+        if outcome ~= "redirect" then
+            return outcome, a, b
+        end
+        hops = hops + 1
+        if hops > max_redirects then
+            return false, "too many redirects (limit " .. max_redirects .. ")"
+        end
+        local nurl, nheaders = prepare_redirect( url, headers, a )
+        if not nurl then return false, nheaders end   -- nheaders is the err string
+        url, headers = nurl, nheaders
+    end
 end
 
 local request
@@ -721,6 +908,11 @@ request = function( req )
     local m = tonumber( req.max_response ) or DEFAULT_MAX_RESP
     if m < 1 then m = DEFAULT_MAX_RESP elseif m > MAX_RESP_CEIL then m = MAX_RESP_CEIL end
     req.max_response = m
+    -- redirect following: opt-in, default 0 (no follow = unchanged
+    -- behaviour), clamped to a hard ceiling.
+    local rd = tonumber( req.max_redirects ) or 0
+    if rd < 0 then rd = 0 elseif rd > MAX_REDIRECT_CEIL then rd = MAX_REDIRECT_CEIL end
+    req.max_redirects = rd
 
     local server = use "server"
     if type( server.addtimer ) ~= "function" then
@@ -767,4 +959,7 @@ return {
     _has_ctrl      = has_ctrl,
     _stream_transfer = stream_transfer,
     _stream_to_file  = stream_to_file,
+    _strip_sensitive   = strip_sensitive,
+    _resolve_location  = resolve_location,
+    _prepare_redirect  = prepare_redirect,
 }
