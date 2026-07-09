@@ -75,6 +75,10 @@ _core = {    -- luadch core, order is important
     "mem",
     "signal",
     "util",
+    -- ensuredirs is deliberately NOT in _core: import() loads it
+    -- manually and calls ensure() BEFORE this load loop, so the runtime
+    -- dirs (log/ cfg/ certs/ scripts/data/ cfg/geoip/) exist before any
+    -- core module inits into them.
     -- cfg_secret is not in _core because its init() needs cfg_get
     -- (master_key_path). cfg.lua does `use "cfg_secret"` and calls
     -- secret.init() from cfg.init() after _settings is loaded so
@@ -249,6 +253,14 @@ import = function( )    -- this function loads all extern libs and the core
         if succ then _global.ssl.x509 = ret end
     end
     write "\ninit.lua: import core"
+    -- Self-heal the runtime directories the hub writes into (log/, cfg/,
+    -- certs/, scripts/data/, cfg/geoip/) BEFORE any core module inits
+    -- into them: a bare-metal / wiped-bind-mount install may lack them,
+    -- and cfg/geoip/ is created by nothing else. Best-effort - makedir is
+    -- EEXIST-tolerant and absent under a standalone lua; a genuine
+    -- failure still surfaces later as a clear write error.
+    local ensuredirs = use "ensuredirs"
+    _ = ensuredirs and ensuredirs.ensure and ensuredirs.ensure( )
     for i, script in ipairs( _core ) do
         _ = _global[ script ] or loadscript( script )
     end

@@ -70,6 +70,16 @@ jobs:
       - name: Run util_makedir unit test
         run: lua5.4 tests/unit/util_makedir_test.lua
 
+      # core/ensuredirs.lua (#78 follow-up): boot-time runtime-directory
+      # self-heal (log/, cfg/, certs/, scripts/data/, cfg/geoip/).
+      - name: Run ensuredirs unit test
+        run: lua5.4 tests/unit/ensuredirs_test.lua
+
+      # core/cfg_secret.lua: first-boot master.key generation creates the
+      # key's parent dir before writing (operator-relocated-path crash fix).
+      - name: Run cfg_secret unit test
+        run: lua5.4 tests/unit/cfg_secret_test.lua
+
       # #275 COV-7: core/http_filter.lua (#264) shared filter/sort/
       # paginate helper. Smoke covers wire-up of each list endpoint;
       # this unit test covers the helper's string / integer (+_min /
@@ -283,6 +293,14 @@ jobs:
       - name: Run util_makedir unit test
         shell: msys2 {0}
         run: lua tests/unit/util_makedir_test.lua
+
+      - name: Run ensuredirs unit test
+        shell: msys2 {0}
+        run: lua tests/unit/ensuredirs_test.lua
+
+      - name: Run cfg_secret unit test
+        shell: msys2 {0}
+        run: lua tests/unit/cfg_secret_test.lua
 
       - name: Run http_filter unit test
         shell: msys2 {0}

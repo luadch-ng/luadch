@@ -296,7 +296,16 @@ static void daemonize(void)
   {
     exit(EXIT_SUCCESS);
   }
-  umask(0);
+  // Restrict the file-creation mask so the hub's OWN writes are not
+  // world-accessible in daemon mode. The classic daemon idiom umask(0)
+  // makes every file the hub creates 0666 and every directory 0777 -
+  // world-readable/writable. That matters now that the hub self-heals
+  // its runtime directories (core/ensuredirs.lua etc.): a 0777 cfg/ or
+  // certs/ lets a local user replace user.tbl / the TLS key / master.key
+  // regardless of those files' own 0600 mode. 027 -> files 0640, dirs
+  // 0750 (owner full, group read, no world); master.key / serverkey.pem
+  // are additionally chmod 600 by their writers.
+  umask(027);
   if (setsid() < 0)
   {
     exit(EXIT_FAILURE);

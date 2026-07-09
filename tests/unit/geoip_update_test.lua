@@ -34,6 +34,7 @@ local function reset( )
     M.rename_ok = true                     -- os.rename result
     M.written = nil                        -- bytes written to the .tmp
     M.bomb = nil                           -- if set, gunzip:push returns it every call (over-cap)
+    M.makedirs = { }                       -- captured makedir(dir) calls (dest-dir self-heal)
 end
 reset( )
 
@@ -74,6 +75,7 @@ local real = {
                      if done then return "" end done = true; return M.tar or "" end,
                  close = function( ) end }
     end },
+    makedir = function( d ) M.makedirs[ #M.makedirs + 1 ] = d; return true end,
 }
 _G.use = function( name ) local v = real[ name ]; if v == nil then error( "use: missing " .. name ) end return v end
 local gu = assert( loadfile( "core/geoip_update.lua" ) )( )
@@ -254,6 +256,30 @@ do
     drive_co( )
     eq( "rename-fail -> failed", res and res.status, "failed" )
     ok( "rename-fail: err mentions rename", res.err and res.err:find( "rename", 1, true ) ~= nil )
+end
+
+-- dest-dir self-heal: update() makedir's the destination's PARENT dir
+-- (default cfg/geoip/, which nothing else creates) before any write.
+-- FAIL-PRE-FIX: the unpatched update() never calls makedir, so the
+-- "makedir('cfg/geoip')" assertion below fails on pre-fix code.
+do
+    reset( )
+    gu.update( opts( { known_sha256 = string.rep( "b", 64 ) } ), function( ) end )
+    local made = false
+    for _, d in ipairs( M.makedirs ) do if d == "cfg/geoip" then made = true end end
+    ok( "dest-dir: makedir('cfg/geoip') called at update() start", made )
+    -- and it happens before the sidecar request is even queued (so the
+    -- directory exists before any download/extract write)
+    ok( "dest-dir: makedir ran (>=1 call)", #M.makedirs >= 1 )
+end
+
+-- absolute / bare dest: a dest with no directory component makes no
+-- makedir call (nothing to create), and update() still proceeds.
+do
+    reset( )
+    gu.update( opts( { dest = "flat.mmdb", known_sha256 = string.rep( "b", 64 ) } ), function( ) end )
+    ok( "dest-dir: bare filename -> no makedir call", #M.makedirs == 0 )
+    eq( "dest-dir: bare filename still queues the sidecar", #_requests, 1 )
 end
 
 io.write( string.format( "\n%d passed, %d failed\n", pass, fail ) )

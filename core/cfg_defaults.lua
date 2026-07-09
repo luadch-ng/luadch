@@ -2615,9 +2615,11 @@ local defaults = {
         end
     },
 
-    -- Directory for the JSONL files. Created on first write if
-    -- missing. The plugin chmods every file 0600 (POSIX) since
-    -- audit content is sensitive (target nicks / IPs / CIDs).
+    -- Directory for the JSONL files. The default log/ is created at
+    -- boot by core/ensuredirs.lua; if you relocate this to a custom
+    -- directory, make sure that directory exists. The plugin chmods
+    -- every file 0600 (POSIX) since audit content is sensitive (target
+    -- nicks / IPs / CIDs).
     etc_auditlog_dir = { "log/",
         function( value )
             return types_utf8( value, nil, true )
