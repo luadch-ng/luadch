@@ -746,10 +746,23 @@ root snapshot:
 | First-boot / upgrade | `cacert_bootstrap.lua` copies the bundled file from `lib/luadch/ca-bundle.pem` (immutable system path) into the operator-facing path on first boot; SHA-256 mismatch logs WARN and leaves the operator-managed copy alone unless `ca_bundle_auto_update = true` |
 | Operator opt-out | Pass `verify="none"` explicitly per call |
 | Response size cap | RAM mode caps the whole response at 1 MiB. Stream-to-disk mode (`download_to_file`, Precursor 0a of the #78 arc, for large external feeds) caps the body at 50 MiB and the response headers separately at 64 KiB, so a server that never terminates its headers cannot grow the RAM buffer without limit. Integrity of the on-disk feed: only a 2xx response is written; a `Transfer-Encoding: chunked` response is rejected (not de-chunked); a `Content-Length` short read is treated as a truncation and discarded; the body streams to `<path>.tmp` and replaces `<path>` only after a complete, in-cap download (atomic rename on POSIX; a move-aside via `<path>.bak` with rollback on Windows keeps the last good file if the swap fails). A partial, non-2xx, or corrupt download therefore never replaces the last good file, and concurrent downloads to the same path are refused. The module owns the `.tmp` / `.bak` siblings. A close-delimited response (no Content-Length, no chunked) cannot have its completeness verified and is committed best-effort - point download-mode feeds at a Content-Length endpoint. The caller owns the target path (same trust boundary as the URL - never derive it from untrusted input). |
+| Redirect following | **Opt-in** via `max_redirects` (default `0` = a `3xx` is returned/failed as-is, unchanged behaviour). Needed because MaxMind's GeoLite2 download endpoint 302-redirects to a signed Cloudflare-R2 URL on a different host. Guards on every hop: `Authorization` / `Cookie` / `Proxy-Authorization` are **dropped when the redirect crosses origin** (scheme/host/port) so a credential never reaches the third-party host; an `https -> http` downgrade is **refused**; the target is re-validated by `parse_url`; hops are capped (`max_redirects`, hard ceiling `MAX_REDIRECT_CEIL = 10`) and share ONE `req.timeout`. Only those three header names are stripped - a credential in a custom header (e.g. `X-Api-Key`) would survive a cross-origin hop, so callers must not combine one with `max_redirects`. |
 
 The bundle's provenance, license, refresh recipe, and threat model
 live in [`docs/CACERT.md`](CACERT.md). Refresh quarterly or when
 the Mozilla NSS root store publishes a new release.
+
+**Redirect trust boundary (SSRF).** Following a redirect widens the
+outbound trust boundary: the initial URL is caller-supplied (operator
+cfg), but the redirect *target* is chosen by the server that answers.
+A compromised or malicious upstream can therefore point the hub at an
+arbitrary host. This is bounded by the opt-in default, the hop cap, the
+https-only + no-downgrade rules, and the `verify="peer"` default (an
+`https://` internal target would still need a publicly-trusted cert),
+but there is no RFC1918/link-local denylist - so `max_redirects` must
+only be enabled for operator-configured endpoints, never for a URL
+derived from untrusted (ADC-client) input. Same rule as the base
+`http_client` SSRF note.
 
 The TLS protocol floor is held at TLS 1.2 (SSLv3 / TLS 1.0 / TLS
 1.1 disabled via LuaSec options) for outbound calls regardless of
