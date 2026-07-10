@@ -268,7 +268,16 @@ jobs:
             mingw-w64-ucrt-x86_64-make
             mingw-w64-ucrt-x86_64-openssl
             mingw-w64-ucrt-x86_64-zlib
-            mingw-w64-ucrt-x86_64-lua
+            mingw-w64-ucrt-x86_64-lua54
+
+      # Pin the msys2 Lua to the lua54 package (Lua 5.4.8, binary
+      # `lua5.4.exe`) rather than the unversioned `lua` package, which
+      # rolling-release msys2 bumped to Lua 5.5 - where generic-for
+      # control variables are const, so 5.4-valid code (e.g. reassigning
+      # a for loop var) fails to even parse. The hub bundles + runs Lua
+      # 5.4.8, so the unit tests MUST run under 5.4.x to validate against
+      # the real runtime. lua54 provides `lua5.4`, matching the Linux
+      # leg's `lua5.4` (apt lua5.4) invocation.
 
       # #275 COV-2 holistic review follow-up: the Lua-side unit tests
       # MUST run on Windows too. Linux-only coverage masks divergences
@@ -277,116 +286,116 @@ jobs:
       # tests as the Linux job, same order.
       - name: Run iostream unit test
         shell: msys2 {0}
-        run: lua tests/unit/iostream_test.lua
+        run: lua5.4 tests/unit/iostream_test.lua
 
       - name: Run bloom unit test
         shell: msys2 {0}
-        run: lua tests/unit/bloom_test.lua
+        run: lua5.4 tests/unit/bloom_test.lua
 
       - name: Run http_router unit test
         shell: msys2 {0}
-        run: lua tests/unit/http_router_test.lua
+        run: lua5.4 tests/unit/http_router_test.lua
 
       - name: Run util_http unit test
         shell: msys2 {0}
-        run: lua tests/unit/util_http_test.lua
+        run: lua5.4 tests/unit/util_http_test.lua
 
       - name: Run util_safe_path unit test
         shell: msys2 {0}
-        run: lua tests/unit/util_safe_path_test.lua
+        run: lua5.4 tests/unit/util_safe_path_test.lua
 
       - name: Run util_makedir unit test
         shell: msys2 {0}
-        run: lua tests/unit/util_makedir_test.lua
+        run: lua5.4 tests/unit/util_makedir_test.lua
 
       - name: Run ensuredirs unit test
         shell: msys2 {0}
-        run: lua tests/unit/ensuredirs_test.lua
+        run: lua5.4 tests/unit/ensuredirs_test.lua
 
       - name: Run cfg_secret unit test
         shell: msys2 {0}
-        run: lua tests/unit/cfg_secret_test.lua
+        run: lua5.4 tests/unit/cfg_secret_test.lua
 
       - name: Run http_filter unit test
         shell: msys2 {0}
-        run: lua tests/unit/http_filter_test.lua
+        run: lua5.4 tests/unit/http_filter_test.lua
 
       - name: Run http_client unit test
         shell: msys2 {0}
-        run: lua tests/unit/http_client_test.lua
+        run: lua5.4 tests/unit/http_client_test.lua
 
       - name: Run hbri unit test
         shell: msys2 {0}
-        run: lua tests/unit/hbri_test.lua
+        run: lua5.4 tests/unit/hbri_test.lua
 
       - name: Run lang unit test
         shell: msys2 {0}
-        run: lua tests/unit/lang_test.lua
+        run: lua5.4 tests/unit/lang_test.lua
 
       - name: Run usr_share lang unit test
         shell: msys2 {0}
-        run: lua tests/unit/usr_share_lang_test.lua
+        run: lua5.4 tests/unit/usr_share_lang_test.lua
 
       - name: Run etc_aliases unit test
         shell: msys2 {0}
-        run: lua tests/unit/etc_aliases_test.lua
+        run: lua5.4 tests/unit/etc_aliases_test.lua
 
       - name: Run cmd_gag bot-guard unit test
         shell: msys2 {0}
-        run: lua tests/unit/cmd_gag_bot_test.lua
+        run: lua5.4 tests/unit/cmd_gag_bot_test.lua
 
       - name: Run audit unit test
         shell: msys2 {0}
-        run: lua tests/unit/audit_test.lua
+        run: lua5.4 tests/unit/audit_test.lua
 
       - name: Run etc_clientblocker unit test
         shell: msys2 {0}
-        run: lua tests/unit/etc_clientblocker_test.lua
+        run: lua5.4 tests/unit/etc_clientblocker_test.lua
 
       - name: Run secrets unit test
         shell: msys2 {0}
-        run: lua tests/unit/secrets_test.lua
+        run: lua5.4 tests/unit/secrets_test.lua
 
       - name: Run sha256 unit test
         shell: msys2 {0}
-        run: lua tests/unit/sha256_test.lua
+        run: lua5.4 tests/unit/sha256_test.lua
 
       - name: Run cacert_bootstrap unit test
         shell: msys2 {0}
-        run: lua tests/unit/cacert_bootstrap_test.lua
+        run: lua5.4 tests/unit/cacert_bootstrap_test.lua
 
       - name: Run ipmatch unit test
         shell: msys2 {0}
-        run: lua tests/unit/ipmatch_test.lua
+        run: lua5.4 tests/unit/ipmatch_test.lua
 
       - name: Run blocklist unit test
         shell: msys2 {0}
-        run: lua tests/unit/blocklist_test.lua
+        run: lua5.4 tests/unit/blocklist_test.lua
 
       # #78 Phase D1: pure-Lua MaxMind DB reader (see Linux job note).
       - name: Run mmdb unit test
         shell: msys2 {0}
-        run: lua tests/unit/mmdb_test.lua
+        run: lua5.4 tests/unit/mmdb_test.lua
 
       # #78 Phase D2: etc_geoip country/ASN blocking (see Linux job note).
       - name: Run etc_geoip unit test
         shell: msys2 {0}
-        run: lua tests/unit/etc_geoip_test.lua
+        run: lua5.4 tests/unit/etc_geoip_test.lua
 
       # #78 Phase D3: in-hub GeoLite2 auto-update (see Linux job note).
       - name: Run geoip_update unit test
         shell: msys2 {0}
-        run: lua tests/unit/geoip_update_test.lua
+        run: lua5.4 tests/unit/geoip_update_test.lua
 
       # #78 Phase E: external-feed plugin (see Linux job note).
       - name: Run etc_blocklist_feeds unit test
         shell: msys2 {0}
-        run: lua tests/unit/etc_blocklist_feeds_test.lua
+        run: lua5.4 tests/unit/etc_blocklist_feeds_test.lua
 
       # #78 Phase F: proxy/VPN detection plugin (see Linux job note).
       - name: Run etc_proxydetect unit test
         shell: msys2 {0}
-        run: lua tests/unit/etc_proxydetect_test.lua
+        run: lua5.4 tests/unit/etc_proxydetect_test.lua
 
       - name: Configure
         shell: msys2 {0}
