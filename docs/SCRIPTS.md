@@ -523,6 +523,212 @@ side: `audit_log_max_reason_chars` (1000),
 `audit_log_max_meta_value_chars` (1000) - applied at `audit.build`
 time so both disk and `/v1/events` payloads stay bounded.
 
+### etc_blocklist
+
+Operator-facing chat command for the unified pre-handshake
+IP/CIDR blocklist. Engine is `core/blocklist.lua` (#78 Phase A);
+this plugin (#78 Phase B) ships the `+blocklist` admin CLI with
+six verbs.
+
+**Commands** (all require `etc_blocklist_oplevel`, default 80):
+
+- `+blocklist show [source]` - list active entries; optional
+  filter by source (`manual`, `geoip`, `external`, `proxycheck`,
+  `vpnapi`, `ipqs`). Output capped at `etc_blocklist_show_limit`
+  rows (default 200) to keep a single DMSG readable on
+  geoip-populated stores.
+- `+blocklist add <cidr|ip> [stealth] [reason="..."] [expires=YYYY-MM-DD]` -
+  add a CIDR (or single IP, treated as `/32` for v4 or `/128`
+  for v6). `stealth` is a literal positional flag; `reason` and
+  `expires` are key=value pairs with quoted-string values. The
+  engine REJECTS host-bits-set CIDRs (`1.2.3.4/24` -> use
+  `1.2.3.0/24` instead); the error surfaces back to the operator.
+- `+blocklist del <id>` - remove an entry by numeric id from the
+  `+blocklist show` output. A level-N operator CANNOT remove an
+  entry added by a level-(N+) master (hierarchy guard via the
+  entry's `by_level` field, captured at add time).
+- `+blocklist count` - `{total, by_source}` summary.
+- `+blocklist export` - write
+  `cfg/blocklist-export-YYYYMMDD.jsonl` with all manual entries
+  (auto-feeds are skipped; they re-fetch themselves). One JSON
+  object per line, encoded with dkjson.
+- `+blocklist import <path>` - read JSONL from the supplied
+  path. Every string field is run through
+  `util.strip_control_bytes` before insertion. Invalid rows
+  (bad JSON, missing cidr) are counted as `errors`; rows whose
+  cidr the engine rejects are counted as `skipped`. Importing
+  attributes all rows to the importing operator's
+  nick + level - the original `by_*` fields in the file are
+  preserved as audit metadata in the imported row only.
+
+**Auto-feed entries.** Phase D (`etc_geoip`), Phase E
+(`etc_blocklist_feeds`), and Phase F (`etc_proxydetect`) plugins
+will push entries into the same store with their respective
+source tags. An operator at or above the master level can
+remove any source via `+blocklist del`, but the matching
+auto-feed will re-add the entry on the next refresh cycle - the
+correct path is to disable / reconfigure the feed plugin, not
+hand-delete its rows. Manual entries (`source=manual`) are
+operator-owned and survive any feed refresh.
+
+**Audit fires:** `blocklist.add` (cidr / source / stealth /
+expires / id), `blocklist.remove` (id / cidr / source),
+`blocklist.export` (path / count), `blocklist.import` (path /
+added / skipped / errors). The accept-time TCP drop on a
+matched IP fires NO per-attempt audit; aggregated rollup lines
+land in the hub log on the
+`blocklist_aggregated_log_window_sec` cadence (default 3600s).
+
+**Storage and reload.** The engine writes
+`scripts/data/etc_blocklist.tbl` on every successful add /
+remove. The file appears on the first successful `+blocklist
+add` (no empty stub on fresh install). The path is configurable
+via `blocklist_store_path` cfg key; `scripts/data/` matches the
+convention used by sibling plugins (`cmd_ban_bans.tbl`,
+`etc_clientblocker.tbl`, `etc_blacklist.tbl`) so operators find
+all plugin-owned state in one place. `+reload` re-snapshots the
+cfg keys (`blocklist_enabled`, `blocklist_stealth_default`,
+`blocklist_aggregated_log_window_sec`) and re-reads the .tbl.
+
+**HTTP API surface (v0.02 / Phase C).** Four endpoints alongside
+the ADC verbs, all documented in `docs/HTTP_API.md`:
+
+- `GET /v1/blocklist` (read) - list with filter/sort/pagination
+  via the shared `http_filter` convention. Query params include
+  `source`, `stealth`, `cidr_contains`, `reason_contains`,
+  `by_nick`, and range-filters on `by_level` / `created_at` /
+  `expires_at`.
+- `GET /v1/blocklist/counts` (read) - `{total, by_source}` for
+  prometheus + dashboard use.
+- `POST /v1/blocklist` (admin) - body `{cidr, source?, stealth?,
+  reason?, expires_at?}`. `source` enum-locked; `expires_at` is a
+  unix timestamp integer (HTTP path skips the ADC-side
+  `YYYY-MM-DD` date parsing).
+- `DELETE /v1/blocklist/{id}` (admin) - stable numeric ids from
+  GET; unlike `/v1/bans/{id}` these do NOT shift on removal.
+
+HTTP admin tokens bypass the ADC-side hierarchy guard: the token
+is the trust surface, so a token can undo any entry regardless
+of who added it. Entries created via HTTP are attributed with
+`by_nick = <token label>` and `by_level = 100` (synthetic
+master).
+
+**Tradeoffs.** JSONL export/import remains the cross-hub sync
+path (dedicated GET `/v1/blocklist/export` for bulk snapshots is
+NOT provided; use GET /v1/blocklist with pagination if a caller
+wants machine-readable batches). Importing the same JSONL twice
+creates duplicate entries (no dedup on cidr alone, since (cidr,
+source) is the engine's identity tuple); operators rely on the
+`+blocklist show` id + `+blocklist del` (or the DELETE endpoint)
+for cleanup.
+
+**Upgrading from a pre-Phase-B hub.** `cfg.scripts` is
+replace-not-merge - an operator with a `cfg.tbl` predating this
+plugin must add the line `{ "etc_blocklist.lua", enabled = true },`
+to their `cfg.scripts` block (next to `etc_clientblocker.lua`
+is the canonical position) and run `+reload`. The example file
+at `examples/cfg/cfg.tbl` shows the placement. The new cfg
+keys (`etc_blocklist_oplevel`, `etc_blocklist_import_min_level`,
+etc.) all have safe defaults via `core/cfg_defaults.lua` so
+omitting them from `cfg.tbl` is fine.
+
+Operators who ran the very first Phase-B build (`v0.01`) and
+already have data at the old `cfg/blocklist.tbl` path from that
+window: move the file to `scripts/data/etc_blocklist.tbl` (or
+set `blocklist_store_path = "cfg/blocklist.tbl"` in `cfg.tbl`
+to pin the old location). No auto-migration is provided; the
+old-path window was small.
+
+### etc_geoip
+
+Country / ASN policy blocking via a MaxMind GeoLite2 database (#78
+Phase D2). **Off by default** - needs a database the operator installs
+with MaxMind's `geoipupdate` tool. Full setup (licence key, Linux /
+Windows / Docker recipes, `log_only` -> `block` workflow) is in
+[`BLOCKLIST.md`](BLOCKLIST.md).
+
+On each connect (post-handshake) it resolves the client IP to its
+country (and ASN, if that DB is configured) and, if it matches
+`etc_geoip_blocked_countries` / `etc_geoip_blocked_asns`, either logs
+the match (`etc_geoip_action = "log_only"`, the default) or kicks the
+connection (`= "block"`). The lookup is a bounded per-connection mmdb
+read, not a pre-handshake store sweep; country blocking is policy, so it
+kicks post-handshake like `+ban` / the client blocker. Operators are
+exempt by default (`etc_geoip_check_levels`), and the hub boots fine
+without a database (a missing / stale `.mmdb` logs one warning and the
+checks stay inert). Must sit AFTER `hub_inf_manager.lua` in
+`cfg.scripts`.
+
+**Command:**
+- `+geoip` - read-only status: DB load state + build date, action mode,
+  blocked country / ASN lists. Requires `etc_geoip_oplevel` (default 80).
+
+**HTTP API:** `GET /v1/geoip` (read scope) mirrors `+geoip`. There is no
+write endpoint - the policy is cfg-driven (`etc_geoip_blocked_countries`
+etc. in `cfg.tbl`, then `+reload`).
+
+**Audit events:** `geoip.block` on every match (both modes, with
+`country` / `asn` / `matched` / `action` meta), `geoip.db.missing` and
+`geoip.db.stale` (once each) on DB problems.
+
+**Config keys:** `etc_geoip_enabled`, `etc_geoip_country_db_path`,
+`etc_geoip_asn_db_path`, `etc_geoip_blocked_countries`,
+`etc_geoip_blocked_asns`, `etc_geoip_action`, `etc_geoip_check_levels`,
+`etc_geoip_recheck_interval_sec`, `etc_geoip_kick_reason`,
+`etc_geoip_oplevel`, `etc_geoip_report[_hubbot|_opchat]`,
+`etc_geoip_llevel`. See [`BLOCKLIST.md`](BLOCKLIST.md) for the table.
+
+### etc_proxydetect
+
+Live proxy / VPN / Tor detection via an external provider API on connect
+(#78 Phase F, closes [#352](https://github.com/luadch-ng/luadch/issues/352)).
+**Off by default** - needs a provider (`etc_proxydetect_provider`) and,
+for most, an API key. Full setup, the provider free-tier / commercial-use
+comparison, and the `log_only` -> `block` workflow are in
+[`BLOCKLIST.md`](BLOCKLIST.md).
+
+On each connect (post-handshake) it fires a **non-blocking** provider
+lookup of the client IP; the verdict arrives in a callback, which kicks
+the still-connected user (`etc_proxydetect_action = "block"`) or just
+logs it (`"log_only"`, the default). A positive verdict in block mode is
+**also pushed into the pre-handshake blocklist** with a TTL, so the next
+connection from that IP is dropped at accept (silently, by default) with
+no further query. Clean verdicts are cached to
+`scripts/data/etc_proxydetect.tbl`, and a daily query cap
+(`etc_proxydetect_max_queries_per_day`) protects the provider quota. On a
+provider error / timeout / spent quota the plugin **fails open** (allows
+the connection) unless `etc_proxydetect_fail_open = false`. Operators are
+exempt by default (`etc_proxydetect_check_levels`). Must sit AFTER
+`hub_inf_manager.lua` in `cfg.scripts`. Three providers: `proxycheck`
+(keyless-capable), `vpnapi`, and `ipqs` (both key-required). For `vpnapi`
+/ `ipqs` the key rides in the request URL, so the plugin passes a
+key-free `log_url` to keep it out of the hub's failure logs. A run of
+provider failures fires one op-chat alert
+(`etc_proxydetect_fail_alert_threshold`).
+
+**Command:**
+- `+proxydetect` - read-only status: provider, action mode, blocked
+  types, cached-verdict count, queries used today. Requires
+  `etc_proxydetect_oplevel` (default 80).
+
+**HTTP API:** `GET /v1/proxydetect` (read scope) mirrors `+proxydetect`.
+No write endpoint - the policy is cfg-driven.
+
+**Audit events:** `proxydetect.block` on every match (both modes, with
+`ip` / `provider` / `types` / `action` / `cached` meta),
+`proxydetect.query.fail` on a provider error / timeout,
+`proxydetect.provider.down` when failures cross the alert threshold.
+
+**Config keys:** `etc_proxydetect_enabled`, `etc_proxydetect_provider`,
+`etc_proxydetect_api_key` (prefer the `LUADCH_ETC_PROXYDETECT_API_KEY`
+env var), `etc_proxydetect_action`, `etc_proxydetect_block_types`,
+`etc_proxydetect_check_levels`, `etc_proxydetect_cache_ttl_sec`,
+`etc_proxydetect_query_timeout_sec`, `etc_proxydetect_fail_open`,
+`etc_proxydetect_stealth`, `etc_proxydetect_max_queries_per_day`,
+`etc_proxydetect_fail_alert_threshold`, `etc_proxydetect_kick_reason`,
+`etc_proxydetect_oplevel`, `etc_proxydetect_report[_hubbot|_opchat]`,
+`etc_proxydetect_llevel`. See [`BLOCKLIST.md`](BLOCKLIST.md) for the table.
+
 ### etc_clientblocker
 
 Block clients by Lua-pattern match against the BINF `AP+VE` field

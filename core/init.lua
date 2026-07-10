@@ -75,18 +75,62 @@ _core = {    -- luadch core, order is important
     "mem",
     "signal",
     "util",
+    -- ensuredirs is deliberately NOT in _core: import() loads it
+    -- manually and calls ensure() BEFORE this load loop, so the runtime
+    -- dirs (log/ cfg/ certs/ scripts/data/ cfg/geoip/) exist before any
+    -- core module inits into them.
     -- cfg_secret is not in _core because its init() needs cfg_get
     -- (master_key_path). cfg.lua does `use "cfg_secret"` and calls
     -- secret.init() from cfg.init() after _settings is loaded so
     -- the cfg-side path override works on first boot.
     "cfg",
+    -- core/secrets.lua (Precursor 0c of #78 arc): sensitive-key
+    -- registry + env-var-first cfg lookup. Loaded AFTER cfg so the
+    -- init() baseline registrations and the lookup fallback can
+    -- consult cfg.get; loaded BEFORE everything that holds
+    -- sensitive cfg keys (http_router /v1/config redaction, future
+    -- etc_geoip / etc_proxydetect plugins).
+    "secrets",
     "out",
     -- cert_bootstrap MUST come after cfg + out (it reads cfg.get and
     -- writes via out.put) and BEFORE hub (hub.init() binds the TLS
     -- listener, which would fail with "missing cert" if the cert was
     -- not yet generated). Closes #77.
     "cert_bootstrap",
+    -- core/sha256.lua (Precursor 0d of #78 arc): pure-Lua FIPS 180-4
+    -- SHA-256. Used by cacert_bootstrap below to compare runtime
+    -- ca-bundle.pem against the bundled source-of-truth. Self-test
+    -- runs at module load against NIST CAVP vectors; load failure
+    -- here aborts the boot LOUD which is exactly what we want for a
+    -- silent-corruption-class bug.
+    "sha256",
+    -- core/cacert_bootstrap.lua (Precursor 0d of #78 arc): reconcile
+    -- certs/ca-bundle.pem against lib/luadch/ca-bundle.pem on every
+    -- boot (install missing, warn on outdated, opt-in auto-update).
+    -- MUST come after cfg + out + sha256 (uses all three at init
+    -- time); ordering vs hub is irrelevant because the reconcile
+    -- runs at init-time, not at hub-loop time.
+    "cacert_bootstrap",
     --"doc",
+    -- core/ipmatch.lua (Phase A of #78 arc): pure-Lua IPv4/IPv6
+    -- + CIDR parse + prefix-match primitives. No deps beyond
+    -- stdlib; load order is just before its consumer blocklist.
+    "ipmatch",
+    -- core/blocklist.lua (Phase A of #78 arc): unified pre-handshake
+    -- IP/CIDR blocklist (in-memory bucketed cache + scripts/data/etc_blocklist.tbl
+    -- persistent store + decision API). Loaded BEFORE ratelimit +
+    -- server because server.lua captures `blocklist.check_ip` at
+    -- module load for the accept-time stealth hook. init() reads
+    -- cfg + reloads the store + registers a cfg-reload listener.
+    "blocklist",
+    -- core/mmdb.lua (Phase D1 of #78 arc): pure-Lua MaxMind DB reader
+    -- (GeoLite2 Country / ASN). Passive library - no init(), opens no
+    -- files at load. Loaded AFTER ipmatch (uses it to parse lookup
+    -- addresses); position among the post-ipmatch modules is otherwise
+    -- irrelevant. The Phase D2 plugin (etc_geoip) is its only
+    -- consumer; registered here so it loads under the restricted env
+    -- and is reachable as a core module.
+    "mmdb",
     "ratelimit",
     "server",
     "adc",
@@ -117,6 +161,14 @@ _core = {    -- luadch core, order is important
     -- non-blocking socket on the existing ~1s timer so the
     -- single-threaded hub never blocks on an outbound request.
     "http_client",
+    -- core/geoip_update.lua: in-hub MaxMind GeoLite2 auto-update
+    -- (download .tar.gz -> verify sha256 -> gunzip -> untar -> atomic
+    -- place). Infrastructure the etc_geoip plugin drives by import - it
+    -- needs sha256 (not in the plugin sandbox), full os.rename and
+    -- server.addtimer, so it cannot live in the plugin. Loaded AFTER
+    -- http_client / sha256 / mmdb (its top-level use deps) and BEFORE
+    -- scripts so it is in _G when the plugin sandbox iterates the whitelist.
+    "geoip_update",
     -- #206 Tier-2 Sub-PR-3: host OS / CPU / RAM detection
     -- helpers. Lives in core (not in a plugin) so the bundled
     -- `cmd_hubinfo` plugin can use `sysinfo.os_name()` etc. via
@@ -201,6 +253,14 @@ import = function( )    -- this function loads all extern libs and the core
         if succ then _global.ssl.x509 = ret end
     end
     write "\ninit.lua: import core"
+    -- Self-heal the runtime directories the hub writes into (log/, cfg/,
+    -- certs/, scripts/data/, cfg/geoip/) BEFORE any core module inits
+    -- into them: a bare-metal / wiped-bind-mount install may lack them,
+    -- and cfg/geoip/ is created by nothing else. Best-effort - makedir is
+    -- EEXIST-tolerant and absent under a standalone lua; a genuine
+    -- failure still surfaces later as a clear write error.
+    local ensuredirs = use "ensuredirs"
+    _ = ensuredirs and ensuredirs.ensure and ensuredirs.ensure( )
     for i, script in ipairs( _core ) do
         _ = _global[ script ] or loadscript( script )
     end

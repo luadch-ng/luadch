@@ -69,6 +69,7 @@ local tostring = use "tostring"
 local string_byte = string.byte
 local string_char = string.char
 local string_sub = string.sub
+local string_match = string.match
 
 local io = use "io"
 local io_open = io.open
@@ -238,6 +239,19 @@ local function init( )
     local key, err = adclib_random_bytes( KEY_SIZE )
     if not key then
         error( "cfg_secret: failed to generate master.key: " .. tostring( err ), 0 )
+    end
+    -- Ensure the key's parent directory exists before writing. The
+    -- operator can point master_key_path at a not-yet-created dir -
+    -- including an absolute one outside the tree (e.g. /secrets on a
+    -- non-Docker host) - and a missing parent makes io.open fail, so the
+    -- error() below would abort the whole boot. Use the RAW makedir
+    -- primitive (not util.makedir, which safe_path-rejects absolute
+    -- paths); the path is operator-trusted cfg, not untrusted input.
+    -- Best-effort - a genuine failure still surfaces as the write error.
+    local key_dir = string_match( _key_path, "^(.*)[/\\][^/\\]+$" )
+    if key_dir and key_dir ~= "" then
+        local mok, mkdir = pcall( use, "makedir" )
+        if mok and type( mkdir ) == "function" then pcall( mkdir, key_dir ) end
     end
     local ok, werr = _write_file( _key_path, key )
     if not ok then

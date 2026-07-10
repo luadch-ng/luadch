@@ -998,6 +998,133 @@ return { -- the settings are a lua table, do not tough this!
     },
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_blocklist.lua settings | `+blocklist` admin CLI for the unified pre-handshake IP/CIDR blocklist (#78 Phase B)
+
+    etc_blocklist_oplevel = 80,  -- min level to run `+blocklist add / del / show / count / export / import` (integer)
+    etc_blocklist_show_limit = 200,  -- hard cap on rows in `+blocklist show` output to avoid wall-of-text DMSG (integer 1..10000)
+
+    etc_blocklist_report = true,  -- on every add / del / export / import, fire etc_report.send with the action summary so staff see it live (boolean)
+    etc_blocklist_report_hubbot = false,  -- send the report as a hubbot PM to operators at or above etc_blocklist_llevel (boolean)
+    etc_blocklist_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_blocklist_llevel = 60,  -- min level for the hubbot-PM report (integer)
+    etc_blocklist_import_min_level = 100,  -- min level to run `+blocklist import <path>` - JSONL files may carry entries added by higher-level masters; default 100 = master-only so a mid-level op cannot import + take ownership of master-tier entries (integer)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_geoip.lua settings | country / ASN blocking via MaxMind GeoLite2 (#78 Phase D2). Needs geoipupdate for the DB - see docs/BLOCKLIST.md
+
+    etc_geoip_enabled = false,  -- master toggle; plugin loads either way but the onConnect check is inert when false (boolean)
+    etc_geoip_country_db_path = "cfg/geoip/GeoLite2-Country.mmdb",  -- path to the GeoLite2 Country .mmdb (string). Missing file = country checks disabled (logged once)
+    etc_geoip_asn_db_path = "cfg/geoip/GeoLite2-ASN.mmdb",  -- path to the GeoLite2 ASN .mmdb (string, optional). Missing file = ASN checks disabled
+    etc_geoip_blocked_countries = { },  -- ISO-3166-1 alpha-2 codes to block, e.g. { "CN", "RU", "KP" } (case-insensitive table of strings)
+    etc_geoip_blocked_asns = { },  -- autonomous-system numbers to block, e.g. { 4134, 4837 } (table of integers; needs the ASN DB)
+    etc_geoip_action = "log_only",  -- "log_only" audits+reports a match but lets the user in (verify first); "block" kicks the connection (string)
+    etc_geoip_recheck_interval_sec = 3600,  -- how often to re-read the .mmdb so a geoipupdate cron write is picked up without +reload (integer 60..604800)
+    etc_geoip_kick_reason = "Your region is not permitted on this hub.",  -- kick message (block mode only) (string)
+    etc_geoip_oplevel = 80,  -- min level to run `+geoip` read-only status (integer)
+
+    etc_geoip_report = true,  -- on every match, fire etc_report.send with nick+ip+match so staff see it in chat (boolean)
+    etc_geoip_report_hubbot = false,  -- send the report as a hubbot PM to operators at or above etc_geoip_llevel (boolean)
+    etc_geoip_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_geoip_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
+    etc_geoip_check_levels = {  -- which levels the GeoIP check applies to (table of integer -> boolean); operators exempt by default
+        [ 0 ]   = true,
+        [ 10 ]  = true,
+        [ 20 ]  = true,
+        [ 30 ]  = true,
+        [ 40 ]  = true,
+        [ 50 ]  = true,
+        [ 55 ]  = false,
+        [ 60 ]  = false,
+        [ 70 ]  = false,
+        [ 80 ]  = false,
+        [ 100 ] = true,
+    },
+
+    -- In-hub DB auto-update (#78 Phase D3): the hub downloads + refreshes the .mmdb itself, no geoipupdate cron / sidecar. OFF by default; needs a free MaxMind account + license key - see docs/BLOCKLIST.md
+    etc_geoip_auto_update = false,  -- master toggle for the in-hub downloader (boolean); requires etc_geoip_enabled + a license key
+    etc_geoip_account_id = "",  -- MaxMind account ID = HTTP Basic-auth username (string)
+    etc_geoip_license_key = "",  -- MaxMind license key (string). Prefer the env var LUADCH_ETC_GEOIP_LICENSE_KEY (Docker, never dumped); a cfg.tbl key is redacted in GET /v1/config once the plugin loads. Sent in an auth header, never the URL/log
+    etc_geoip_edition_ids = { "GeoLite2-Country", "GeoLite2-ASN" },  -- editions to fetch (table of "GeoLite2-*" strings); only Country + ASN map to the reader paths
+    etc_geoip_update_interval_sec = 86400,  -- auto-update cadence (integer 21600..2592000); daily default, 6h floor (MaxMind releases 2x/week)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_blocklist_feeds.lua settings | pull external IP/CIDR blocklists (Tor, Spamhaus DROP) into the blocklist (#78 Phase E). All feeds OFF by default - see docs/BLOCKLIST.md
+
+    etc_blocklist_feeds_enabled = false,  -- master toggle; plugin loads either way but the refresh loop is inert when false (boolean)
+
+    etc_blocklist_feeds_tor_enabled = false,  -- pull the Tor exit-node list (boolean)
+    etc_blocklist_feeds_tor_url = "https://check.torproject.org/torbulkexitlist",  -- Tor exit list URL, plain IPv4 one per line (string). NOTE: dan.me.uk bans IPs fetching >1/30min - keep the default
+    etc_blocklist_feeds_tor_refresh_interval_sec = 3600,  -- refresh cadence (integer); clamped UP to the 1800s Tor minimum at runtime
+    etc_blocklist_feeds_tor_stealth = false,  -- stealth-drop Tor IPs (silent close, no per-attempt log) vs visible (boolean)
+
+    etc_blocklist_feeds_spamhaus_enabled = false,  -- pull Spamhaus DROP v4 (boolean)
+    etc_blocklist_feeds_spamhaus_url = "https://www.spamhaus.org/drop/drop_v4.json",  -- Spamhaus DROP v4 JSONL URL (string)
+    etc_blocklist_feeds_spamhaus_refresh_interval_sec = 86400,  -- refresh cadence (integer); clamped UP to the 3600s Spamhaus minimum. Their policy is >=1h; daily is plenty (DROP churns slowly)
+    etc_blocklist_feeds_spamhaus_stealth = false,  -- stealth-drop Spamhaus CIDRs (boolean); shared by the v6 feed below
+
+    etc_blocklist_feeds_spamhaus_v6_enabled = false,  -- pull Spamhaus DROP v6 (boolean); shares the spamhaus interval + stealth
+    etc_blocklist_feeds_spamhaus_v6_url = "https://www.spamhaus.org/drop/drop_v6.json",  -- Spamhaus DROP v6 JSONL URL (string)
+
+    etc_blocklist_feeds_abuseipdb_enabled = false,  -- pull the AbuseIPDB blacklist (boolean); needs the API key below
+    etc_blocklist_feeds_abuseipdb_url = "https://api.abuseipdb.com/api/v2/blacklist?plaintext",  -- blacklist download endpoint, plaintext one IP per line (string)
+    etc_blocklist_feeds_abuseipdb_refresh_interval_sec = 86400,  -- refresh cadence (integer); clamped UP to the 21600s (6h) minimum - free-tier blacklist download is 5/day
+    etc_blocklist_feeds_abuseipdb_stealth = false,  -- stealth-drop AbuseIPDB IPs (boolean)
+    etc_blocklist_feeds_abuseipdb_key = "",  -- AbuseIPDB API key (string). Prefer the env var LUADCH_ETC_BLOCKLIST_FEEDS_ABUSEIPDB_KEY (Docker, never dumped). A cfg.tbl key here is redacted in GET /v1/config only once the plugin is loaded. Empty = feed disabled
+
+    etc_blocklist_feeds_generic_enabled = false,  -- pull an operator-supplied line-list URL (boolean)
+    etc_blocklist_feeds_generic_url = "",  -- your line-list URL, one IP/CIDR per line, #/; comments tolerated (string). Empty = feed skipped
+    etc_blocklist_feeds_generic_refresh_interval_sec = 3600,  -- refresh cadence (integer); clamped UP to the 300s (5min) minimum
+    etc_blocklist_feeds_generic_stealth = false,  -- stealth-drop generic-feed IPs (boolean)
+
+    etc_blocklist_feeds_oplevel = 80,  -- min level to run `+blfeeds` read-only status (integer)
+
+    etc_blocklist_feeds_report = true,  -- fire etc_report on a refresh + on an ok->fail transition (boolean)
+    etc_blocklist_feeds_report_hubbot = false,  -- send the report as a hubbot PM (boolean)
+    etc_blocklist_feeds_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_blocklist_feeds_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_proxydetect.lua settings | live proxy/VPN/Tor detection via a provider API on connect (#78 Phase F, closes #352). OFF by default - see docs/BLOCKLIST.md
+
+    etc_proxydetect_enabled = false,  -- master toggle; plugin loads either way but the onConnect check is inert when false (boolean)
+    etc_proxydetect_provider = "proxycheck",  -- detection provider, pick ONE: "proxycheck" / "vpnapi" / "ipqs" (string). Review each provider's free-tier terms in docs/BLOCKLIST.md (vpnapi free = non-commercial; ipqs free = evaluation-only, 1000/month)
+    etc_proxydetect_api_key = "",  -- provider API key (string). Prefer the env var LUADCH_ETC_PROXYDETECT_API_KEY (Docker, never dumped); a cfg.tbl key is redacted in GET /v1/config only once the plugin loads. proxycheck works keyless (100/day, 1000/day keyed); vpnapi + ipqs require a key
+    etc_proxydetect_action = "log_only",  -- "log_only" audits+reports a match but lets the user in (verify first); "block" kicks + pushes the IP into the pre-handshake blocklist (string)
+    etc_proxydetect_block_types = {  -- which detected types trigger a block (table of type -> boolean); proxycheck/ipqs report proxy/vpn/tor, vpnapi also "relay" (iCloud Private Relay) - add relay=true only to block privacy relays (kicks Apple users)
+        proxy = true,
+        vpn   = true,
+        tor   = true,
+    },
+    etc_proxydetect_cache_ttl_sec = 86400,  -- how long a verdict is cached AND a positive IP stays pre-handshake-blocked (integer 60..604800)
+    etc_proxydetect_query_timeout_sec = 5,  -- per-lookup HTTP timeout in the connect path (integer 1..30)
+    etc_proxydetect_fail_open = true,  -- provider error/timeout/quota: true = let the user in (fail-open, safe default); false = kick (fail-closed, risky without 24/7 ops) (boolean)
+    etc_proxydetect_stealth = true,  -- repeat connections silently dropped pre-handshake; the FIRST detection still gets a visible kick (boolean)
+    etc_proxydetect_max_queries_per_day = 1000,  -- daily provider-query cap (quota/cost safety valve); over the cap -> skip lookup + fail-open. 0 = unlimited (integer)
+    etc_proxydetect_fail_alert_threshold = 10,  -- this many provider failures within 60s fires one op-chat alert (down provider / bad key); 0 = disabled (integer)
+    etc_proxydetect_kick_reason = "Proxy / VPN / Tor connections are not permitted on this hub.",  -- kick message (block mode only) (string)
+    etc_proxydetect_oplevel = 80,  -- min level to run `+proxydetect` read-only status (integer)
+
+    etc_proxydetect_report = true,  -- on every match, fire etc_report.send so staff see it in chat (boolean)
+    etc_proxydetect_report_hubbot = false,  -- send the report as a hubbot PM to operators at or above etc_proxydetect_llevel (boolean)
+    etc_proxydetect_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_proxydetect_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
+    etc_proxydetect_check_levels = {  -- which levels the proxy check applies to (table of integer -> boolean); operators exempt by default
+        [ 0 ]   = true,
+        [ 10 ]  = true,
+        [ 20 ]  = true,
+        [ 30 ]  = true,
+        [ 40 ]  = true,
+        [ 50 ]  = true,
+        [ 55 ]  = false,
+        [ 60 ]  = false,
+        [ 70 ]  = false,
+        [ 80 ]  = false,
+        [ 100 ] = true,
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_log_cleaner.lua settings | this script adds a command to clean log files
 
     etc_log_cleaner_minlevel = 100,  -- min level to use this command? (integer)
@@ -1413,6 +1540,10 @@ return { -- the settings are a lua table, do not tough this!
         "usr_nick_length.lua",
         "hub_inf_manager.lua",
         { "etc_clientblocker.lua", enabled = true },  -- #81 client AP/VE blocklist. API-toggleable (#261). Must sit AFTER hub_inf_manager so structural BINF rejects (forbidden flags / identity spoofing) happen first; client-policy kicks then run on already-validated INFs.
+        { "etc_blocklist.lua", enabled = true },  -- #78 Phase B `+blocklist` admin CLI for the unified pre-handshake IP/CIDR blocklist (engine = core/blocklist.lua, Phase A). API-toggleable (#261). Manages MANUAL entries; Phase D/E/F plugins (geoip / external feeds / proxydetect) will push auto-feed entries into the same store.
+        { "etc_geoip.lua", enabled = false },  -- #78 Phase D2 country / ASN blocking via MaxMind GeoLite2. OFF by default (needs a geoipupdate-managed DB - see docs/BLOCKLIST.md). Per-connection post-handshake lookup; must sit AFTER hub_inf_manager like etc_clientblocker. Enable here + set etc_geoip_enabled=true + populate etc_geoip_blocked_countries.
+        { "etc_blocklist_feeds.lua", enabled = false },  -- #78 Phase E external IP/CIDR feeds (Tor exits, Spamhaus DROP) pulled over HTTPS into the blocklist store. OFF by default. Store WRITER (the engine blocks pre-handshake), so chain position is not load-bearing. Enable here + set etc_blocklist_feeds_enabled=true + turn on a feed - see docs/BLOCKLIST.md.
+        { "etc_proxydetect.lua", enabled = false },  -- #78 Phase F live proxy/VPN/Tor detection via a provider API on connect. OFF by default (needs a provider + API key - see docs/BLOCKLIST.md). Per-connection post-handshake lookup; must sit AFTER hub_inf_manager like etc_geoip. Enable here + set etc_proxydetect_enabled=true + etc_proxydetect_action="block".
         { "hub_runtime.lua", enabled = true },  -- using report import; API-toggleable (#261)
         { "bot_regchat.lua", enabled = true },  -- API-toggleable (#261)
         { "bot_session_chat.lua", enabled = true },  -- API-toggleable (#261)

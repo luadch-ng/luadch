@@ -2615,9 +2615,11 @@ local defaults = {
         end
     },
 
-    -- Directory for the JSONL files. Created on first write if
-    -- missing. The plugin chmods every file 0600 (POSIX) since
-    -- audit content is sensitive (target nicks / IPs / CIDs).
+    -- Directory for the JSONL files. The default log/ is created at
+    -- boot by core/ensuredirs.lua; if you relocate this to a custom
+    -- directory, make sure that directory exists. The plugin chmods
+    -- every file 0600 (POSIX) since audit content is sensitive (target
+    -- nicks / IPs / CIDs).
     etc_auditlog_dir = { "log/",
         function( value )
             return types_utf8( value, nil, true )
@@ -2762,6 +2764,572 @@ local defaults = {
     -- consulted when etc_clientblocker_report_hubbot=true). Mirrors
     -- the etc_report.send signature used across bundled plugins.
     etc_clientblocker_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_geoip.lua settings (#78 Phase D2)
+
+    -- Feature toggle. Plugin loads either way (so operators can flip
+    -- this + `+reload` without editing cfg.scripts); when false the
+    -- onConnect check returns immediately - zero lookup cost.
+    etc_geoip_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Paths to the MaxMind GeoLite2 databases. The operator installs +
+    -- refreshes these out-of-band with MaxMind's `geoipupdate` tool
+    -- (see docs/BLOCKLIST.md). A missing file is not an error - the
+    -- plugin logs once and stays inert for that DB. ASN is optional;
+    -- leave the path pointing at a non-existent file to disable ASN
+    -- checks.
+    etc_geoip_country_db_path = { "cfg/geoip/GeoLite2-Country.mmdb",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_geoip_asn_db_path = { "cfg/geoip/GeoLite2-ASN.mmdb",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Blocked ISO-3166-1 alpha-2 country codes, e.g. { "CN", "RU", "KP" }.
+    -- Case-insensitive (normalised to upper-case at load); entries that
+    -- are not two letters are ignored. Empty = no country is blocked.
+    etc_geoip_blocked_countries = { { },
+        function( value )
+            if not types_table( value ) then return false end
+            for _, v in ipairs( value ) do
+                if type( v ) ~= "string" or not v:upper( ):match( "^%u%u$" ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- Blocked autonomous-system numbers, e.g. { 4134, 4837 } (needs an
+    -- ASN DB configured). Empty = no ASN is blocked.
+    etc_geoip_blocked_asns = { { },
+        function( value )
+            if not types_table( value ) then return false end
+            for _, v in ipairs( value ) do
+                if not ( types_number( v, nil, true ) and v % 1 == 0 and v >= 0 ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- What to do on a match. "log_only" (default) audits + reports the
+    -- match but lets the user in - the safe starting mode so an operator
+    -- verifies the logs before enforcing. "block" kicks the connection.
+    etc_geoip_action = { "log_only",
+        function( value )
+            return value == "log_only" or value == "block"
+        end
+    },
+
+    -- Which user levels the GeoIP check applies to. Operators (55-80)
+    -- exempt by default so a misconfigured country list cannot lock
+    -- staff out; HUBOWNER (100) kept in scope (flip [100]=false to test
+    -- from a blocked region). Mirrors etc_clientblocker_check_levels.
+    etc_geoip_check_levels = { {
+        [ 0 ]   = true,
+        [ 10 ]  = true,
+        [ 20 ]  = true,
+        [ 30 ]  = true,
+        [ 40 ]  = true,
+        [ 50 ]  = true,
+        [ 55 ]  = false,
+        [ 60 ]  = false,
+        [ 70 ]  = false,
+        [ 80 ]  = false,
+        [ 100 ] = true,
+    },
+        function( value )
+            if not types_table( value ) then return false end
+            for level, allowed in pairs( value ) do
+                if not ( types_number( level, nil, true )
+                         and types_boolean( allowed, nil, true ) ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- How often (seconds) to re-read the .mmdb from disk so a
+    -- geoipupdate cron write is picked up without a manual +reload.
+    -- MaxMind releases twice weekly; hourly is ample. 60s floor keeps
+    -- the re-read off the per-tick hot path.
+    etc_geoip_recheck_interval_sec = { 3600,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 60
+                and value <= 604800
+        end
+    },
+
+    -- Kick message shown to a blocked user (block mode only).
+    etc_geoip_kick_reason = { "Your region is not permitted on this hub.",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Operator level that can run `+geoip` (read-only status).
+    etc_geoip_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    -- Opchat / hubbot report on every match (mirrors etc_clientblocker:
+    -- opchat ON, hubbot OFF).
+    etc_geoip_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_geoip_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_geoip_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_geoip_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    -- In-hub DB auto-update (#78 Phase D3). When ON, the hub downloads +
+    -- refreshes the .mmdb itself (no geoipupdate cron / sidecar needed) on
+    -- every platform. OFF by default; needs a free MaxMind account_id +
+    -- license_key. See docs/BLOCKLIST.md.
+    etc_geoip_auto_update = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- MaxMind account ID (the HTTP Basic-auth username). "" = unset.
+    etc_geoip_account_id = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- MaxMind license key. SECRET: registered + resolved via core/secrets
+    -- (env-var-first LUADCH_ETC_GEOIP_LICENSE_KEY, cfg.tbl fallback), sent
+    -- in an Authorization header so it never touches the URL / the log.
+    -- "" = unset (auto-update stays inert).
+    etc_geoip_license_key = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Editions to fetch. Only GeoLite2-Country / GeoLite2-ASN map to the
+    -- two reader paths above; any other has no destination and is skipped
+    -- (never downloaded).
+    etc_geoip_edition_ids = { { "GeoLite2-Country", "GeoLite2-ASN" },
+        function( value )
+            if not types_table( value ) then return false end
+            for _, v in ipairs( value ) do
+                if type( v ) ~= "string" or not v:match( "^GeoLite2%-%w+$" ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- Auto-update cadence (seconds). Default daily; floor 6 h so we never
+    -- hammer download.maxmind.com faster than its 2x/week release cadence.
+    etc_geoip_update_interval_sec = { 86400,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0
+                and value >= 21600
+                and value <= 2592000
+        end
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_blocklist_feeds.lua settings (#78 Phase E)
+    --
+    -- Pull external IP/CIDR blocklists (Tor exits, Spamhaus DROP) over
+    -- HTTPS and push them into the unified blocklist with source=external.
+    -- Every feed is independently opt-in; all OFF by default. The refresh
+    -- interval is a sanity-bounded cfg value here; the plugin ADDITIONALLY
+    -- clamps each feed up to its provider's published auto-fetch floor
+    -- (Tor 30 min, Spamhaus 1 h) at runtime. See docs/BLOCKLIST.md.
+
+    -- Master toggle. The plugin loads either way (it is whitelisted in
+    -- cfg.scripts); when false the onTimer refresh loop is inert.
+    etc_blocklist_feeds_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Tor exit-node list (plain IPv4, one per line).
+    etc_blocklist_feeds_tor_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_tor_url = { "https://check.torproject.org/torbulkexitlist",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_tor_refresh_interval_sec = { 3600,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 60 and value <= 604800
+        end
+    },
+    etc_blocklist_feeds_tor_stealth = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Spamhaus DROP v4 (JSONL: one {"cidr","sblid"} object per line).
+    etc_blocklist_feeds_spamhaus_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_spamhaus_url = { "https://www.spamhaus.org/drop/drop_v4.json",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_spamhaus_refresh_interval_sec = { 86400,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 60 and value <= 604800
+        end
+    },
+    etc_blocklist_feeds_spamhaus_stealth = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Spamhaus DROP v6 (same JSONL format, drop_v6.json). Shares the
+    -- spamhaus refresh interval + stealth toggle above.
+    etc_blocklist_feeds_spamhaus_v6_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_spamhaus_v6_url = { "https://www.spamhaus.org/drop/drop_v6.json",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- AbuseIPDB blacklist (top-N reported IPs, plaintext). Needs an API
+    -- key (see etc_blocklist_feeds_abuseipdb_key); free-tier blacklist
+    -- download is 5/day so the plugin floors the interval at 6 h.
+    etc_blocklist_feeds_abuseipdb_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_abuseipdb_url = { "https://api.abuseipdb.com/api/v2/blacklist?plaintext",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_abuseipdb_refresh_interval_sec = { 86400,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 60 and value <= 604800
+        end
+    },
+    etc_blocklist_feeds_abuseipdb_stealth = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    -- AbuseIPDB API key. Read env-var-first via core/secrets.lua
+    -- (LUADCH_ETC_BLOCKLIST_FEEDS_ABUSEIPDB_KEY) with this cfg value as the
+    -- fallback; registered as a secret so GET /v1/config redacts it (once
+    -- the plugin is loaded). The env var is never dumped - prefer it.
+    -- Empty = the abuseipdb feed stays disabled.
+    etc_blocklist_feeds_abuseipdb_key = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Generic operator-supplied line-list (IP/CIDR per line). No default
+    -- URL; an operator who enables it must set one. No API key.
+    etc_blocklist_feeds_generic_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_generic_url = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_generic_refresh_interval_sec = { 3600,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 60 and value <= 604800
+        end
+    },
+    etc_blocklist_feeds_generic_stealth = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Operator level that can run `+blfeeds` (read-only status).
+    etc_blocklist_feeds_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    -- Opchat / hubbot report on refresh success + on an ok->fail
+    -- transition (mirrors etc_geoip: opchat ON, hubbot OFF).
+    etc_blocklist_feeds_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_feeds_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_proxydetect.lua settings (#78 Phase F, closes #352)
+    --
+    -- Live proxy / VPN / Tor detection: on connect the client IP is
+    -- looked up against an external provider API and, if it is a
+    -- blocked type, the connection is kicked (action="block") or just
+    -- logged (action="log_only"). Non-blocking lookup (verdict arrives
+    -- in a callback, kick-later); a positive verdict in block mode is
+    -- ALSO pushed into the unified blocklist with a TTL so repeat
+    -- connections drop pre-handshake. Verdicts are cached to
+    -- scripts/data/etc_proxydetect.tbl to save provider quota. OFF by
+    -- default. See docs/BLOCKLIST.md.
+
+    -- Master toggle. The plugin loads either way (whitelisted in
+    -- cfg.scripts); when false the onConnect check is inert.
+    etc_proxydetect_enabled = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Detection provider (pick ONE): "proxycheck", "vpnapi", or "ipqs".
+    -- See docs/BLOCKLIST.md for the free-tier / commercial-use terms of
+    -- each before enabling - they differ sharply (vpnapi free = non-
+    -- commercial only; ipqs free = evaluation only, 1000/month).
+    etc_proxydetect_provider = { "proxycheck",
+        function( value )
+            return value == "proxycheck" or value == "vpnapi" or value == "ipqs"
+        end
+    },
+
+    -- Provider API key. Read env-var-first via core/secrets.lua
+    -- (LUADCH_ETC_PROXYDETECT_API_KEY) with this cfg value as the
+    -- fallback; registered as a secret so GET /v1/config redacts it
+    -- (once the plugin is loaded). The env var is never dumped - prefer
+    -- it. proxycheck works keyless (100/day); a key raises it to
+    -- 1000/day. vpnapi + ipqs require a key.
+    etc_proxydetect_api_key = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- What to do on a match. "log_only" (default) audits + reports but
+    -- lets the user in - the safe starting mode. "block" kicks the
+    -- connection AND pushes the IP into the pre-handshake blocklist.
+    etc_proxydetect_action = { "log_only",
+        function( value )
+            return value == "log_only" or value == "block"
+        end
+    },
+
+    -- Which detected types trigger a block (map of type -> boolean).
+    -- proxycheck / ipqs report proxy / vpn / tor; vpnapi additionally
+    -- reports "relay" (e.g. iCloud Private Relay) - deliberately left OUT
+    -- of the default so mainstream Apple users are not kicked; add
+    -- relay=true only to block privacy relays. A detected type counts only
+    -- if it is present AND true here.
+    etc_proxydetect_block_types = { {
+        proxy = true,
+        vpn   = true,
+        tor   = true,
+    },
+        function( value )
+            if not types_table( value ) then return false end
+            for k, v in pairs( value ) do
+                if not ( type( k ) == "string"
+                         and types_boolean( v, nil, true ) ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- Which user levels the proxy check applies to (map of integer ->
+    -- boolean). Operators (55-80) exempt by default so a provider false
+    -- positive cannot lock staff out; HUBOWNER (100) kept in scope.
+    -- Mirrors etc_geoip_check_levels.
+    etc_proxydetect_check_levels = { {
+        [ 0 ]   = true,
+        [ 10 ]  = true,
+        [ 20 ]  = true,
+        [ 30 ]  = true,
+        [ 40 ]  = true,
+        [ 50 ]  = true,
+        [ 55 ]  = false,
+        [ 60 ]  = false,
+        [ 70 ]  = false,
+        [ 80 ]  = false,
+        [ 100 ] = true,
+    },
+        function( value )
+            if not types_table( value ) then return false end
+            for level, allowed in pairs( value ) do
+                if not ( types_number( level, nil, true )
+                         and types_boolean( allowed, nil, true ) ) then
+                    return false
+                end
+            end
+            return true
+        end
+    },
+
+    -- How long (seconds) a verdict stays cached AND how long a positive
+    -- IP stays in the pre-handshake blocklist. A proxy today may not be
+    -- one next week (dynamic IPs), so 1 day is a sane default.
+    etc_proxydetect_cache_ttl_sec = { 86400,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 60 and value <= 604800
+        end
+    },
+
+    -- Per-lookup HTTP timeout (seconds). Kept short - this runs in the
+    -- connect path; a slow provider must not stall the pending verdict.
+    etc_proxydetect_query_timeout_sec = { 5,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 1 and value <= 30
+        end
+    },
+
+    -- Behaviour when the provider errors / times out / quota is spent.
+    -- true (default) = fail-OPEN (let the user in) so a provider outage
+    -- does not lock every joining user out. false = fail-CLOSED (kick on
+    -- provider error) - stricter, but risky for hubs without 24/7 ops.
+    etc_proxydetect_fail_open = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Stealth flag for the pushed pre-handshake block: true = repeat
+    -- connections are silently dropped at accept (no visible kick); the
+    -- FIRST detection still gets a visible kick reason post-handshake.
+    etc_proxydetect_stealth = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- Daily provider-query cap (quota / cost safety valve). A flood of
+    -- DISTINCT IPs (each a cache miss) could otherwise exhaust the free
+    -- tier or run up a paid bill. Over the cap -> skip the lookup and
+    -- fail-open. 0 = unlimited. Default matches the common 1000/day free
+    -- tier.
+    etc_proxydetect_max_queries_per_day = { 1000,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 0 and value <= 1000000
+        end
+    },
+
+    -- Op-chat alert threshold: this many provider failures within a 60s
+    -- window fires ONE alert (debounced until a success) so a down provider
+    -- or a bad API key does not silently degrade detection. 0 = disabled.
+    etc_proxydetect_fail_alert_threshold = { 10,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 0 and value <= 100000
+        end
+    },
+
+    -- Kick message shown to a detected user (block mode only).
+    etc_proxydetect_kick_reason = { "Proxy / VPN / Tor connections are not permitted on this hub.",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
+    -- Operator level that can run `+proxydetect` (read-only status).
+    etc_proxydetect_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
+    -- Opchat / hubbot report on every match (mirrors etc_geoip: opchat
+    -- ON, hubbot OFF).
+    etc_proxydetect_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_proxydetect_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_proxydetect_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_proxydetect_llevel = { 60,
         function( value )
             return types_number( value, nil, true )
         end
@@ -3717,7 +4285,6 @@ local defaults = {
         "cmd_nickchange.lua",
         "cmd_mass.lua",
         "cmd_talk.lua",
-        "cmd_pm2offliners.lua",
         "cmd_topic.lua",
         "cmd_userlist.lua",
         "cmd_disconnect.lua",
@@ -3822,6 +4389,33 @@ local defaults = {
             return types_boolean( value, nil, true )
         end
     },
+    -- #78 Precursor 0d: outbound-HTTPS CA bundle management.
+    --
+    -- `ca_bundle_path` is the runtime location of the trusted-CA
+    -- bundle - operator-overwriteable, the default for
+    -- http_client.cafile. `ca_bundle_source_path` is the immutable
+    -- system-path source-of-truth installed by CMake (NOT under any
+    -- volume-mounted directory), used by core/cacert_bootstrap.lua to
+    -- restore the runtime file when missing. `ca_bundle_auto_update`
+    -- defaults FALSE so the bootstrap leaves the operator-facing
+    -- file alone on SHA mismatch (an operator might run a custom
+    -- corporate-PKI bundle); flip TRUE for the "always pull the
+    -- latest from the install tree" preference. See docs/CACERT.md.
+    ca_bundle_path = { "certs/ca-bundle.pem",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    ca_bundle_source_path = { "lib/luadch/ca-bundle.pem",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    ca_bundle_auto_update = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
     -- #97 (default true since v3.1.4), flipped back to false in
     -- v3.2.x: with the #214 Gap 2 fix in place, kill_wrong_ips=false
     -- no longer broadcasts a client-claimed (potentially spoofed) IP
@@ -3866,6 +4460,93 @@ local defaults = {
         end
     },
     ratelimit_bypass_level = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- #78 Phase A: unified pre-handshake IP/CIDR blocklist. The
+    -- engine + store ship enabled-by-default but the store is
+    -- empty - zero overhead until operators add entries via
+    -- Phase B's `+blocklist` cmd or Phase D/E/F's auto-feeds.
+    -- See core/blocklist.lua + docs/BLOCKLIST.md (Phase B+).
+    blocklist_enabled = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    blocklist_store_path = { "scripts/data/etc_blocklist.tbl",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    -- Per-rule stealth opt-in (default visible-kick), per locked
+    -- arc decision: most operators want clear log feedback;
+    -- stealth is for the rare "Tor exit pollutes the log" case.
+    blocklist_stealth_default = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    -- Aggregated-log rollup window in seconds. Per-IP attempt
+    -- counters flush as a single line at this cadence. Default
+    -- 3600 = once-per-hour. Range 60..86400 (one-minute lower
+    -- bound so the rollup is not also a high-rate log spammer).
+    blocklist_aggregated_log_window_sec = { 3600,
+        function( value )
+            if not types_number( value, nil, true ) then return false end
+            return value >= 60 and value <= 86400
+        end
+    },
+    -- #78 Phase B: `+blocklist` admin plugin (etc_blocklist.lua).
+    -- Operator-facing chat command + JSONL export/import. The
+    -- engine in core/blocklist.lua is independent; these keys
+    -- only gate the plugin surface.
+    etc_blocklist_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Hard cap on rows returned by `+blocklist show`. Operator can
+    -- still filter via `+blocklist show <source>` to narrow further.
+    -- Cap exists so a 10k-row geoip-populated store doesn't dump a
+    -- ten-thousand-line wall of text into one DMSG.
+    etc_blocklist_show_limit = { 200,
+        function( value )
+            if not types_number( value, nil, true ) then return false end
+            return value >= 1 and value <= 10000
+        end
+    },
+    -- Opchat report toggles, same shape as etc_clientblocker. Add /
+    -- remove / export / import events get a one-liner to the
+    -- op-chat so all staff see the action live; the audit log
+    -- carries the structured event for forensics.
+    etc_blocklist_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_blocklist_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Minimum level to RUN `+blocklist import <path>`. JSONL files
+    -- can contain entries originally added by higher-level masters;
+    -- without a level guard a mid-level operator could import +
+    -- thereby take ownership of entries another master added.
+    -- Default 100 = master-only; lower if your hub trusts every
+    -- operator at `etc_blocklist_oplevel` with arbitrary imports.
+    etc_blocklist_import_min_level = { 100,
         function( value )
             return types_number( value, nil, true )
         end

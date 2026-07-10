@@ -149,6 +149,7 @@ local init
 local handlebom
 local checkfile
 local safe_path
+local makedir
 
 local serialize
 local sortserialize
@@ -241,6 +242,13 @@ safe_path = function( path )
     if path == "" then
         return false, "empty path"
     end
+    -- Reject embedded NUL: the C I/O layer (strlen-based) would truncate
+    -- at it, so a lexical check here and the byte-level check there would
+    -- disagree (e.g. "..\0x" reads as a harmless component here but as
+    -- ".." to C). No legitimate path contains a NUL.
+    if string_find( path, "\0", 1, true ) then
+        return false, "null byte in path"
+    end
     local first = string_sub( path, 1, 1 )
     if first == "/" or first == "\\" then
         return false, "absolute paths blocked (got '" .. path .. "')"
@@ -275,6 +283,33 @@ checkfile = function( path )
     end
     out_error( "util.lua: function 'checkfile': error in ", path, ": ", err, " (checkfile)" )
     return nil, err
+end
+
+-- Create `path` and every missing parent (mkdir -p), via the makedir C
+-- primitive registered by hub.c. safe_path-gated like the other
+-- plugin-callable I/O, so a sandboxed plugin can only create directories
+-- INSIDE the hub tree (no absolute / traversal path). Core self-heal that
+-- must create an absolute operator-configured dir resolves the raw
+-- primitive via `use "makedir"` instead (a core module cannot reference a
+-- bare global under the restricted env). The primitive is absent under
+-- standalone lua (unit tests / a broken build), so degrade to (nil, err)
+-- rather than throw.
+makedir = function( path )
+    local ok, perr = safe_path( path )
+    if not ok then
+        out_error( "util.lua: function 'makedir': unsafe path '", tostring( path ), "': ", perr )
+        return nil, perr
+    end
+    local resolved, mkdir = pcall( use, "makedir" )
+    if not resolved or type( mkdir ) ~= "function" then
+        return nil, "makedir primitive unavailable"
+    end
+    local made, merr = mkdir( path )
+    if not made then
+        out_error( "util.lua: function 'makedir': could not create '", path, "': ", tostring( merr ) )
+        return nil, merr
+    end
+    return true
 end
 
 serialize = function( tbl, name, file, tab )  -- this function saves a table to a file
@@ -935,6 +970,7 @@ return {
     handlebom = handlebom,
     safe_path = safe_path,
     checkfile = checkfile,
+    makedir = makedir,
     savetable = savetable,
     loadtable = loadtable,
     loadtable_string = loadtable_string,

@@ -34,12 +34,23 @@ makefile    text eol=lf
 *.yaml      text eol=lf
 *.json      text eol=lf
 
+# PEM bundles (certs/cacert.pem inbound, certs/ca-bundle.pem outbound,
+# future operator-supplied bundles): LF.
+# Openssl tolerates CRLF, but cross-platform consistency keeps sha256sum
+# stable across Windows + Linux checkouts. core/cacert_bootstrap.lua's
+# SHA-256 compare relies on this.
+*.pem       text eol=lf
+
 # Windows-specific build files stay CRLF in the working tree so cmd.exe and
 # the Windows native tools handle them as expected.
 *.bat       text eol=crlf
 *.cmd       text eol=crlf
 
 # Binary assets: never line-ending-converted.
+# *.mmdb are MaxMind DB test fixtures (tests/unit/fixtures/mmdb/): the
+# pure-Lua reader parses raw bytes, so EOL normalization would corrupt
+# them and break the offsets the format depends on.
+*.mmdb      binary
 *.png       binary
 *.jpg       binary
 *.jpeg      binary

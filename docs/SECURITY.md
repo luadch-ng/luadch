@@ -373,6 +373,80 @@ snapshots, `_normalize_str` for flat-table input). INF-derived
 strings are F-INF-2-clamped at parse time too, so this is
 defense-in-depth.
 
+### cfg-level secrets, env-var fallback, and HTTP API redaction
+
+Some cfg keys hold authentication material (HTTP API bearer tokens,
+future plugin API keys) or paths that protect at-rest encryption.
+These are tracked in a SINGLE registry at
+[`core/secrets.lua`](../core/secrets.lua) - the same module that
+`GET /v1/config` redaction consults and that plugin secrets-lookup
+helpers go through.
+
+**Registry semantics.** A cfg key registered via
+`secrets.register(cfg_key)` is treated as sensitive for the
+process lifetime:
+
+- `GET /v1/config` masks its value as `"<redacted>"`.
+- `PUT /v1/config/{key}` returns `403 E_FORBIDDEN` (rotate via
+  direct `cfg.tbl` edit + restart).
+- Future `+showcfg` / `+config show` cmds (when added) will
+  consult the same registry.
+
+Baseline registrations are seeded by `secrets.init()`:
+
+- `http_api_tokens` (HTTP API auth tokens, existed pre-arc).
+- `master_key_path` (cfg_secret encryption key path, existed
+  pre-arc).
+
+Plugins register their own sensitive keys at `onStart`:
+
+```lua
+local secrets = use "secrets"
+secrets.register( "etc_geoip_license_key" )
+secrets.register( "etc_proxydetect_api_key" )
+```
+
+`register()` is exposed to every plugin via `SANDBOX_GLOBALS` and
+takes effect for the process lifetime - the same trust assumption
+as §2 applies. A hostile plugin can hide a live cfg key from
+`GET /v1/config` by registering it, but the sandbox already grants
+worse capabilities (file I/O, network, hub state). The registry is
+defense-in-depth alongside the per-key chmod baseline above, not a
+plugin-trust boundary.
+
+**Env-var-first lookup.** Plugins that need an API key call
+`secrets.lookup(cfg_key)` instead of `cfg.get(cfg_key)`. The helper
+checks `LUADCH_<UPPER_CFG_KEY>` (e.g. `LUADCH_ETC_GEOIP_LICENSE_KEY`)
+first, then falls back to `cfg.get`. Empty strings in either
+location are treated as unset, so an accidentally blank env var
+does NOT mask a populated cfg value.
+
+Use cases:
+
+| Deployment | Where the key lives | Why |
+|---|---|---|
+| Docker / docker-compose | `environment:` section of the service | Survives container restarts; never written to disk; trivial rotation via `docker compose up -d` after a value change |
+| Bare-metal (Linux / Windows) | `cfg/cfg.tbl` (chmod 600 / icacls applied per the recipes above) | Stable across reboots; no env var to forget |
+| CI / staging | `LUADCH_*` env var injected by the orchestrator | Separation between code-config (cfg.tbl in repo or volume) and secrets (injected per environment) |
+
+Mixed deployments are allowed - any individual key can travel via
+env, via cfg, or both (env wins).
+
+**Why env-var-first and not encrypted-cfg.** The hub-itself already
+encrypts `cfg/user.tbl` (Phase 7c F-AUTH-1) but `cfg.tbl` itself is
+plain on disk with chmod 600. Encrypting individual cfg keys
+introduces an at-rest-secrets-management problem that the existing
+master-key path already solves at the user.tbl scope. The env-var
+fallback gives Docker operators a path that does not touch disk at
+all (env vars live in `/proc/<pid>/environ`, readable only by the
+process owner), and bare-metal operators a path that mirrors how
+they already manage `cfg.tbl` (chmod 600 + backup separation).
+
+**Process-environ leak surface.** `os.getenv` reads from the
+process environment, which Linux exposes via `/proc/<pid>/environ`
+to the process owner. Run the hub under its own dedicated user;
+the per-OS hardening recipes above already cover this.
+
 ---
 
 ## 5. Network-level defenses
@@ -655,6 +729,45 @@ the binding ([`zlib_stream/zlib_stream.c`](../zlib_stream/zlib_stream.c)):
 - **Malformed-input close.** zlib `Z_DATA_ERROR` / `Z_NEED_DICT` on
   a corrupted compressed stream is also surfaced as overflow; the
   hub closes rather than continuing on poisoned state.
+
+### Outbound HTTPS verification
+
+Plugins that make outbound HTTPS requests via
+[`core/http_client.lua`](../core/http_client.lua) (hublist
+announce, future external feed pulls, future proxy/VPN detection
+API calls) authenticate the remote against a bundled Mozilla CA
+root snapshot:
+
+| Aspect | Default |
+|---|---|
+| `verify` | `"peer"` (was `"none"` before Precursor 0b of the #78 arc) |
+| `cafile` | `certs/ca-bundle.pem` (bundled, 121 trusted roots; renamed from `cacert.pem` in Precursor 0d to avoid the path collision with `cert_bootstrap.lua`'s inbound TLS cafile) |
+| Missing cafile behaviour | **Fail-closed** - request is rejected with a clear error rather than silently falling back to unauthenticated |
+| First-boot / upgrade | `cacert_bootstrap.lua` copies the bundled file from `lib/luadch/ca-bundle.pem` (immutable system path) into the operator-facing path on first boot; SHA-256 mismatch logs WARN and leaves the operator-managed copy alone unless `ca_bundle_auto_update = true` |
+| Operator opt-out | Pass `verify="none"` explicitly per call |
+| Response size cap | RAM mode caps the whole response at 1 MiB. Stream-to-disk mode (`download_to_file`, Precursor 0a of the #78 arc, for large external feeds) caps the body at 50 MiB and the response headers separately at 64 KiB, so a server that never terminates its headers cannot grow the RAM buffer without limit. Integrity of the on-disk feed: only a 2xx response is written; a `Transfer-Encoding: chunked` response is rejected (not de-chunked); a `Content-Length` short read is treated as a truncation and discarded; the body streams to `<path>.tmp` and replaces `<path>` only after a complete, in-cap download (atomic rename on POSIX; a move-aside via `<path>.bak` with rollback on Windows keeps the last good file if the swap fails). A partial, non-2xx, or corrupt download therefore never replaces the last good file, and concurrent downloads to the same path are refused. The module owns the `.tmp` / `.bak` siblings. A close-delimited response (no Content-Length, no chunked) cannot have its completeness verified and is committed best-effort - point download-mode feeds at a Content-Length endpoint. The caller owns the target path (same trust boundary as the URL - never derive it from untrusted input). |
+| Redirect following | **Opt-in** via `max_redirects` (default `0` = a `3xx` is returned/failed as-is, unchanged behaviour). Needed because MaxMind's GeoLite2 download endpoint 302-redirects to a signed Cloudflare-R2 URL on a different host. Guards on every hop: `Authorization` / `Cookie` / `Proxy-Authorization` are **dropped when the redirect crosses origin** (scheme/host/port) so a credential never reaches the third-party host; an `https -> http` downgrade is **refused**; the target is re-validated by `parse_url`; hops are capped (`max_redirects`, hard ceiling `MAX_REDIRECT_CEIL = 10`) and share ONE `req.timeout`. Only those three header names are stripped - a credential in a custom header (e.g. `X-Api-Key`) would survive a cross-origin hop, so callers must not combine one with `max_redirects`. |
+
+The bundle's provenance, license, refresh recipe, and threat model
+live in [`docs/CACERT.md`](CACERT.md). Refresh quarterly or when
+the Mozilla NSS root store publishes a new release.
+
+**Redirect trust boundary (SSRF).** Following a redirect widens the
+outbound trust boundary: the initial URL is caller-supplied (operator
+cfg), but the redirect *target* is chosen by the server that answers.
+A compromised or malicious upstream can therefore point the hub at an
+arbitrary host. This is bounded by the opt-in default, the hop cap, the
+https-only + no-downgrade rules, and the `verify="peer"` default (an
+`https://` internal target would still need a publicly-trusted cert),
+but there is no RFC1918/link-local denylist - so `max_redirects` must
+only be enabled for operator-configured endpoints, never for a URL
+derived from untrusted (ADC-client) input. Same rule as the base
+`http_client` SSRF note.
+
+The TLS protocol floor is held at TLS 1.2 (SSLv3 / TLS 1.0 / TLS
+1.1 disabled via LuaSec options) for outbound calls regardless of
+verify mode, so a downgrade attack cannot land on a broken
+protocol even when `verify="none"` is the operator's choice.
 
 ---
 

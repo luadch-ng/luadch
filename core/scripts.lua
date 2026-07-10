@@ -239,6 +239,29 @@ local SANDBOX_GLOBALS = {
     -- luadch core modules (always present in _G after init.lua)
     "cfg", "util", "util_http", "http_filter", "http_events", "http_client", "adc", "adclib", "signal", "out",
     "audit",
+    -- core/secrets.lua (#78 Precursor 0c): sensitive-key registry
+    -- + env-var-first cfg lookup. Future API-keyed plugins
+    -- (etc_geoip MaxMind license, etc_proxydetect provider keys,
+    -- webhook tokens) call `secrets.lookup(cfg_key)` so Docker
+    -- operators can set keys via env vars instead of cfg.tbl.
+    "secrets",
+    -- core/blocklist.lua (#78 Phase A): unified pre-handshake
+    -- IP/CIDR blocklist engine. Phase B's etc_blocklist.lua and
+    -- Phase D/E/F's auto-feed plugins call blocklist.add /
+    -- .remove / .list / .count to manage entries; plugins NEVER
+    -- hold a direct reference to the engine's _entries array
+    -- (trust contract documented in the engine header).
+    "blocklist",
+    -- core/mmdb.lua (#78 Phase D1): pure-Lua MaxMind DB reader.
+    -- Phase D2's etc_geoip.lua calls mmdb.open(path) + reader:lookup(ip)
+    -- to resolve a connecting IP to its country / ASN. Read-only; the
+    -- reader degrades to (nil, err) on a missing / corrupt DB so a
+    -- plugin never crashes the hub on a bad operator drop.
+    "mmdb",
+    -- core/geoip_update.lua (#78 Phase D3): in-hub MaxMind GeoLite2 DB
+    -- auto-update. etc_geoip.lua calls geoip_update.update{...} on its
+    -- update timer to fetch + refresh the .mmdb the reader reads.
+    "geoip_update",
     "unicode",
     -- read-only program constants (PROGRAM_NAME / VERSION / FORK /
     -- COPYRIGHT / CONFIG_PATH). Static strings, no capability; lets

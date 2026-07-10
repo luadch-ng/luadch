@@ -124,6 +124,34 @@ def override_test_ports(staging_dir: Path):
         # log traces (e.g. #265 regression test scans event.log for the
         # 'invalid named parameter' line emitted on `nowhitespace` reject).
         (r"log_events\s*=\s*false", "log_events = true"),
+        # #78 Phase D2: turn etc_geoip ON (ships OFF) with NO database
+        # present in the staging tree. This exercises the plugin's
+        # real-sandbox load path + graceful missing-DB handling on every
+        # smoke boot: a sandbox-undeclared-global or a load-time crash
+        # would surface as a script error (caught by test_no_script_errors)
+        # or prevent the hub from binding its ports. onConnect stays inert
+        # without a DB, so no other test is affected.
+        (r'\{\s*"etc_geoip\.lua",\s*enabled\s*=\s*false\s*\}',
+         '{ "etc_geoip.lua", enabled = true }'),
+        (r"etc_geoip_enabled\s*=\s*false", "etc_geoip_enabled = true"),
+        # #78 Phase E: turn etc_blocklist_feeds ON (ships OFF) with NO feed
+        # enabled - exercises the plugin's real-sandbox load path + onStart
+        # command registration on every smoke boot WITHOUT any outbound
+        # network (no feed is scheduled). A sandbox-undeclared-global or a
+        # load-time crash surfaces via test_no_script_errors.
+        (r'\{\s*"etc_blocklist_feeds\.lua",\s*enabled\s*=\s*false\s*\}',
+         '{ "etc_blocklist_feeds.lua", enabled = true }'),
+        (r"etc_blocklist_feeds_enabled\s*=\s*false", "etc_blocklist_feeds_enabled = true"),
+        # #78 Phase F: turn etc_proxydetect ON (ships OFF). Keep the real
+        # default provider (proxycheck) so the real-sandbox load + onStart
+        # command registration run on every smoke boot, but EMPTY
+        # check_levels so onConnect never fires an outbound provider query -
+        # no network dependency in CI. A sandbox-undeclared-global or a
+        # load-time crash surfaces via test_no_script_errors.
+        (r'\{\s*"etc_proxydetect\.lua",\s*enabled\s*=\s*false\s*\}',
+         '{ "etc_proxydetect.lua", enabled = true }'),
+        (r"etc_proxydetect_enabled\s*=\s*false", "etc_proxydetect_enabled = true"),
+        (r"etc_proxydetect_check_levels = \{[^}]*\}", "etc_proxydetect_check_levels = { }"),
     ]
     for pattern, replacement in rewrites:
         new_text, count = re.subn(pattern, replacement, text, count=1)
@@ -6651,6 +6679,189 @@ def test_aliases_adc_dispatch():
             raise TestFailure(f"+delalias did not confirm removal: {reply!r}")
 
 
+def test_blocklist_78_phase_b():
+    """#78 Phase B etc_blocklist `+blocklist` admin CLI smoke.
+
+    Exercises the dispatcher + 4 of 6 verbs (count / add / show /
+    del) over an authenticated ADC session. The remaining two
+    (export / import) write to disk and are covered by the unit
+    test - smoke stays focused on the live ADC path.
+
+    Sequence:
+      1. Login as dummy (level 100, > etc_blocklist_oplevel=80).
+      2. `+blocklist count` -> reply with "0 entries total".
+      3. `+blocklist add 198.51.100.0/24 reason="smoke"` ->
+         reply contains "added" + "blocklist entry". TEST-NET-3
+         prefix (not loopback, not routable) so a smoke-run cannot
+         accidentally block a real IP.
+      4. `+blocklist count` -> "1 entries total" + "manual".
+      5. `+blocklist show` -> reply contains "198.51.100.0/24".
+      6. `+blocklist del 1` -> "removed" + "blocklist entry".
+      7. `+blocklist count` -> "0 entries total" again (roundtrip).
+
+    Registered in the initial TESTS list rather than the staging-
+    runner block so the test runs BEFORE `_switch_to_tier_mode`
+    injects `ratelimit_tiers = { strict = { msg_burst = 2 } }`
+    for level 100. Under that overlay, dummy can send only 2
+    BMSGs per burst; our 6-BMSG roundtrip would starve the token
+    bucket and stall from step 3 onward. Keeping the test in the
+    default-cfg phase avoids the rate-limit interaction entirely.
+
+    Frames arrive with ADC space-escapes (`\\s` for space). The
+    `_dcontains` predicate helper decodes that once so per-step
+    predicates read as plain English content.
+    """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
+    def _dcontains(f, substr):
+        return substr in f.replace("\\s", " ")
+
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+
+        # 1. count -> "0 entries total"
+        sock.sendall(f"BMSG {sid} +blocklist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and _dcontains(f, "0 entries total"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist count (pre-add) did not return zero: {reply!r}")
+
+        # 2. add TEST-NET-3 CIDR
+        sock.sendall(
+            f'BMSG {sid} +blocklist\\sadd\\s198.51.100.0/24\\sreason="smoke"\n'
+            .encode("utf-8")
+        )
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "added")
+                and _dcontains(f, "blocklist entry"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist add did not confirm: {reply!r}")
+
+        # 3. count -> "1 entries total" + "manual"
+        sock.sendall(f"BMSG {sid} +blocklist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "1 entries total")
+                and _dcontains(f, "manual"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist count (post-add) did not return one: {reply!r}")
+
+        # 4. show -> includes the cidr
+        sock.sendall(f"BMSG {sid} +blocklist\\sshow\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and _dcontains(f, "198.51.100.0/24"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist show did not list the entry: {reply!r}")
+
+        # 5. del 1 -> "removed"
+        sock.sendall(f"BMSG {sid} +blocklist\\sdel\\s1\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "removed")
+                and _dcontains(f, "blocklist entry"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist del did not confirm: {reply!r}")
+
+        # 6. count -> back to zero
+        sock.sendall(f"BMSG {sid} +blocklist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and _dcontains(f, "0 entries total"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blocklist count (post-del) did not return zero: {reply!r}")
+
+
+def test_blocklist_feeds_status():
+    """#78 Phase E etc_blocklist_feeds `+blfeeds` read-only status smoke.
+
+    override_test_ports enables the plugin with NO feed active, so this
+    validates the real-hub operator surface end-to-end over an ADC
+    session: the onStart command + HTTP registration, get_status, and
+    format_status all run in the restricted sandbox. The fetch -> parse
+    -> bulk_replace path is unit-tested with mocked responses (86
+    checks); the full fetch-and-block end-to-end (a live mock feed
+    server + close-on-accept) is left as a follow-up.
+
+    Sequence:
+      1. Login as dummy (level 100 > etc_blocklist_feeds_oplevel=80).
+      2. `+blfeeds` -> DMSG reply with the status header + a feed row.
+    """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
+    def _dcontains(f, substr):
+        return substr in f.replace("\\s", " ")
+
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+
+        sock.sendall(f"BMSG {sid} +blfeeds\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "BLOCKLIST FEEDS STATUS")
+                and _dcontains(f, "[tor]"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+blfeeds did not return status: {reply!r}")
+
+
+def test_proxydetect_status():
+    """#78 Phase F etc_proxydetect `+proxydetect` read-only status smoke.
+
+    override_test_ports enables the plugin with EMPTY check_levels, so
+    onConnect never fires an outbound provider query (no network in CI)
+    while the real-hub operator surface is validated end-to-end over an
+    ADC session: the onStart command + HTTP registration, secrets.register,
+    get_status and format_status all run in the restricted sandbox. The
+    async lookup -> kick / store-push flow + SSRF / SID-reuse / fail-open
+    guards + all three provider adapters (proxycheck / vpnapi / ipqs) are
+    unit-tested with a mocked http_client / blocklist; a live mock-provider
+    end-to-end is left as a follow-up.
+
+    Sequence:
+      1. Login as dummy (level 100 > etc_proxydetect_oplevel=80).
+      2. `+proxydetect` -> DMSG reply with the status header + provider row.
+    """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
+    def _dcontains(f, substr):
+        return substr in f.replace("\\s", " ")
+
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+
+        sock.sendall(f"BMSG {sid} +proxydetect\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "PROXYDETECT STATUS")
+                and _dcontains(f, "proxycheck"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+proxydetect did not return status: {reply!r}")
+
+
 def test_http_aliases(staging_dir: Path, proc=None):
     """#327: HTTP API CRUD for etc_aliases.
 
@@ -8746,6 +8957,210 @@ def test_http_reload(staging_dir: Path, proc=None):
             f"catalog missing /v1/reload after reload; "
             f"restartscripts did not re-register? body={b!r}"
         )
+
+
+def test_http_phase_c_blocklist(staging_dir: Path, proc=None):
+    """#78 Phase C HTTP API for the unified blocklist.
+
+    Four endpoints, one plugin (etc_blocklist.lua v0.02):
+      - GET    /v1/blocklist          list with filter/sort/pagination
+      - GET    /v1/blocklist/counts   {total, by_source}
+      - POST   /v1/blocklist          create; body {cidr, source?,
+                                      stealth?, reason?, expires_at?}
+      - DELETE /v1/blocklist/{id}     remove
+
+    Coverage:
+    - Pre-flight: fresh staging has 0 entries + counts.total=0
+    - Anonymous POST -> 401
+    - POST cidr + reason (default source=manual) -> 201; id echoed;
+      GET reflects the addition; counts.total=1, by_source.manual=1
+    - POST source=external -> 201 (enum accepts non-manual); GET
+      ?source=external returns exactly this one
+    - POST bad cidr (host-bits-set) -> 400 with engine err msg
+    - POST missing cidr -> 400 E_BAD_INPUT (schema reject)
+    - DELETE existing id -> 200 + removed snapshot
+    - DELETE 999 -> 404 E_NOT_FOUND
+    - DELETE non-integer -> 400 E_BAD_INPUT
+    - Persistence: scripts/data/etc_blocklist.tbl reflects the
+      surviving entries after all mutations
+    - HTTP tokens bypass ADC hierarchy - a level-100 entry can be
+      removed by an admin token that has no operator level
+    """
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def post(path: bytes, body: bytes) -> str:
+        return _http_roundtrip(
+            b"POST " + path + b" HTTP/1.1\r\n" + auth +
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"\r\n" + body
+        )
+
+    def get(path: bytes, use_auth: bool = True) -> str:
+        req = b"GET " + path + b" HTTP/1.1\r\n"
+        if use_auth:
+            req += auth
+        req += b"\r\n"
+        return _http_roundtrip(req)
+
+    def delete_id(id_str: str) -> str:
+        return _http_roundtrip(
+            b"DELETE /v1/blocklist/" + id_str.encode("ascii") +
+            b" HTTP/1.1\r\n" + auth + b"\r\n"
+        )
+
+    # 1. Fresh staging: empty entries + counts.
+    r = get(b"/v1/blocklist")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"pre-flight GET /v1/blocklist: expected 200, got {status(r)!r}")
+    if '"entries":[]' not in body_of(r).replace(" ", ""):
+        raise TestFailure(
+            f"pre-flight expected empty entries, got {body_of(r)!r}"
+        )
+
+    r = get(b"/v1/blocklist/counts")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"pre-flight GET counts: expected 200, got {status(r)!r}")
+    pre_flight_body = body_of(r).replace(" ", "")
+    if '"total":0' not in pre_flight_body:
+        raise TestFailure(f"pre-flight counts.total should be 0, got {body_of(r)!r}")
+    # Empty by_source must wire as JSON `{}`, not `[]`. dkjson's
+    # default for a Lua table with no string keys is array; the
+    # plugin forces `__jsontype = "object"` so callers with typed
+    # decoders don't break on fresh installs.
+    if '"by_source":{}' not in pre_flight_body:
+        raise TestFailure(
+            f"pre-flight counts.by_source should wire as JSON object "
+            f"`{{}}` (not array `[]`) on empty store; body={body_of(r)!r}"
+        )
+
+    # 2. Anonymous POST -> 401
+    anon_body = b'{"cidr":"10.0.0.0/8"}'
+    r = _http_roundtrip(
+        b"POST /v1/blocklist HTTP/1.1\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: " + str(len(anon_body)).encode("ascii") +
+        b"\r\n\r\n" + anon_body
+    )
+    if "401" not in status(r):
+        raise TestFailure(f"anon POST should be 401, got {status(r)!r}")
+
+    # 3. POST manual entry.
+    r = post(b"/v1/blocklist",
+        b'{"cidr":"198.51.100.0/24","reason":"smoke phase c"}')
+    if "201" not in status(r):
+        raise TestFailure(f"POST manual: expected 201, got {status(r)!r}; body={body_of(r)!r}")
+    b = body_of(r).replace(" ", "")
+    if '"ok":true' not in b:
+        raise TestFailure(f"POST envelope missing ok:true; body={b!r}")
+    if '"action":"added"' not in b:
+        raise TestFailure(f"POST action missing; body={b!r}")
+    if '"cidr":"198.51.100.0/24"' not in b:
+        raise TestFailure(f"POST cidr echo missing; body={b!r}")
+    if '"source":"manual"' not in b:
+        raise TestFailure(f"POST default source should be manual; body={b!r}")
+    m1 = re.search(r'"id":(\d+)', b)
+    if not m1:
+        raise TestFailure(f"POST id missing; body={b!r}")
+    manual_id = m1.group(1)
+
+    # 4. GET reflects + counts=1
+    r = get(b"/v1/blocklist")
+    b = body_of(r).replace(" ", "")
+    if '"198.51.100.0/24"' not in b:
+        raise TestFailure(f"GET after add missing entry; body={b!r}")
+
+    r = get(b"/v1/blocklist/counts")
+    b = body_of(r).replace(" ", "")
+    if '"total":1' not in b:
+        raise TestFailure(f"counts after add: total=1 missing; body={b!r}")
+    if '"manual":1' not in b:
+        raise TestFailure(f"counts.by_source.manual=1 missing; body={b!r}")
+
+    # 5. POST source=external.
+    r = post(b"/v1/blocklist",
+        b'{"cidr":"192.0.2.0/24","source":"external","reason":"feed test"}')
+    if "201" not in status(r):
+        raise TestFailure(f"POST external: expected 201, got {status(r)!r}; body={body_of(r)!r}")
+
+    r = get(b"/v1/blocklist?source=external")
+    b = body_of(r).replace(" ", "")
+    if '"192.0.2.0/24"' not in b:
+        raise TestFailure(f"filtered GET source=external missing entry; body={b!r}")
+
+    # 6. POST bad cidr (host-bits-set).
+    r = post(b"/v1/blocklist", b'{"cidr":"1.2.3.4/24"}')
+    if "400" not in status(r):
+        raise TestFailure(f"POST bad-cidr should be 400, got {status(r)!r}; body={body_of(r)!r}")
+
+    # 7. POST missing cidr (router schema rejects, or handler catches).
+    r = post(b"/v1/blocklist", b'{"reason":"nope"}')
+    if "400" not in status(r):
+        raise TestFailure(f"POST missing cidr should be 400, got {status(r)!r}; body={body_of(r)!r}")
+
+    # 8. DELETE bad id.
+    r = delete_id("abc")
+    if "400" not in status(r):
+        raise TestFailure(f"DELETE bad id should be 400, got {status(r)!r}")
+
+    # 9. DELETE non-existent id.
+    r = delete_id("999")
+    if "404" not in status(r):
+        raise TestFailure(f"DELETE 999 should be 404, got {status(r)!r}")
+
+    # 10. DELETE manual entry.
+    r = delete_id(manual_id)
+    if "200" not in status(r):
+        raise TestFailure(f"DELETE id={manual_id}: expected 200, got {status(r)!r}; body={body_of(r)!r}")
+    b = body_of(r).replace(" ", "")
+    if '"action":"removed"' not in b:
+        raise TestFailure(f"DELETE action missing; body={b!r}")
+    if '"cidr":"198.51.100.0/24"' not in b:
+        raise TestFailure(f"DELETE removed.cidr missing; body={b!r}")
+
+    # 11. DELETE same id again -> 404 (entry gone).
+    r = delete_id(manual_id)
+    if "404" not in status(r):
+        raise TestFailure(f"DELETE second time should be 404, got {status(r)!r}")
+
+    # 12. Persistence: the store file exists after the mutations.
+    store = staging_dir / "scripts" / "data" / "etc_blocklist.tbl"
+    if not store.exists():
+        raise TestFailure(
+            f"scripts/data/etc_blocklist.tbl not written by HTTP mutations "
+            f"({store})"
+        )
+
+    # 13. Endpoints catalog contains our two paths (the catalog
+    #     keys on path, not method+path - a single path with
+    #     multiple methods appears once with method-array in the
+    #     entry).
+    r = get(b"/v1/endpoints")
+    b = body_of(r)
+    for wanted in (
+        '"/v1/blocklist"',
+        '"/v1/blocklist/counts"',
+        '"/v1/blocklist/{id}"',
+    ):
+        if wanted not in b:
+            raise TestFailure(
+                f"/v1/endpoints missing {wanted}; body={b[:400]!r}"
+            )
 
 
 def test_http_plugins_api(staging_dir: Path, proc=None):
@@ -11540,6 +11955,9 @@ TESTS = [
     ("TLS ADC full login (dummy/test)", test_full_login_tls),
     ("+cmd routing (post-login +help)", test_command_routing),
     ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
+    ("blocklist admin CLI (#78 Phase B)", test_blocklist_78_phase_b),
+    ("blocklist feeds status (#78 Phase E)", test_blocklist_feeds_status),
+    ("proxydetect status (#78 Phase F)", test_proxydetect_status),
     ("S1: fragmented frame reassembled (phase8-io)", test_s1_fragmented_frame_reassembled),
     ("S1: two frames in one segment (phase8-io)", test_s1_two_frames_one_segment),
     ("literal [+!#] bracket hint + no-arg-echo (#137)", test_literal_bracket_command_hint),
@@ -12242,6 +12660,21 @@ def main():
             failed.append("client blocker end-to-end (#81)")
         else:
             log("PASS  client blocker end-to-end (#81)")
+
+        # #78 Phase C HTTP API for the unified blocklist. Four
+        # endpoints (GET list, GET counts, POST, DELETE); anon-auth
+        # sanity check + happy path per verb + bad-cidr / missing-
+        # cidr / bad-id / not-found rejections + persistence check
+        # on scripts/data/etc_blocklist.tbl + endpoints-catalog
+        # sanity. Uses HTTP (not BMSG) so ratelimit_tier overlay is
+        # irrelevant here.
+        try:
+            test_http_phase_c_blocklist(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API blocklist (#78 Phase C): {e}")
+            failed.append("HTTP API blocklist (#78 Phase C)")
+        else:
+            log("PASS  HTTP API blocklist (#78 Phase C)")
 
         # #261 plugin-management endpoints: GET /v1/plugins (read) +
         # PUT /v1/plugins/{name}/enabled (admin). Full toggle cycle on

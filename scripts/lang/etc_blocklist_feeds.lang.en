@@ -1,0 +1,23 @@
+return {
+
+    msg_denied       = "You are not allowed to use this command.",
+
+    msg_refresh_ok   = "etc_blocklist_feeds.lua: feed '%s' refreshed: +%d / -%d entries (%d skipped).",
+    msg_refresh_fail = "etc_blocklist_feeds.lua: feed '%s' refresh FAILED: %s (keeping last-good entries).",
+    msg_clamped      = "etc_blocklist_feeds.lua: feed '%s' refresh interval raised to the %ds minimum (feed policy).",
+    msg_abuseipdb_no_key = "etc_blocklist_feeds.lua: abuseipdb feed is enabled but no API key is set (cfg '%s' or the LUADCH_* env var) - the feed is disabled.",
+    msg_report_ok    = "[ FEEDS ]--> Feed '%s' updated: %d entries now active.",
+    msg_report_fail  = "[ FEEDS ]--> Feed '%s' refresh FAILED: %s",
+
+    msg_status_header = "\n=== BLOCKLIST FEEDS STATUS ===",
+    msg_status_footer = "=== END ===\n",
+    msg_status_master = "  plugin enabled:  %s",
+    msg_status_feed   = "  [%s] enabled=%s  interval=%ds  entries=%d  last=%s",
+
+    help_title = "etc_blocklist_feeds.lua - external blocklist feeds",
+    help_usage = "[+!#]blfeeds",
+    help_desc  = "Show external-feed status: per-feed enabled state, interval, entry count, last refresh.",
+
+    ucmd_menu  = { "Hub", "Blocklist", "Feeds status" },
+
+}

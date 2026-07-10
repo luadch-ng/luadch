@@ -29,6 +29,18 @@
  *       Z_DATA_ERROR / Z_NEED_DICT). The caller is expected to log
  *       and close.
  *
+ *   zlib_stream.gunzip( ) -> stream
+ *       :push( input ) -> decompressed bytes
+ *
+ *       Like inflate(), but decodes the GZIP wrapper (RFC 1952) instead
+ *       of the zlib wrapper (RFC 1950): inflateInit2(windowBits = 15+16).
+ *       Reuses the inflate userdata/metatable, so :push / :close / __gc
+ *       and the 4 MiB per-push bomb cap are identical. A non-gzip body
+ *       (e.g. an HTML error page) is rejected with Z_DATA_ERROR on the
+ *       first push. Used by core/geoip_update.lua to decompress the
+ *       MaxMind GeoLite2 .tar.gz; feed the compressed file in bounded
+ *       input chunks so the per-push OUTPUT stays under the 4 MiB cap.
+ *
  *   :close()  -- frees the underlying zlib z_stream early
  *   __gc      -- safety net for forgotten :close()
  *
@@ -49,9 +61,10 @@
  *     (Lua's luaL_Buffer keeps it on the Lua stack); zlib doubles its
  *     consume rate. For the inflate cap we tally bytes across rounds.
  *
- *   - No support for raw deflate, gzip, custom window bits, or
- *     dictionaries: spec mandates plain zlib stream (windowBits = 15
- *     default), this binding stays minimal.
+ *   - inflate() decodes the plain zlib stream ONLY (windowBits = 15,
+ *     what ADC-EXT ZLIF mandates); gunzip() is the gzip-wrapper variant
+ *     (windowBits = 15+16). No raw-deflate / custom-window-bits /
+ *     dictionary support - the binding stays minimal.
  */
 
 #include <string.h>
@@ -269,6 +282,30 @@ static int zlib_stream_inflate( lua_State *L ) {
     return 1;
 }
 
+static int zlib_stream_gunzip( lua_State *L ) {
+    zs_state *st = (zs_state *) lua_newuserdata( L, sizeof( zs_state ) );
+    memset( st, 0, sizeof( *st ) );
+
+    /* windowBits 15 + 16 = 32 KiB window, GZIP (RFC 1952) wrapper ONLY.
+     * gzip-only (not 15 + 32 auto-detect) so a non-gzip body is rejected
+     * with Z_DATA_ERROR on the first :push rather than silently
+     * mis-parsed. Reuses the inflate metatable below, so :push (with the
+     * 4 MiB per-push bomb cap), :close and __gc are shared verbatim.
+     * Decodes a SINGLE gzip member only (standard `tar czf` / MaxMind
+     * output): a concatenated multi-member gzip would stop at the first
+     * member's Z_STREAM_END and silently ignore the rest. Fine for the
+     * GeoIP use case - the downstream tar-member + mmdb.open sanity checks
+     * reject a truncated payload and keep the last-good DB. */
+    int rc = inflateInit2( &st->strm, 15 + 16 );
+    if ( rc != Z_OK ) {
+        return luaL_error( L, "zlib_stream.gunzip: inflateInit2 failed (rc=%d, msg=%s)",
+            rc, st->strm.msg ? st->strm.msg : "?" );
+    }
+
+    luaL_setmetatable( L, INFLATE_META );
+    return 1;
+}
+
 
 /* ---------- module ---------- */
 
@@ -287,6 +324,7 @@ static const luaL_Reg inflate_methods[] = {
 static const luaL_Reg module_funcs[] = {
     { "deflate", zlib_stream_deflate },
     { "inflate", zlib_stream_inflate },
+    { "gunzip",  zlib_stream_gunzip  },
     { NULL, NULL },
 };
 

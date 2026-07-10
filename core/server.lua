@@ -90,6 +90,7 @@ local out = use "out"
 local mem = use "mem"
 local signal = use "signal"
 local ratelimit = use "ratelimit"
+local blocklist = use "blocklist"
 local iostream = use "iostream"
 
 --// core methods //--
@@ -102,6 +103,7 @@ local signal_set = signal.set
 local signal_get = signal.get
 local ratelimit_accept_ip = ratelimit.accept_ip
 local ratelimit_release_ip = ratelimit.release_ip
+local blocklist_check_ip = blocklist.check_ip
 local ratelimit_handshake_started = ratelimit.handshake_started
 local ratelimit_handshake_finished = ratelimit.handshake_finished
 local ratelimit_expired_handshakes = ratelimit.expired_handshakes
@@ -398,6 +400,18 @@ wrapserver = function( listeners, socket, serverip, serverport, serverfamily, pa
         local client, err = accept( socket )    -- try to accept
         if client then
             local clientip, clientport = client:getpeername( )
+            -- #78 Phase A: pre-handshake blocklist check. Runs BEFORE
+            -- ratelimit_accept_ip so a blocked-IP flood does not drain
+            -- the per-IP ratelimit budget for other (legitimate) IPs.
+            -- core/blocklist.lua handles the aggregated-log rollup +
+            -- per-attempt visible log; we just close-on-accept here
+            -- to keep the rejection silent at the ADC layer (no
+            -- ISTA reply because we have not started the handshake).
+            local bl_blocked = blocklist_check_ip( clientip )
+            if bl_blocked then
+                client:close( )
+                return false
+            end
             -- Phase 7c F-NET-1: per-IP parallel-socket cap and per-IP
             -- accept-rate cap. Refuse pre-wrap so the offending IP cannot
             -- consume FDs / slot-list entries.

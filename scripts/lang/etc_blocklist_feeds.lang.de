@@ -1,0 +1,23 @@
+return {
+
+    msg_denied       = "Du darfst diesen Befehl nicht verwenden.",
+
+    msg_refresh_ok   = "etc_blocklist_feeds.lua: Feed '%s' aktualisiert: +%d / -%d Eintraege (%d uebersprungen).",
+    msg_refresh_fail = "etc_blocklist_feeds.lua: Feed '%s' Aktualisierung FEHLGESCHLAGEN: %s (behalte letzten guten Stand).",
+    msg_clamped      = "etc_blocklist_feeds.lua: Feed '%s' Aktualisierungsintervall auf das Minimum von %ds angehoben (Feed-Richtlinie).",
+    msg_abuseipdb_no_key = "etc_blocklist_feeds.lua: abuseipdb-Feed ist aktiviert, aber kein API-Key gesetzt (cfg '%s' oder die LUADCH_*-Umgebungsvariable) - der Feed ist deaktiviert.",
+    msg_report_ok    = "[ FEEDS ]--> Feed '%s' aktualisiert: %d Eintraege jetzt aktiv.",
+    msg_report_fail  = "[ FEEDS ]--> Feed '%s' Aktualisierung FEHLGESCHLAGEN: %s",
+
+    msg_status_header = "\n=== BLOCKLIST FEEDS STATUS ===",
+    msg_status_footer = "=== ENDE ===\n",
+    msg_status_master = "  Plugin aktiviert:  %s",
+    msg_status_feed   = "  [%s] aktiviert=%s  Intervall=%ds  Eintraege=%d  zuletzt=%s",
+
+    help_title = "etc_blocklist_feeds.lua - externe Blocklist-Feeds",
+    help_usage = "[+!#]blfeeds",
+    help_desc  = "Zeigt den Feed-Status: pro Feed aktiviert-Status, Intervall, Eintragszahl, letzte Aktualisierung.",
+
+    ucmd_menu  = { "Hub", "Blocklist", "Feeds Status" },
+
+}
