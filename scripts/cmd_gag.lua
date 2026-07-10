@@ -258,8 +258,12 @@ parse_duration = function(s)
     local total = 0
     local matched_any = false
     local consumed = 0
-    for n, unit in s:gmatch("(%d+)([smhdw])") do
-        n = tonumber(n)
+    -- iterate over a renamed capture + fresh local rather than reassigning
+    -- the loop variable: Lua 5.5 makes generic-for control variables const,
+    -- so `n = tonumber(n)` would be a compile error there (the hub runs
+    -- 5.4.8, but the Windows CI's msys2 lua tracks 5.5).
+    for ns, unit in s:gmatch("(%d+)([smhdw])") do
+        local n = tonumber(ns)
         if unit == "s" then total = total + n
         elseif unit == "m" then total = total + n * 60
         elseif unit == "h" then total = total + n * 3600
