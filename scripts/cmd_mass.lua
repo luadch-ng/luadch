@@ -402,9 +402,9 @@ hub.setlistener( "onStart", { },
         local hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
         --assert( hubcmd.add( { cmd, cmd_lvl, cmd_hub }, onbmsg ) )
-        assert( hubcmd.add( cmd, onbmsg ) )
-        assert( hubcmd.add( cmd_lvl, onbmsg ) )
-        assert( hubcmd.add( cmd_hub, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel ) )
+        assert( hubcmd.add( cmd_lvl, onbmsg, oplevel ) )
+        assert( hubcmd.add( cmd_hub, onbmsg, oplevel ) )
         -- HTTP API endpoint (#82). Coexists with the three ADC
         -- chat-cmds above. Raw hub.http_register (not util_http)
         -- because this is a hub-control endpoint with no SID target.

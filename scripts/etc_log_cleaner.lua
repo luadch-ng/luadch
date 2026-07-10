@@ -202,7 +202,7 @@ hub.setlistener( "onStart", {},
         end
         local hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel ) )
         -- HTTP API endpoint (#82 Phase 3 PR-5). Write-endpoint;
         -- admin scope. Bypasses the ADC-side activate_X cfg gates.
         if hub.http_register then

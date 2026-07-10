@@ -550,7 +550,7 @@ hub.setlistener( "onStart", {},
         end
         hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel ) )
 
         if hub.http_register then
             hub.http_register( "PUT", "/v1/registered/{nick}/nick", "admin", http_handler_set_nick, {

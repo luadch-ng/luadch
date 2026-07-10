@@ -310,7 +310,7 @@ hub.setlistener( "onStart", {},
         end
         hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, oplevel ) )
         -- HTTP API endpoints (#82 Phase 4 PR-3).
         if hub.http_register then
             hub.http_register( "GET", "/v1/blacklist", "read", http_handler_list_blacklist, {

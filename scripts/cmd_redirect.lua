@@ -229,7 +229,7 @@ hub.setlistener( "onStart", {},
         end
         local hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, oplevel ) )
         -- HTTP API endpoint (#82 Phase 2 PR-2). The util_http
         -- helper is fail-soft; the whole script returns at module
         -- top if `cmd_redirect_activate` is false, so this

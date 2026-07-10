@@ -483,7 +483,7 @@ hub.setlistener("onStart", {},
         end
         hubcmd = hub.import("etc_hubcommands")
         assert(hubcmd)
-        assert(hubcmd.add(cmd, onbmsg))
+        assert(hubcmd.add(cmd, onbmsg, minlevel))
         -- HTTP API endpoints (#82 Phase 2 PR-3). The util_http
         -- helper handles the standard SID-online-non-bot preflight,
         -- the §7.1.1 response envelope, and the audit log. This

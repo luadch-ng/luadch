@@ -463,7 +463,7 @@ hub.setlistener( "onStart", { },
         end
         hubcmd = hub.import( "etc_hubcommands" )    -- add hubcommand
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel, { secret = true } ) ) -- #356 f/u: setpass carries a password inline; keep swallowing its forgot-prefix "cmd <args>" form
 
         if hub.http_register then
             hub.http_register( "PUT", "/v1/registered/{nick}/password", "admin", http_handler_set_password, {

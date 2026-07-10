@@ -228,7 +228,7 @@ hub.setlistener("onStart", {},
         end
         hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel ) )
         -- HTTP API endpoint (#82 Phase 3 PR-4). Read-only;
         -- admin scope (operator log, same as /v1/log/error).
         if hub.http_register then

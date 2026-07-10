@@ -767,7 +767,7 @@ hub.setlistener( "onStart", {},
         end
         hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel ) )
 
         if hub.http_register then
             hub.http_register( "GET", "/v1/registered", "read", http_handler_list_regusers, {

@@ -485,7 +485,7 @@ hub.setlistener( "onStart", {},
         end
         hubcmd = hub.import( "etc_hubcommands" )  -- add hubcommand
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel ) )
 
         if hub.http_register then
             hub.http_register( "DELETE", "/v1/registered/{nick}", "admin", http_handler_delreguser, {

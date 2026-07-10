@@ -1499,7 +1499,7 @@ hub.setlistener( "onStart", {},
         end
         local hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, oplevel ) )
 
         for sid, user in pairs( hub.getusers() ) do
             if need_block( user ) then

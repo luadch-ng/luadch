@@ -559,7 +559,7 @@ hub.setlistener( "onStart", { },
 
         local hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd_status, on_blfeeds ) )
+        assert( hubcmd.add( cmd_status, on_blfeeds, oplevel ) )
 
         -- Read-only HTTP status mirror. No write endpoint: which feeds run
         -- is cfg-driven (edited in cfg.tbl + reload), not a mutable store.

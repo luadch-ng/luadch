@@ -327,7 +327,7 @@ hub.setlistener( "onStart", { },
         end
         hubcmd = hub.import( "etc_hubcommands" )  -- add hubcommand
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel ) )
         -- HTTP API endpoint (#82 Phase 3 PR-1). Coexists with the
         -- ADC `+restart` chat-cmd above; both call into do_restart.
         -- Raw hub.http_register (not util_http) because this is a

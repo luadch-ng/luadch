@@ -315,7 +315,7 @@ hub.setlistener( "onStart", {},
         end
         local hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd_name, onbmsg ) )
+        assert( hubcmd.add( cmd_name, onbmsg, minlevel ) )
         if hub.http_register then
             hub.http_register( "GET", "/v1/log/audit", "admin", http_handler_log_audit, {
                 plugin = scriptname,
