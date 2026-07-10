@@ -5,6 +5,15 @@
             - this script adds a command "gag" to mute, kennylize or shadowmute a user
             - usage: [+!#]gag mute|kennylize|shadowmute|ungag|show <NICK> [<DURATION>]
 
+            v0.12:
+                - the ADC `+gag mute|kennylize|shadowmute` path now
+                  rejects a bot target (Hubbot / OpChat / RegChat) with
+                  "User is a bot.", matching the guard the other user-
+                  action commands already carry and the HTTP path's
+                  util_http non-bot preflight (closes #355). ungag is
+                  left unguarded so a stale gag set on a bot before this
+                  fix can still be removed.
+
             v0.11:
                 - route the inline duration unit labels "y "/"d "/"h "/"m "/"s"
                   through lang (msg_unit_*). Part of #301 i18n cleanup.
@@ -103,7 +112,7 @@
 --// settings begin //--
 
 local scriptname = "cmd_gag"
-local scriptversion = "0.11"
+local scriptversion = "0.12"
 
 local cmd = "gag"
 local prm_mute = "mute"
@@ -183,6 +192,7 @@ local msg_remove_user = lang.msg_remove_user or "[ GAG ]--> User:  %s  was ungag
 local msg_expired = lang.msg_expired or "[ GAG ]--> User:  %s  restriction (%s) auto-expired."
 local msg_error_in = lang.msg_error_in or "User already gagged, remove his restrictions before adding another one."
 local msg_error_out = lang.msg_error_out or "User:  %s  has no restriction set."
+local msg_isbot = lang.msg_isbot or "User is a bot."
 local msg_user_restriction_added = lang.msg_user_restriction_added or "You were gagged with mode: %s"
 local msg_user_restriction_removed = lang.msg_user_restriction_removed or "Your chat restrictions were removed."
 
@@ -248,8 +258,12 @@ parse_duration = function(s)
     local total = 0
     local matched_any = false
     local consumed = 0
-    for n, unit in s:gmatch("(%d+)([smhdw])") do
-        n = tonumber(n)
+    -- iterate over a renamed capture + fresh local rather than reassigning
+    -- the loop variable: Lua 5.5 makes generic-for control variables const,
+    -- so `n = tonumber(n)` would be a compile error there (the hub runs
+    -- 5.4.8, but the Windows CI's msys2 lua tracks 5.5).
+    for ns, unit in s:gmatch("(%d+)([smhdw])") do
+        local n = tonumber(ns)
         if unit == "s" then total = total + n
         elseif unit == "m" then total = total + n * 60
         elseif unit == "h" then total = total + n * 3600
@@ -349,6 +363,15 @@ local onbmsg = function(user, command, parameters)
     local target = hub.isnickonline(target_arg)
     if not target then
         user:reply(msg_off, hub.getbot())
+        return PROCESSED
+    end
+    -- Never gag a bot (Hubbot / OpChat / RegChat). Mirrors the bot-target
+    -- guard the other user-action commands carry (cmd_redirect's msg_isbot,
+    -- cmd_disconnect's msg_bot, ...) and the HTTP path's util_http non-bot
+    -- preflight (#355). ungag is deliberately NOT guarded so a stale gag
+    -- set on a bot before this fix can still be removed.
+    if target:isbot() then
+        user:reply(msg_isbot, hub.getbot())
         return PROCESSED
     end
     local max_target_level = permission[user:level()] or 0   -- v0.09 fix: nil-safe
@@ -735,3 +758,10 @@ cleanup_expired = function()
 end
 
 hub.debug("** Loaded " .. scriptname .. " " .. scriptversion .. " **")
+
+
+-- exposed for the unit test (#355 bot-guard regression)
+return {
+    _onbmsg  = onbmsg,
+    _gag_tbl = gag_tbl,
+}
