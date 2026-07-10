@@ -2,6 +2,24 @@
 
         etc_hubcommands.lua v0.03 by blastbeat
 
+        v0.08: by Aybo
+            - #356: the bare-word "Did you mean +X?" hint now only
+              fires for a command the user is actually allowed to run.
+              Previously it fired for ANY registered command name, so a
+              normal chat line that merely starts with a privileged
+              command word (e.g. "talk to me brother", "reg me") was
+              swallowed and the existence of op-only commands leaked to
+              unprivileged users. `add` gains an optional third arg
+              `minlevel`; commands register their level (mirroring the
+              level already passed to cmd_help.reg and ucmd.add). A
+              command whose level was never registered (nil, e.g. a
+              public command or a not-yet-updated third-party plugin)
+              is treated as ungated, so the hint behaves exactly as
+              before. The literal-bracket branch (`[+!#]reg <user>
+              <pw>`) is deliberately NOT gated: it must keep swallowing
+              to prevent the #137 credential leak, and its input form
+              has no false-positive chat overlap.
+
         v0.07: by Aybo
             - alias-resolver fallback for #327. On a missed direct
               lookup the dispatcher consults etc_aliases via
@@ -61,7 +79,7 @@
 --// settings end //--
 
 local scriptname = "etc_hubcommands"
-local scriptversion = "0.07"
+local scriptversion = "0.08"
 
 local utf_match = utf.match
 local utf_format = utf.format
@@ -78,6 +96,12 @@ local msg_did_you_mean     = lang.msg_did_you_mean     or "Did you mean +%s? Hub
 local msg_literal_brackets = lang.msg_literal_brackets or "The `[+!#]` in the docs is notation for 'pick one of +, !, or #', not literal brackets. Try `+%s` (your message was NOT sent to main chat)."
 
 local commands = { }
+-- v0.08 (#356): per-command minlevel, parallel to `commands`. A nil
+-- entry means the command's level was never registered (public
+-- command, or a plugin that has not yet adopted the third `add` arg);
+-- such commands are treated as ungated by the hint (unchanged
+-- behaviour).
+local command_levels = { }
 
 -- v0.07 (#327): alias resolution. Looks up etc_aliases on every
 -- miss rather than caching, so a +reload of etc_aliases doesn't
@@ -91,30 +115,50 @@ local resolve_alias = function( name )
     return m.resolve( name )
 end
 
-local reg_cmd = function( cmd, func )
+local reg_cmd = function( cmd, func, minlevel )
     if ( type( cmd ) == "string" ) and ( type( func ) == "function" ) then
         if commands[ cmd ] then
             return false -- name is already registered
         end
         commands[ cmd ] = func
+        command_levels[ cmd ] = minlevel -- #356: nil == ungated (unchanged behaviour)
         return true
     end
     return false
 end
 
-local add = function( cmd, func ) -- quick and dirty...
+-- v0.08 (#356): optional `minlevel` records the level required to run
+-- the command, so the "Did you mean +X?" hint can be gated on access.
+-- Back-compatible: callers that omit it register an ungated command.
+local add = function( cmd, func, minlevel ) -- quick and dirty...
     if type( cmd ) == "string" then
         cmd = { cmd }
     end
     if type( cmd ) == "table" then
         for _, name in pairs( cmd ) do
-            if not reg_cmd( name, func ) then
+            if not reg_cmd( name, func, minlevel ) then
                 return false
             end
         end
         return true
     end
     return false
+end
+
+-- #356: may `user` run the command `cmd`? An unregistered level (nil)
+-- is treated as "yes" so public and not-yet-updated commands keep the
+-- pre-#356 hint behaviour. Mirrors the `user_level < minlevel` guard
+-- each command handler already performs internally. For a command
+-- whose handler gates on a permission SET (`permission[level]`) rather
+-- than a threshold, plugins register the lowest permitted level; this
+-- `>=` check may therefore over-fire the hint for a user ABOVE that
+-- floor under a non-contiguous permission config, but it never leaks
+-- to a user BELOW it - the safe direction, and strictly narrower than
+-- the bug this fixes.
+local user_may_run = function( user, cmd )
+    local lvl = command_levels[ cmd ]
+    if not lvl then return true end
+    return user:level() >= lvl
 end
 
 hub.setlistener( "onBroadcast", { },
@@ -148,7 +192,14 @@ hub.setlistener( "onBroadcast", { },
         if first_word then
             -- v0.07 (#327): hint at the real command, not the alias.
             local fw_target = commands[ first_word ] and first_word or resolve_alias( first_word )
-            if fw_target and commands[ fw_target ] then
+            -- v0.08 (#356): only hint (and swallow) when the user could
+            -- actually run the resolved command. Otherwise a normal chat
+            -- line starting with a privileged command word (e.g. "talk to
+            -- me brother") must reach main chat unmolested, and op-only
+            -- command names must not leak to unprivileged users. When the
+            -- user is not allowed, we fall through and return nil so the
+            -- broadcast proceeds as ordinary chat.
+            if fw_target and commands[ fw_target ] and user_may_run( user, fw_target ) then
                 user:reply(
                     utf_format( msg_did_you_mean, fw_target ),
                     hub_getbot( )

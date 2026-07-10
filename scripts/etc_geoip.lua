@@ -585,7 +585,7 @@ hub.setlistener( "onStart", { },
 
         local hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd_status, on_geoip ) )
+        assert( hubcmd.add( cmd_status, on_geoip, oplevel ) )
 
         -- Read-only HTTP status mirror. No write endpoint: the policy
         -- (blocked countries / ASNs) is cfg-driven, edited in cfg.tbl +

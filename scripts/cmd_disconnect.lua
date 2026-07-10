@@ -209,7 +209,7 @@ hub.setlistener( "onStart", {},
         end
         hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel ) )
         -- HTTP API endpoint (#82 Phase 2). The util_http helper
         -- does the fail-soft check, the preflight, the envelope,
         -- and the audit-log integration; this plugin only owns the

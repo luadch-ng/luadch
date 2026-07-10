@@ -175,7 +175,7 @@ hub.setlistener( "onStart", { },
         end
         local hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel ) )
         local report = hub.import( "etc_report" )
         assert( report )
         report_send = report.send

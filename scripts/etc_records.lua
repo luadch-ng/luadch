@@ -273,7 +273,7 @@ hub.setlistener( "onStart", { },
         end
         hubcmd = hub_import( "etc_hubcommands" )  -- add hubcommand
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, min_level ) )
         -- HTTP API endpoints (#82 Phase 4 PR-2). Read snapshot +
         -- admin-scoped destructive reset.
         if hub.http_register then
