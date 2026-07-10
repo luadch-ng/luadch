@@ -3385,6 +3385,43 @@ local defaults = {
         end
     },
 
+    -- etc_status_push.lua: periodic PUBLIC-status heartbeat (name / online
+    -- user count / uptime) POSTed as JSON to an external endpoint.
+    etc_status_push_activate = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_status_push_url = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    -- Secret: resolved env-var-first via core/secrets (registered by the
+    -- plugin) so GET /v1/config redacts it + PUT /v1/config/{key} refuses
+    -- it. Prefer the env var LUADCH_ETC_STATUS_PUSH_TOKEN over a plaintext
+    -- value here.
+    etc_status_push_token = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    etc_status_push_interval = { 300,
+        function( value )
+            return types_number( value, nil, true ) and value > 0
+        end
+    },
+    etc_status_push_tls_verify = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_status_push_cafile = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+
     etc_trafficmanager_permission = { {
 
         [ 0 ] = 0,
