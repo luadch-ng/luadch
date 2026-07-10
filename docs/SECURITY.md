@@ -443,6 +443,7 @@ Plugins register their own sensitive keys at `onStart`:
 local secrets = use "secrets"
 secrets.register( "etc_geoip_license_key" )
 secrets.register( "etc_proxydetect_api_key" )
+secrets.register( "etc_status_push_token" )   -- heartbeat bearer token
 ```
 
 `register()` is exposed to every plugin via `SANDBOX_GLOBALS` and
