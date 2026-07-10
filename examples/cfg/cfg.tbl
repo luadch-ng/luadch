@@ -1326,6 +1326,16 @@ return { -- the settings are a lua table, do not tough this!
     etc_regserver_announce_max_attempts = 12,  -- give up on a regserver after this many failed attempts (per regserver). 0 = retry forever. Reload re-arms. (integer >= 0)
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_status_push.lua settings | periodically PUSHES public hub status (name / online users / uptime) as JSON to an external HTTP(S) endpoint - a heartbeat for a status page, a push-uptime monitor, a dashboard, etc.
+
+    etc_status_push_activate = false,  -- opt-in. false = never sends. Set true (+ url + token below) to push a heartbeat every interval. Sends ONLY public info: hub name, online human-user count (no bots), uptime seconds. No nicks, no secrets. (boolean)
+    etc_status_push_url = "",  -- full ingest endpoint URL the heartbeat is POSTed to, e.g. "https://status.example.org/api/hub-status/ingest". The path MUST be included - nothing is appended. (string)
+    etc_status_push_token = "",  -- shared secret sent as "Authorization: Bearer <token>". PREFER the env var LUADCH_ETC_STATUS_PUSH_TOKEN over setting it here in plaintext; the value is redacted from GET /v1/config either way. Generate with e.g. `openssl rand -hex 32` and set the SAME value at the receiver. (string)
+    etc_status_push_interval = 300,  -- seconds between heartbeats. 300 (5 min) is a good default; very low values hammer the receiver (mind third-party rate limits). Missed beats are fine - the receiver detects staleness itself. (integer > 0)
+    etc_status_push_tls_verify = true,  -- verify the endpoint's TLS cert? Default true because the request carries the bearer token - it must not leak to a MITM. Verifies against http_client's bundled certs/ca-bundle.pem unless a cafile is set below. Set false only for a self-signed / local test endpoint. (boolean)
+    etc_status_push_cafile = "",  -- optional path to a CA bundle (PEM) for tls_verify. Empty = use http_client's bundled Mozilla ca-bundle.pem (covers all public CAs). (string)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_records.lua settings | this script adds and shows statistics about hubshare/usershare records
 
     etc_records_min_level = 20,  -- minlevel to show record statistic? (integer)
@@ -1602,6 +1612,7 @@ return { -- the settings are a lua table, do not tough this!
         "etc_onfailedauth.lua",  -- using report import
         { "etc_prometheus.lua", enabled = true },  -- Prometheus /metrics endpoint, API-toggleable (#261). The plugin's own etc_prometheus_activate cfg key still gates the /metrics route; flip enabled=false here OR etc_prometheus_activate=false to silence it. Placed AFTER all chat/search blocker plugins so the chat_msgs / pm_msgs / searches counters reflect DELIVERED messages, not attempts (listener-chain runs in cfg.scripts order; a blocker that returns PROCESSED short-circuits subsequent listeners).
         { "etc_regserver_announce.lua", enabled = true },  -- hublist regserver announce. Loaded but does nothing until you opt in via the "etc_regserver_announce.lua settings" block above (etc_regserver_announce_activate = true + _url). Default: private hub, never announced.
+        { "etc_status_push.lua", enabled = true },  -- public-status heartbeat push. Loaded but does nothing until you opt in via the "etc_status_push.lua settings" block above (etc_status_push_activate = true + _url + _token). Default: never sends.
         --------------------------------------
         --// add here your additional scripts
 

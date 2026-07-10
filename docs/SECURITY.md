@@ -268,6 +268,45 @@ private host where the disk-level threat model is "if my disk
 leaves my house I have bigger problems": `false` is reasonable. The
 hub does not assume which one applies.
 
+### Password disclosure in command replies ([#95](https://github.com/luadch-ng/luadch/issues/95))
+
+The same cleartext-equivalent password the hub must hold for the ADC
+`BASE` challenge (F-AUTH-1, above) used to be echoed back over the
+chat / PM channel by four admin commands. On a plain-ADC listener that
+exposes the value on the wire; even on TLS it lands in the client's
+local chat log (DC++ keeps one by default).
+
+**Redacted (PR [#119](https://github.com/luadch-ng/luadch/pull/119)):**
+
+- `+accinfo` and `+usersearch` show `<REDACTED>` in the password
+  column of every output format (the pre-existing permission gate is
+  unchanged: a denied row still shows `<Not allowed to view>`).
+- `+setpass` no longer echoes the new password back to the **caller**
+  (who typed it, or is the target). The **target** of an admin
+  `+setpass nick <NICK> <PASS>` still receives it via PM - they need
+  it to log in.
+
+**`+reg` auto-generated password: delivered by design, not a defect.**
+`+reg` generates the password with `util.generatepass()` and it must
+reach the new user for their first login. In a base DC hub the only
+in-hub channel is a private message, so `+reg` PMs the value to the
+new user (when online) and to the registering admin. The admin copy
+is **required** for the offline-target case: if the registered nick is
+not connected, the admin is the only party who receives the password
+and conveys it out of band - dropping it would leave a freshly
+registered user unable to log in. This is a directed disclosure to the
+two parties who need the value, not a broadcast; the opchat reg-report
+(`report.send`) never contains the password. The residual exposure
+(the value sits in the admin's and the new user's local client logs)
+is inherent to password-based ADC registration without an external
+side channel, and is mitigated by the at-rest encryption above plus
+the `cmd.log` redaction from
+[#96](https://github.com/luadch-ng/luadch/issues/96). A leak-free
+delivery (SMTP invite via [#100](https://github.com/luadch-ng/luadch/issues/100),
+or a first-login token flow) is a Phase 8+ candidate that depends on
+infrastructure luadch does not yet ship; until then the chat-delivery
+behaviour is retained deliberately.
+
 ---
 
 ## 4. File-permission baseline
@@ -404,6 +443,7 @@ Plugins register their own sensitive keys at `onStart`:
 local secrets = use "secrets"
 secrets.register( "etc_geoip_license_key" )
 secrets.register( "etc_proxydetect_api_key" )
+secrets.register( "etc_status_push_token" )   -- heartbeat bearer token
 ```
 
 `register()` is exposed to every plugin via `SANDBOX_GLOBALS` and

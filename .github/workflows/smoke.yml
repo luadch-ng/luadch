@@ -219,6 +219,13 @@ jobs:
       - name: Run etc_proxydetect unit test
         run: lua5.4 tests/unit/etc_proxydetect_test.lua
 
+      # etc_status_push: the public-status heartbeat. Stubbed hub / cfg /
+      # secrets / signal / http_client verify the POST shape (Bearer token
+      # + JSON {name,users,uptime}), the interval throttle + in_flight
+      # guard, and the inert paths (no token / url / http_client).
+      - name: Run etc_status_push unit test
+        run: lua5.4 tests/unit/etc_status_push_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -407,6 +414,11 @@ jobs:
       - name: Run etc_proxydetect unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_proxydetect_test.lua
+
+      # public-status heartbeat (see Linux job note).
+      - name: Run etc_status_push unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_status_push_test.lua
 
       - name: Configure
         shell: msys2 {0}

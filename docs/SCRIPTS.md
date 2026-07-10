@@ -729,6 +729,40 @@ env var), `etc_proxydetect_action`, `etc_proxydetect_block_types`,
 `etc_proxydetect_oplevel`, `etc_proxydetect_report[_hubbot|_opchat]`,
 `etc_proxydetect_llevel`. See [`BLOCKLIST.md`](BLOCKLIST.md) for the table.
 
+### etc_status_push
+
+Periodically PUSHES the hub's PUBLIC status to an external HTTP(S)
+endpoint - a heartbeat. Generic: any consumer that accepts a JSON POST
+works (an external status page, a push-uptime monitor such as
+healthchecks.io / Uptime Kuma / Better Uptime, a self-hosted dashboard,
+an automation webhook, a multi-hub status aggregator).
+
+Unlike `etc_regserver_announce` (register once, then quiet) this is an
+unconditional heartbeat: it POSTs every `etc_status_push_interval`
+seconds (default 300) so the receiver gets evenly-spaced samples for a
+graph and detects staleness itself. No login/logout trigger, no
+give-up logic - a missed beat is fine. Complements `etc_prometheus`:
+that is a PULL model (a scraper GETs `/metrics`, inbound); this is
+PUSH (the hub dials out), which needs no inbound exposure and works
+behind NAT.
+
+Only PUBLIC fields are sent - never a nick, secret, or internal state.
+The fixed JSON body is `{ "name": <hub name>, "users": <online humans,
+no bots>, "uptime": <seconds since start> }`; the hub sends no
+timestamp (the receiver stamps arrival). The request carries an
+`Authorization: Bearer <token>` header over TLS (`verify=peer` by
+default, since the token must not leak). Transport is the non-blocking
+`core/http_client`.
+
+**Off by default** (`etc_status_push_activate = false`); with no url or
+no token it stays inert. The token is read env-var-first via
+`core/secrets` and is redacted from `GET /v1/config`.
+
+**Config keys:** `etc_status_push_activate`, `etc_status_push_url`,
+`etc_status_push_token` (prefer the `LUADCH_ETC_STATUS_PUSH_TOKEN` env
+var), `etc_status_push_interval`, `etc_status_push_tls_verify`,
+`etc_status_push_cafile`.
+
 ### etc_clientblocker
 
 Block clients by Lua-pattern match against the BINF `AP+VE` field
