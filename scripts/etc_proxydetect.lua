@@ -874,7 +874,7 @@ hub.setlistener( "onStart", { },
 
         local hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd_status, on_proxydetect ) )
+        assert( hubcmd.add( cmd_status, on_proxydetect, oplevel ) )
 
         -- Read-only HTTP status mirror. No write endpoint: the policy is
         -- cfg-driven (edit cfg.tbl + reload), not a mutable store. Raw

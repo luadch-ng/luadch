@@ -571,9 +571,9 @@ hub.setlistener( "onStart", { },
 
         local hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd_add,  on_addblocker ) )
-        assert( hubcmd.add( cmd_del,  on_delblocker ) )
-        assert( hubcmd.add( cmd_list, on_listblocker ) )
+        assert( hubcmd.add( cmd_add,  on_addblocker, oplevel ) )
+        assert( hubcmd.add( cmd_del,  on_delblocker, oplevel ) )
+        assert( hubcmd.add( cmd_list, on_listblocker, oplevel ) )
 
         --// HTTP API endpoints (#81, raw hub.http_register because
         --// the resource key is a pattern string, not a SID).

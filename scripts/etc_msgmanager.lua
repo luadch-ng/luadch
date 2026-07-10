@@ -672,7 +672,7 @@ hub.setlistener( "onStart", {},
         end
         local hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, oplevel ) )
         -- HTTP API endpoints (#82 Phase 4 PR-5). Only registered
         -- when the plugin is `activate=true` (early-return at top
         -- of file already short-circuits the entire module otherwise,

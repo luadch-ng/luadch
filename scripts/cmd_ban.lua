@@ -1190,7 +1190,7 @@ hub.setlistener( "onStart", {},
         end
         hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
-        assert(  hubcmd.add( cmd, onbmsg ) )
+        assert(  hubcmd.add( cmd, onbmsg, minlevel ) )
 
         -- HTTP API endpoints (#82 Phase 2 PR-4). The ADC chat-cmds
         -- (`+ban`, `+unban`) above are unchanged - this is a

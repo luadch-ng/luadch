@@ -459,9 +459,9 @@ hub.setlistener( "onStart", { },
 
         local hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd_add,  on_addalias ) )
-        assert( hubcmd.add( cmd_del,  on_delalias ) )
-        assert( hubcmd.add( cmd_list, on_listalias ) )
+        assert( hubcmd.add( cmd_add,  on_addalias, minlevel ) )
+        assert( hubcmd.add( cmd_del,  on_delalias, minlevel ) )
+        assert( hubcmd.add( cmd_list, on_listalias, minlevel ) )
 
         --// HTTP API endpoints (#327, raw hub.http_register because
         --// this is a global config resource, not SID-scoped).

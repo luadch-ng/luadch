@@ -970,7 +970,7 @@ hub.setlistener( "onStart", { },
 
         local hubcmd = hub_import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd_main, on_blocklist ) )
+        assert( hubcmd.add( cmd_main, on_blocklist, oplevel ) )
 
         -- #78 Phase C HTTP API. Raw hub.http_register (target is
         -- CIDR / id, not SID; util_http.http_register_user_action

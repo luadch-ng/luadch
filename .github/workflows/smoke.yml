@@ -132,6 +132,13 @@ jobs:
       - name: Run cmd_gag bot-guard unit test
         run: lua5.4 tests/unit/cmd_gag_bot_test.lua
 
+      # #356 etc_hubcommands: the bare-word "Did you mean +X?" hint must
+      # only fire for a command the user may run (no chat-swallow / no
+      # op-command-name leak to unprivileged users); the literal-bracket
+      # branch stays ungated so it keeps swallowing (#137 cred leak).
+      - name: Run etc_hubcommands unit test
+        run: lua5.4 tests/unit/etc_hubcommands_test.lua
+
       # #84 audit: event-shape contract + actor / target snapshot +
       # reason / meta normalization. Pure helper, no hub state needed.
       - name: Run audit unit test
@@ -343,6 +350,10 @@ jobs:
       - name: Run cmd_gag bot-guard unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/cmd_gag_bot_test.lua
+
+      - name: Run etc_hubcommands unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_hubcommands_test.lua
 
       - name: Run audit unit test
         shell: msys2 {0}

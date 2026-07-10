@@ -295,7 +295,7 @@ hub.setlistener( "onStart", {},
         end
         local hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, minlevel ) )
         -- HTTP API endpoints (#82 Phase 4 PR-4).
         if hub.http_register then
             hub.http_register( "GET", "/v1/runtime", "read", http_handler_get_runtime, {

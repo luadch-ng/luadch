@@ -346,7 +346,7 @@ hub.setlistener( "onStart", { },
         end
         hubcmd = hub.import "etc_hubcommands"  -- add hubcommand
         assert( hubcmd )
-        assert( hubcmd.add( cmd, onbmsg ) )
+        assert( hubcmd.add( cmd, onbmsg, min_level ) )
         -- HTTP API endpoint (#82 Phase 4 PR-1). Read-only; `read`
         -- scope per spec §10.2.
         if hub.http_register then

@@ -227,7 +227,7 @@ hub.setlistener( "onStart", { },
         end
         hubcmd = hub_import( "etc_hubcommands" )    -- add hubcommand
         assert( hubcmd )
-        assert( hubcmd.add( cmd, ontopic ) )
+        assert( hubcmd.add( cmd, ontopic, minlevel ) )
         -- HTTP API endpoint (#82). Coexists with the ADC `+topic`
         -- chat-cmd above. Raw hub.http_register (not util_http)
         -- because this is a hub-control endpoint with no SID target.
