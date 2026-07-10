@@ -353,7 +353,16 @@ _identify = {
                 -- address (DDoS-amplification, see issue body). Stamp
                 -- the authenticated TCP-source IP over the lie so the
                 -- broadcast INF carries `userip`, not the claim.
-                adccmd:setnp( userfam, userip )
+                -- v3.1.12: this branch used the master-line variable
+                -- name `userfam`, which does not exist in the 3.1.x
+                -- scope (this function's family variable is `ipver`,
+                -- see line ~341). Under the restricted core env the
+                -- undeclared read raised "attempt to read undeclared
+                -- var: 'userfam'" in `incoming` for every mismatched-IP
+                -- user with kill_wrong_ips=false, so the opt-out never
+                -- stamped the real IP. Partial-rename backport slip;
+                -- master is unaffected (uses `userfam` throughout).
+                adccmd:setnp( ipver, userip )
             end
         end
         if cid ~= adclib_hash( pid ) then

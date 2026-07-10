@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The upstream project (`luadch/luadch`) is a separate codebase; its release
 history is at https://github.com/luadch/luadch/releases.
 
+## [v3.1.12] - 2026-07-10
+
+Maintenance patch release on the `release/3.1.x` line. One bugfix for a backport slip introduced in v3.1.10. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.11.
+
+### Bugfixes
+
+- [#393](https://github.com/luadch-ng/luadch/issues/393) (Sopor) - **the `kill_wrong_ips = false` opt-out raised `attempt to read undeclared var: 'userfam'` in `incoming` and never stamped the real IP.** The [#214](https://github.com/luadch-ng/luadch/issues/214) Gap 2 backport in v3.1.10 stamps the verified IP over a mismatched claim via `adccmd:setnp( userfam, userip )` - but `userfam` is the *master* line's variable name; the 3.1.x `incoming` function calls its address-family variable `ipver` (declared at the top of the function, used correctly by the first `setnp` on the no-IP path ~15 lines above). Under the restricted core env the undeclared `userfam` read raised a Lua error in `hub.lua: function 'incoming'` for every user whose claimed INF IP differed from their authenticated TCP-source IP while `kill_wrong_ips = false` was set - so the NAT/CGNAT opt-out never stamped the real IP and the affected user (typically the very NAT/CGNAT client the opt-out exists to admit) could not complete login. Fix: use the in-scope `ipver` at that call site, matching the sibling `setnp`. Default `kill_wrong_ips = true` deployments are unaffected (they take the kill branch, never the stamp branch). Master is unaffected - it uses `userfam` consistently throughout its (renamed) `incoming`; this was a partial-rename slip in the v3.1.10 cherry-pick only, so the fix is applied directly on `release/3.1.x` (nothing to cherry-pick from master). The one-token fix is self-evident (the unpatched `userfam` is undeclared in the entire function and can only error; `ipver` is the family variable used identically on the no-IP path). The kill_wrong_ips=false stamp path had no smoke coverage, which is how the slip shipped in v3.1.10; a behavioural regression test needs a kill_wrong_ips=false hub config and is tracked as a follow-up.
+
+### Notes
+
+- **No breaking changes, no cfg / lang-file edits required.** Drop-in upgrade from v3.1.11.
+- **Affects only deployments that set `kill_wrong_ips = false`** (not the default `true`). Those operators - typically running the opt-out specifically to admit NAT / CGNAT users - should upgrade: the bug defeats exactly that opt-out.
+
+[v3.1.12]: https://github.com/luadch-ng/luadch/releases/tag/v3.1.12
+
+
 ## [v3.1.11] - 2026-06-07
 
 Maintenance patch release on the `release/3.1.x` line. One privilege-escalation bugfix cherry-picked from master. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.10.
