@@ -34,6 +34,7 @@ local _real = {
     string   = string,
     table    = table,
     os       = os,
+    pcall    = pcall,
     cfg      = {
         get = function( key )
             return _cfg_store[ key ]

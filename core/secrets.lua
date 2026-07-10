@@ -53,6 +53,7 @@ local tostring    = use "tostring"
 local string      = use "string"
 local table       = use "table"
 local os          = use "os"
+local pcall       = use "pcall"
 
 local _registry = { }
 
