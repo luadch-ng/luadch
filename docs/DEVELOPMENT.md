@@ -139,13 +139,17 @@ The conventions below are either not in it or are easy to get wrong:
 - **API keys / secrets: env-var-first via `core/secrets.lua`.** Read a key with
   `secrets.lookup("cfg_key")` (checks `LUADCH_CFG_KEY` env first, then `cfg.tbl`)
   and call `secrets.register("cfg_key")` in `onStart` so `GET /v1/config` redacts
-  it. Two gotchas: redaction is active only once the plugin is *loaded* (a key
-  sat in `cfg.tbl` before the plugin is enabled in `cfg.scripts` is NOT redacted,
-  and `/v1/config` is `read`-scoped) - so document "prefer the env var" (never
-  dumped); and there is no `+showcfg` command today, only `GET /v1/config`
-  redacts, so do not claim otherwise. Send the key in a request HEADER, never a
-  URL query param (`http_client` logs the URL on failure, never the headers).
-  Precedent: `etc_blocklist_feeds` (AbuseIPDB key).
+  it. Three gotchas: (1) redaction is active only once the plugin is *loaded* (a
+  key sat in `cfg.tbl` before the plugin is enabled in `cfg.scripts` is NOT
+  redacted, and `/v1/config` is `read`-scoped) - so document "prefer the env var"
+  (never dumped); (2) call `secrets.register` at the TOP of `onStart`, BEFORE any
+  `activate` / `enabled` early-return - registering it after the gate leaves a
+  cfg.tbl-stored key un-redacted while the plugin is loaded-but-inactive (the
+  `#395` review catch; `lookup` can stay at the point of use); (3) there is no
+  `+showcfg` command today, only `GET /v1/config` redacts, so do not claim
+  otherwise. Send the key in a request HEADER, never a URL query param
+  (`http_client` logs the URL on failure, never the headers). Precedents:
+  `etc_blocklist_feeds` (AbuseIPDB key), `etc_status_push` (heartbeat bearer token).
 - **`scriptversion` bump on any semantic change** (behaviour, cfg keys, wire
   surface) - the companion `luadch-ng/scripts` repo syncs by version.
 - **Config defaults + validator go in `core/cfg_defaults.lua`.** Add the key
