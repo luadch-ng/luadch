@@ -133,7 +133,7 @@ order (its inline comments explain each ordering constraint).
 | Network + ADC | `server`, `iostream`, `adc`, `hub`, `hub_dispatch`, `hub_user_object`, `hub_bot_object`, `hbri`, `ratelimit`, `blocklist`, `ipmatch` | select() loop + SSL; framing pipeline; ADC parse/escape/format; main loop + login; command dispatch; user/bot objects; dual-stack secondary-IP verification; DoS limits; pre-handshake IP/CIDR blocklist; IP/CIDR primitives |
 | HTTP API | `http`, `http_router`, `http_client`, `http_filter`, `http_events`, `util_http` | Inbound HTTP/JSON API + router + auth; non-blocking OUTBOUND client; filter/sort/paginate helper; deferred-event endpoints; plugin endpoint helper |
 | Crypto + boot trust | `sha256`, `cert_bootstrap`, `cacert_bootstrap` | Pure-Lua SHA-256; first-boot TLS-cert auto-gen (#77); CA-bundle reconciliation |
-| Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `bloom`, `doc` (disabled), `hci` (stub) | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader; bloom filter; dormant |
+| Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `bloom`, `ensuredirs`, `doc` (disabled), `hci` (stub) | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader; bloom filter; boot-time runtime-dir self-heal; dormant |
 
 Two hard ceilings (both enforced by review, not tooling):
 
@@ -238,14 +238,20 @@ Shipped feature arcs so far (closed trackers, details in the issues): HTTP
 API #82, audit log #84, real HBRI #214, registered-users API family #236,
 subsystem managers #249, client blocker #81, aliases #327.
 
-**In flight (status 2026-07-06 - the tracker is the source of truth):**
-unified blocklist arc [#78](https://github.com/luadch-ng/luadch/issues/78) -
-Precursors + Phases A/B/C/D + Precursor 0a (`http_client` stream-to-disk) +
-Precursor E0 (`blocklist.bulk_replace`) + Phase E1
-(`scripts/etc_blocklist_feeds.lua`: Tor + Spamhaus) merged; Phase E2
-(same plugin: AbuseIPDB + generic adapters, closes #79) in review.
-**Phase E is content-complete**; Phase F (`scripts/etc_proxydetect.lua`,
-live proxy/VPN detection, closes #352) is the arc's last remaining phase.
+**Unified blocklist arc [#78](https://github.com/luadch-ng/luadch/issues/78)
+COMPLETE + on master (2026-07-10); #78 + #79 + #352 closed.** All precursors
++ Phases A-F + D3 in-hub GeoIP auto-update shipped (`core/blocklist`,
+`ipmatch`, `mmdb`, `geoip_update`; plugins `etc_blocklist`, `etc_geoip`,
+`etc_blocklist_feeds`, `etc_proxydetect`). Post-arc testhub-gap follow-ups:
+`http_client` opt-in redirect following (#383, MaxMind download 302s
+cross-host to a signed CDN URL), boot-time runtime-dir self-heal
+(`core/ensuredirs.lua` + a `makedir` C primitive #382, #384) with a daemon
+`umask(027)` hardening, and an `etc_blocklist_feeds` reload-throttle (#386).
+
+**Current era: bug-issue triage** - working the `gh issue list --label bug`
+backlog one at a time (each: deep-dive from source per §1a.3/4, since many
+are old-version reports asking "fixed in 3.x?"). GitFlow A per fix; batch
+dev->master as a MERGE commit (never squash - see §8 branch hygiene).
 
 **HTTP-endpoint authoring** (which helper for which endpoint shape, envelope
 contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and
