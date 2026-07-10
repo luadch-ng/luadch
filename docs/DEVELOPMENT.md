@@ -215,8 +215,19 @@ lua5.4 tests/unit/yourmodule_test.lua      # exit 0 = pass, 1 = fail
 
 **Register every new unit test in `.github/workflows/smoke.yml` on BOTH legs**
 - the Linux job runs `lua5.4 tests/unit/X_test.lua`, the Windows job runs the
-same under `shell: msys2 {0}` with `lua`. An unregistered test is silent
+same under `shell: msys2 {0}` with `lua5.4`. An unregistered test is silent
 non-coverage.
+
+**Run under the hub's Lua (5.4.x), never a newer one.** The hub bundles + runs
+Lua 5.4.8, so the tests must too. The Windows leg installs the *versioned*
+`mingw-w64-ucrt-x86_64-lua54` package (Lua 5.4.8, binary `lua5.4`), NOT the
+unversioned `...-lua` - which rolling-release msys2 bumped to Lua 5.5, where
+generic-for control variables are `const` (`for x,.. do x = ... end` fails to
+even parse) and other 5.4-valid code breaks. Symptom of a re-drift: a
+Windows-only unit-test failure (`attempt to assign to const variable`) that
+passes on Linux + locally. Don't "fix" the code to satisfy a newer Lua - pin
+the CI back to 5.4.x. (Local dev uses a standalone Lua 5.4.8 = the same
+version.)
 
 ### Restricted-env load check for a plugin
 
@@ -333,6 +344,16 @@ crash / hang / OOM takes down the single-threaded hub. Required:
   and bypasses the ADC hierarchy guard by design - the token IS the trust
   surface. Document it at the call site; never treat a token request as a
   lower-privilege actor.
+- **A user-action command must reject a bot target (#355).** Any ADC command
+  that resolves an online target and does something disruptive (gag / kick /
+  ban / disconnect / redirect / nick or level change / setpass) must guard
+  `if target:isbot() then user:reply(msg_isbot, hub.getbot()); return PROCESSED end`
+  (`msg_isbot = "User is a bot."`). ~10 commands already do; the HTTP path is
+  covered automatically by `util_http.http_register_user_action`'s non-bot
+  preflight. NOTE: login/connect-time enforcers (`usr_*`, `hub_inf_manager`)
+  need NO such guard - bots never fire `onLogin`/`onConnect`/`onInf`, and
+  `hub.getusers()` returns humans-only first, so they are structurally
+  bot-unreachable.
 
 ### Fail-safe checklist
 
