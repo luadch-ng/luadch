@@ -94,10 +94,19 @@ local lookup = function( cfg_key )
 
     -- 2. cfg.tbl fallback (bare-metal friendly; chmod 600 by Phase
     -- 7c hardening).
+    --
+    -- cfg.get RAISES on a key that is in neither cfg_defaults nor
+    -- cfg.tbl (it indexes the nil default entry, cfg.lua get()). That
+    -- path is reachable for dynamically-named secret keys - e.g. the
+    -- etc_webhook plugin resolves a per-endpoint
+    -- `etc_webhook_<name>_secret` that need not be a cfg_defaults key.
+    -- pcall-guard so an unknown key degrades to "unset" (nil) instead
+    -- of taking down the caller's onStart; a genuine cfg.tbl value
+    -- still returns normally.
     local cfg_mod = use "cfg"
     if cfg_mod and type( cfg_mod.get ) == "function" then
-        local v = cfg_mod.get( cfg_key )
-        if type( v ) == "string" and v ~= "" then
+        local ok, v = pcall( cfg_mod.get, cfg_key )
+        if ok and type( v ) == "string" and v ~= "" then
             return v
         end
     end
