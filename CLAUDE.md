@@ -79,7 +79,7 @@ luadch is a DC++ **ADC** hub server written in Lua with a thin C launcher
 
 - **Current source version:** `v3.2.0-dev` on `master`, `PROGRAM_NAME = "Luadch-NG"`
   (see `core/const.lua`). The 3.1.x maintenance line keeps `PROGRAM_NAME = "Luadch"`.
-- **Latest release:** `v3.1.9` (2026-05-13, on `release/3.1.x`)
+- **Latest release:** `v3.1.12` (2026-07-10, on `release/3.1.x`)
 - **Status:** the Phase 1-7 modernisation programme is content-complete; work is now
   3.2.x feature development (Phase 8+) plus 3.1.x security-only maintenance (see §8).
 - **Open issues:** check `gh issue list --repo luadch-ng/luadch` (never trust a
@@ -275,7 +275,7 @@ contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and
   **this file**, not in memory, because they belong with the code. Durable
   engineering patterns belong in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) so
   they reach every assistant and contributor, not just one memory owner.
-- **Releases** — this fork's latest release is `v3.1.9` (see §2 and §8); UPSTREAM
+- **Releases** — this fork's latest release is `v3.1.12` (see §2 and §8); UPSTREAM
   `luadch/luadch` last released v2.23 back in 2022-04-02 (see Upstream policy below).
 
 ### Upstream policy
@@ -325,7 +325,7 @@ open a fresh issue here that references the upstream one in its body.
   source of truth (`wc -l`, `gh issue list`, CI) instead. Two exemptions, because
   they do NOT drift: (a) frozen historical facts about a CLOSED phase (e.g. "24
   findings / 22 closed" in the §5 table); (b) release/version/"verified-on"
-  markers (e.g. "latest release v3.1.9", the deps-table verified date). A live
+  markers (e.g. "latest release v3.1.12", the deps-table verified date). A live
   status line (like §5 "In flight") must name the tracker as its source of truth.
 
 ### Tooling gotchas (these have already burned us)
