@@ -127,6 +127,11 @@ jobs:
       - name: Run etc_aliases unit test
         run: lua5.4 tests/unit/etc_aliases_test.lua
 
+      # #355 cmd_gag: the ADC +gag path must reject a bot target
+      # (regression - bot-guard mirrors the other user-action commands).
+      - name: Run cmd_gag bot-guard unit test
+        run: lua5.4 tests/unit/cmd_gag_bot_test.lua
+
       # #84 audit: event-shape contract + actor / target snapshot +
       # reason / meta normalization. Pure helper, no hub state needed.
       - name: Run audit unit test
@@ -325,6 +330,10 @@ jobs:
       - name: Run etc_aliases unit test
         shell: msys2 {0}
         run: lua tests/unit/etc_aliases_test.lua
+
+      - name: Run cmd_gag bot-guard unit test
+        shell: msys2 {0}
+        run: lua tests/unit/cmd_gag_bot_test.lua
 
       - name: Run audit unit test
         shell: msys2 {0}

@@ -27,6 +27,7 @@ Shadowmuted users: (%s)
     msg_expired = "[ GAG ]--> User:  %s  restriction (%s) auto-expired.",
     msg_error_in = "User already gagged, remove his restrictions before adding another one.",
     msg_error_out = "User %s has no restriction set.",
+    msg_isbot = "User is a bot.",
     msg_user_restriction_added = "You were gagged with mode: %s",
     msg_user_restriction_removed = "Your chat restrictions were removed.",
 
