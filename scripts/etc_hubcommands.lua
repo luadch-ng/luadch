@@ -2,6 +2,23 @@
 
         etc_hubcommands.lua v0.03 by blastbeat
 
+        v0.09: by Aybo
+            - #356 follow-up: the bare-word "Did you mean +X?" hint now
+              fires ONLY when the message is EXACTLY a command word
+              ("talk"), no longer for "command word + trailing text"
+              ("talk to me brother"). A lone command word is a genuine
+              forgot-the-prefix attempt; a command word followed by text
+              is almost always ordinary chat, and matching it produced
+              constant false-positive swallows (an op in chat mode
+              writes "talk to me brother" and it got eaten). Exception:
+              a command that carries a secret inline (registered with
+              `{ secret = true }` - only cmd_setpass today) is still
+              caught in its "cmd <args>" form and swallowed regardless
+              of level, so a forgot-the-prefix `setpass nick x <pw>`
+              never broadcasts the password to main chat (same intent
+              as the #137 literal-bracket guard). The #356 access-level
+              gate still applies to the exact-word case.
+
         v0.08: by Aybo
             - #356: the bare-word "Did you mean +X?" hint now only
               fires for a command the user is actually allowed to run.
@@ -79,7 +96,7 @@
 --// settings end //--
 
 local scriptname = "etc_hubcommands"
-local scriptversion = "0.08"
+local scriptversion = "0.09"
 
 local utf_match = utf.match
 local utf_format = utf.format
@@ -102,6 +119,11 @@ local commands = { }
 -- such commands are treated as ungated by the hint (unchanged
 -- behaviour).
 local command_levels = { }
+-- v0.09 (#356 f/u): commands that carry a secret inline (e.g. setpass's
+-- `<PASS>`), registered with `add( cmd, func, minlevel, { secret = true } )`.
+-- Their "cmd <args>" forgot-prefix form is still swallowed (regardless of
+-- level) so a mistyped password never broadcasts to main chat.
+local command_secret = { }
 
 -- v0.07 (#327): alias resolution. Looks up etc_aliases on every
 -- miss rather than caching, so a +reload of etc_aliases doesn't
@@ -115,13 +137,14 @@ local resolve_alias = function( name )
     return m.resolve( name )
 end
 
-local reg_cmd = function( cmd, func, minlevel )
+local reg_cmd = function( cmd, func, minlevel, is_secret )
     if ( type( cmd ) == "string" ) and ( type( func ) == "function" ) then
         if commands[ cmd ] then
             return false -- name is already registered
         end
         commands[ cmd ] = func
         command_levels[ cmd ] = minlevel -- #356: nil == ungated (unchanged behaviour)
+        command_secret[ cmd ] = is_secret or nil -- #356 f/u: carries an inline secret
         return true
     end
     return false
@@ -129,14 +152,18 @@ end
 
 -- v0.08 (#356): optional `minlevel` records the level required to run
 -- the command, so the "Did you mean +X?" hint can be gated on access.
--- Back-compatible: callers that omit it register an ungated command.
-local add = function( cmd, func, minlevel ) -- quick and dirty...
+-- v0.09 (#356 f/u): optional `opts.secret` marks a command that carries
+-- a secret inline (setpass) so its "cmd <args>" forgot-prefix form keeps
+-- being swallowed. Back-compatible: callers that omit either register an
+-- ungated, non-secret command.
+local add = function( cmd, func, minlevel, opts ) -- quick and dirty...
+    local is_secret = opts and opts.secret and true or nil
     if type( cmd ) == "string" then
         cmd = { cmd }
     end
     if type( cmd ) == "table" then
         for _, name in pairs( cmd ) do
-            if not reg_cmd( name, func, minlevel ) then
+            if not reg_cmd( name, func, minlevel, is_secret ) then
                 return false
             end
         end
@@ -182,29 +209,41 @@ hub.setlistener( "onBroadcast", { },
             user:reply( utf_format( msg_command_echo, txt ), hub_getbot( ) )
             return func( user, effective_cmd, parameters, txt )
         end
-        -- Closes upstream luadch/luadch#223: catch the common "forgot
-        -- the [+!#] prefix" mistake. If the message starts with a
-        -- known command name as a whole word and is the entire line
-        -- or "cmd args" (no period / question mark / etc - so not
-        -- mid-sentence chat), swallow the broadcast and remind the
-        -- operator. Conservative match: only `^cmd$` or `^cmd <args>$`.
-        local first_word = utf_match( txt, "^(%a+)$" ) or utf_match( txt, "^(%a+) " )
-        if first_word then
+        -- Closes upstream luadch/luadch#223 (+ #356 and its follow-up):
+        -- catch the "forgot the [+!#] prefix" mistake. Trigger ONLY when
+        -- the message is EXACTLY a command word ("talk"). A lone command
+        -- word is a genuine forgot-the-prefix attempt (nobody types it as
+        -- chat); a command word FOLLOWED by text ("talk to me brother")
+        -- is ordinary chat and must reach main unmolested - the old
+        -- "cmd <args>" match ate normal chat lines (#356 f/u). Exception:
+        -- a command that carries a secret inline (registered with
+        -- { secret = true }, e.g. setpass) is still caught in its
+        -- "cmd <args>" form so a mistyped password does not broadcast.
+        local exact_word  = utf_match( txt, "^(%a+)$" )
+        local secret_word = ( not exact_word ) and utf_match( txt, "^(%a+) " ) or nil
+        local candidate   = exact_word or secret_word
+        if candidate then
             -- v0.07 (#327): hint at the real command, not the alias.
-            local fw_target = commands[ first_word ] and first_word or resolve_alias( first_word )
-            -- v0.08 (#356): only hint (and swallow) when the user could
-            -- actually run the resolved command. Otherwise a normal chat
-            -- line starting with a privileged command word (e.g. "talk to
-            -- me brother") must reach main chat unmolested, and op-only
-            -- command names must not leak to unprivileged users. When the
-            -- user is not allowed, we fall through and return nil so the
-            -- broadcast proceeds as ordinary chat.
-            if fw_target and commands[ fw_target ] and user_may_run( user, fw_target ) then
-                user:reply(
-                    utf_format( msg_did_you_mean, fw_target ),
-                    hub_getbot( )
-                )
-                return PROCESSED
+            local fw_target = commands[ candidate ] and candidate or resolve_alias( candidate )
+            if fw_target and commands[ fw_target ] then
+                -- exact word: gate on access (#356) so op-only command
+                -- names do not leak to unprivileged users. Secret command
+                -- in "cmd <args>" form: swallow regardless of level, like
+                -- the #137 literal-bracket guard below - the point is to
+                -- stop the credential broadcast, not to teach the prefix.
+                local fire
+                if exact_word then
+                    fire = user_may_run( user, fw_target )
+                elseif command_secret[ fw_target ] then
+                    fire = true
+                end
+                if fire then
+                    user:reply(
+                        utf_format( msg_did_you_mean, fw_target ),
+                        hub_getbot( )
+                    )
+                    return PROCESSED
+                end
             end
         end
         -- Closes luadch-ng/luadch#137 (Sopor): catch the "literal
