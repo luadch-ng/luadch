@@ -368,6 +368,18 @@ wrapserver = function( listeners, socket, serverip, serverport, pattern, sslctx,
         local client, err = accept( socket )    -- try to accept
         if client then
             local clientip, clientport = client:getpeername( )
+            -- A peer that reset the connection between accept() and here
+            -- leaves getpeername() returning nil (remote-triggerable).
+            -- We cannot rate-limit an unknown IP and the socket is
+            -- already dead; drop it before ratelimit_accept_ip rather
+            -- than passing nil in - a nil there raised inside the accept
+            -- loop and took the whole listener down (no new connections
+            -- could be accepted; Sopor, 3.1.11).
+            if not clientip then
+                out_put( "server.lua: function 'wrapserver': accepted socket with no peer address (reset before getpeername), closing" )
+                client:close( )
+                return false
+            end
             -- Phase 7c F-NET-1: per-IP parallel-socket cap and per-IP
             -- accept-rate cap. Refuse pre-wrap so the offending IP cannot
             -- consume FDs / slot-list entries.
