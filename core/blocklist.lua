@@ -463,6 +463,12 @@ local _resolve_decision
 
 local function check_ip( ip )
     if not _enabled then return false end
+    -- Defence in depth: a nil peer IP (getpeername raced with a reset)
+    -- cannot match any rule. Explicit guard mirroring ratelimit.accept_ip
+    -- for a consistent contract at the accept-time entry points
+    -- (_resolve_decision already type-guards nil, so this is intent, not
+    -- a crash fix on its own).
+    if not ip then return false end
     if not next( _entries ) then return false end
 
     local entry = _resolve_decision( ip )
