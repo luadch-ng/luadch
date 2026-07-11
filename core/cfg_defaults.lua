@@ -4463,9 +4463,12 @@ local defaults = {
     --
     -- The practical effect of the strict default was kicking users
     -- with legitimate IP mismatches (VPN clients with stale cached
-    -- IPs, CGNAT users with manual WAN-IP misconfiguration, dual-
+    -- IPs, clients hand-set with the wrong External / WAN IP, dual-
     -- stack users where the kernel picked a different outbound family
-    -- than the user's configured advertise). Per-IP rate limits, GeoIP
+    -- than the user's configured advertise). The gate only concerns
+    -- this advertised-vs-source mismatch, and is unrelated to how the
+    -- hub blocks users (e.g. the Traffic Manager, which on 3.x decides
+    -- on level / share / account-nick, not IP). Per-IP rate limits, GeoIP
     -- rules, abuse logs, and the unified blocklist all operate on the
     -- TCP source IP anyway, so the gate is purely defence-in-depth -
     -- and post-Gap-2 there is nothing left to depend on.
