@@ -1,6 +1,6 @@
-# Luadch v3.1.12
+# Luadch v3.1.13
 
-**Maintenance patch release** on the `release/3.1.x` line. One bugfix for a backport slip introduced in v3.1.10. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.11.
+**Security maintenance patch** on the `release/3.1.x` line. One fix: a remote, unauthenticated hub-crash. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.12.
 
 ## ⚠️ Before upgrading
 
@@ -12,34 +12,49 @@ tar -czf "luadch-backup-$(date +%F).tar.gz" cfg scripts certs secrets
 
 ## Why upgrade
 
-**Only deployments that explicitly set `kill_wrong_ips = false`** are affected (the 3.1.x default is `true`). Operators run that opt-out specifically to admit NAT / CGNAT users whose client advertises a different IP than the one they connect from - and this bug defeats exactly that opt-out: instead of stamping the real IP and letting the user in, the hub raised a Lua error in `incoming` and the affected user could not complete login. If you set `kill_wrong_ips = false` (or plan to), upgrade. If you run the default, you are not affected and can upgrade at leisure.
+**Every operator should upgrade.** This is a remote, unauthenticated denial of service that takes the **whole hub** down - all users dropped, no reconnections possible until you manually restart the process. It is trivially triggerable (a single TCP connect followed by an immediate reset) and reproducible against any hub regardless of configuration.
 
 ## Bugfixes
 
-### [#393](https://github.com/luadch-ng/luadch/issues/393) (Sopor) - `kill_wrong_ips = false` path errored with `attempt to read undeclared var: 'userfam'`
+### [#401](https://github.com/luadch-ng/luadch/issues/401) (Sopor) - remote hub-crash on a peer reset right after accept
 
-The symptom, once an operator set `kill_wrong_ips = false` and a mismatched-IP user connected:
+The symptom in the error log, immediately followed by the hub dropping every user:
 
 ```
-hub.lua: function 'incoming': lua error: ././core/hub_dispatch.lua:356: attempt to read undeclared var: 'userfam'
+././core/ratelimit.lua:176: attempt to concatenate a nil value (local 'ip')
+*** TLS error: Connection closed
 ```
 
-The [#214](https://github.com/luadch-ng/luadch/issues/214) Gap 2 fix (shipped to 3.1.x in v3.1.10) stamps the authenticated TCP-source IP over a mismatched INF claim so the wrong IP is never broadcast. The v3.1.10 cherry-pick wrote that stamp as `adccmd:setnp( userfam, userip )` - but `userfam` is the **master** branch's variable name. The 3.1.x `incoming` function calls its address-family variable `ipver` (declared at the top of the function, used correctly by the first `setnp` on the no-IP path ~15 lines above). Under luadch's restricted core environment, reading the undeclared `userfam` raises an error - so for every user whose claimed INF IP differed from their real TCP-source IP while `kill_wrong_ips = false` was set, the stamp branch threw and the user (typically the very NAT/CGNAT client the opt-out exists to admit) could not log in.
+`core/server.lua`'s accept path reads the connecting client's IP via `client:getpeername()` and hands it to the per-IP rate-limit guard. When a peer resets the TCP connection in the split second between `accept()` and `getpeername()` (connect + immediate RST - anyone can do it), `getpeername()` returns `nil`. That `nil` reached `ratelimit.accept_ip`, which builds its token-bucket key as `"ip:" .. ip` - raising `attempt to concatenate a nil value (local 'ip')`. The error was **uncaught inside the listener's accept loop**, so the hub stopped accepting connections and dropped everyone online.
 
-**Fix:** use the in-scope `ipver` at that call site, matching the sibling `setnp`:
+`ratelimit.release_ip` already guarded a `nil` IP; `accept_ip` did not - the asymmetry that made this reachable.
+
+**Fix (defence in depth):**
 
 ```lua
--               adccmd:setnp( userfam, userip )
-+               adccmd:setnp( ipver, userip )
+-- core/server.lua, accept path
+ local clientip, clientport = client:getpeername( )
++if not clientip then
++    -- peer reset between accept() and getpeername(); socket is dead,
++    -- and we cannot rate-limit an unknown IP. Drop it before the guard.
++    client:close( )
++    return false
++end
 ```
 
-Default `kill_wrong_ips = true` deployments are unaffected - they take the kill branch and never reach the stamp branch. Master is unaffected; it uses `userfam` consistently throughout its renamed `incoming`. This was a partial-rename slip in the v3.1.10 backport only, so the fix is applied directly on `release/3.1.x` (nothing to cherry-pick from master).
+```lua
+-- core/ratelimit.lua, accept_ip
+ if not _activate then return true end
++if not ip then return true end   -- mirror release_ip's nil guard
+```
 
-The `kill_wrong_ips = false` stamp path had no smoke coverage, which is how the slip shipped in v3.1.10; a behavioural regression test needs a `kill_wrong_ips = false` hub config and is tracked as a follow-up.
+`core/server.lua` now closes a just-accepted socket whose peer address cannot be read *before* the rate-limit guard runs, and `accept_ip` guards `nil` directly.
+
+The 3.2.x line (`master`) additionally guards `core/blocklist.lua`, which does not exist on 3.1.x, and carries a regression unit test (`tests/unit/ratelimit_test.lua`) that reproduces the exact crash and provably fails pre-fix. The 3.1.x fix is the same server + ratelimit guard, reviewer-verified, and validated by running that same test against this line's `ratelimit.lua`.
 
 ## Build / runtime
 
-No changes. Same Lua 5.4, same LuaSec 1.3.2, same LuaSocket 3.1.0, same build toolchain as v3.1.11.
+No changes. Same Lua 5.4, same LuaSec 1.3.2, same LuaSocket 3.1.0, same build toolchain as v3.1.12.
 
 The `linux-aarch64` artifact continues with the Bullseye-container pipeline (glibc 2.31 baseline, works on Pi OS Bullseye / Bookworm / DietPi v9.x).
 
@@ -47,12 +62,12 @@ The `linux-aarch64` artifact continues with the Bullseye-container pipeline (gli
 
 ```sh
 # Linux x86_64 / aarch64
-wget https://github.com/luadch-ng/luadch/releases/download/v3.1.12/luadch-v3.1.12-linux-x86_64.tar.gz
-tar xzf luadch-v3.1.12-linux-x86_64.tar.gz
+wget https://github.com/luadch-ng/luadch/releases/download/v3.1.13/luadch-v3.1.13-linux-x86_64.tar.gz
+tar xzf luadch-v3.1.13-linux-x86_64.tar.gz
 # move your cfg/, scripts/data/, etc into the new tree, restart hub
 
 # Windows
-# Download luadch-v3.1.12-windows-x86_64.zip, extract, copy cfg+data over, restart.
+# Download luadch-v3.1.13-windows-x86_64.zip, extract, copy cfg+data over, restart.
 ```
 
 3.2.x is the active development line on `master`; security backports continue to land on `release/3.1.x` per [`CLAUDE.md` §8](https://github.com/luadch-ng/luadch/blob/master/CLAUDE.md#8-release-lines-and-support-policy).

@@ -163,6 +163,11 @@ end
 
 accept_ip = function( ip )
     if not _activate then return true end
+    -- Defence in depth: server.lua drops a nil peer IP before calling
+    -- us, but never let a nil crash the accept loop here (mirror
+    -- release_ip's guard below). A peer we cannot identify cannot be
+    -- per-IP limited; allow and let the caller close the dead socket.
+    if not ip then return true end
     -- Sticky F-AUTH-3 IP block from prior bad-auth abuse.
     if _ip_blocked( ip ) then
         return false, "IP locked out due to repeated auth failures: " .. tostring( ip )

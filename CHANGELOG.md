@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The upstream project (`luadch/luadch`) is a separate codebase; its release
 history is at https://github.com/luadch/luadch/releases.
 
+## [v3.1.13] - 2026-07-11
+
+Maintenance patch release on the `release/3.1.x` line. One security bugfix: a remotely-triggerable hub-crash. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.12.
+
+### Bugfixes
+
+- [#401](https://github.com/luadch-ng/luadch/issues/401) (Sopor) - **remote hub-crash: a peer that reset its connection right after the TCP accept took the whole hub down.** `core/server.lua`'s accept path reads the client IP via `client:getpeername()` and hands it to the per-IP rate-limit guard. When the peer resets the connection between `accept()` and `getpeername()` (trivially remote-triggerable - connect + immediate RST), `getpeername()` returns `nil`, and `ratelimit.accept_ip(nil)` raised `attempt to concatenate a nil value (local 'ip')` at `core/ratelimit.lua:176` while building its token-bucket key `"ip:" .. ip`. The raise was **uncaught inside the listener's accept loop**, so the hub stopped accepting connections and dropped every online user - a remote, unauthenticated denial of service (Sopor hit this on 3.1.11 after 10+ years, matching the `TLS error: Connection closed` two seconds after the ratelimit error). `ratelimit.release_ip` already guarded `nil`; `accept_ip` did not - the asymmetry that made it reachable. Fix (defence in depth): `core/server.lua` now closes a just-accepted socket whose peer address cannot be read *before* the rate-limit guard runs, and `ratelimit.accept_ip` guards `nil` (mirroring `release_ip`). The 3.2.x master fix ([PR #402](https://github.com/luadch-ng/luadch/pull/402), commit `54ac292`) additionally guards `core/blocklist.lua`, which does not exist on the 3.1.x line; the regression test (`tests/unit/ratelimit_test.lua`, reproduces the exact nil-concat crash, provably fails pre-fix) lives on the 3.2.x line because 3.1.x has no unit-test harness - the fix logic here is identical and reviewer-verified, and was validated by running that same test against the 3.1.x `ratelimit.lua`.
+
+### Notes
+
+- **No breaking changes, no cfg / lang-file edits required.** Drop-in upgrade from v3.1.12.
+- **All operators should upgrade.** The crash is a remote, unauthenticated denial of service (connect + immediate reset), reproducible against any hub regardless of config, and takes the whole hub down - every user dropped, no reconnects until a manual restart.
+
+[v3.1.13]: https://github.com/luadch-ng/luadch/releases/tag/v3.1.13
+
+
 ## [v3.1.12] - 2026-07-10
 
 Maintenance patch release on the `release/3.1.x` line. One bugfix for a backport slip introduced in v3.1.10. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.11.
