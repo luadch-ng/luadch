@@ -158,6 +158,14 @@ jobs:
       - name: Run secrets unit test
         run: lua5.4 tests/unit/secrets_test.lua
 
+      # core/ratelimit.lua per-IP accept guard. Regression: accept_ip(nil)
+      # must not crash - server.lua passes a nil clientip when getpeername()
+      # races with a peer reset, which used to raise in the accept loop and
+      # take the listener down (Sopor, 3.1.11). Plus limiter-still-works
+      # sanity + disabled-passthrough.
+      - name: Run ratelimit unit test
+        run: lua5.4 tests/unit/ratelimit_test.lua
+
       # #78 Precursor 0d: core/sha256.lua pure-Lua FIPS 180-4. Verifies
       # 8 canonical NIST vectors (empty / abc / message digest /
       # alphabet / alphanumeric / 55-byte / 112-byte / 1M-char) plus
@@ -373,6 +381,10 @@ jobs:
       - name: Run secrets unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/secrets_test.lua
+
+      - name: Run ratelimit unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/ratelimit_test.lua
 
       - name: Run sha256 unit test
         shell: msys2 {0}

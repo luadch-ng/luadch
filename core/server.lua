@@ -400,6 +400,19 @@ wrapserver = function( listeners, socket, serverip, serverport, serverfamily, pa
         local client, err = accept( socket )    -- try to accept
         if client then
             local clientip, clientport = client:getpeername( )
+            -- A peer that reset the connection between accept() and here
+            -- leaves getpeername() returning nil (remote-triggerable).
+            -- We cannot blocklist / rate-limit an unknown IP and the
+            -- socket is already dead; drop it before the accept guards
+            -- rather than passing nil into them - feeding nil into
+            -- ratelimit_accept_ip raised inside the accept loop and took
+            -- the whole listener down (no new connections could be
+            -- accepted; Sopor, 3.1.11).
+            if not clientip then
+                out_put( "server.lua: function 'wrapserver': accepted socket with no peer address (reset before getpeername), closing" )
+                client:close( )
+                return false
+            end
             -- #78 Phase A: pre-handshake blocklist check. Runs BEFORE
             -- ratelimit_accept_ip so a blocked-IP flood does not drain
             -- the per-IP ratelimit budget for other (legitimate) IPs.
