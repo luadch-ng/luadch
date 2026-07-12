@@ -248,11 +248,16 @@ cross-host to a signed CDN URL), boot-time runtime-dir self-heal
 (`core/ensuredirs.lua` + a `makedir` C primitive #382, #384) with a daemon
 `umask(027)` hardening, and an `etc_blocklist_feeds` reload-throttle (#386).
 
-**Current era: feature plugins + bug-issue triage.** Recent dev: push/pull
-status export (`etc_status_push` #395), the inbound webhook receiver
-(`etc_webhook` #398, the first `scope="none"` plugin route), plus a run of
-Sopor-reported fixes (v3.1.13 ratelimit hub-crash #401, `usr_uptime`
-undercount #405, BLOM smoke de-flake #408). Alongside, the
+**Current era: feature plugins + bug-issue triage.** Shipped to master
+(3.2.x, still no `v3.2.0` tag): push/pull status export (`etc_status_push`
+#395), the inbound webhook receiver (`etc_webhook` #398, the first
+`scope="none"` plugin route - live against a Discourse forum + a GitHub org),
+plus Sopor-reported fixes (v3.1.13 ratelimit hub-crash #401, `usr_uptime`
+undercount #405, BLOM smoke de-flake #408). A recurring pattern this era:
+a **periodic-fetch plugin must persist its next-fetch deadline across
+`+reload`**, or every reload re-hits a rate-limited provider - fixed twice
+(`etc_blocklist_feeds` #386, `etc_geoip` auto-update #414); general rule in
+[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3. Alongside, the
 `gh issue list --label bug` backlog is worked one at a time (each: deep-dive
 from source per §1a.3/4, since many are old-version reports asking "fixed in
 3.x?"). GitFlow A per fix; batch dev->master as a MERGE commit (never squash
