@@ -104,6 +104,13 @@ _core = {    -- luadch core, order is important
     -- here aborts the boot LOUD which is exactly what we want for a
     -- silent-corruption-class bug.
     "sha256",
+    -- core/hmac.lua: HMAC-SHA256 (RFC 2104) on top of core/sha256.lua.
+    -- Load AFTER sha256 (its only dep; used at load-time self-test
+    -- against RFC 4231 vectors) and BEFORE scripts so it is in _G when
+    -- the plugin sandbox iterates the whitelist. Consumed by the
+    -- etc_webhook plugin to authenticate signed inbound webhook bodies;
+    -- sha256 itself stays OUT of the sandbox, plugins get only the MAC.
+    "hmac",
     -- core/cacert_bootstrap.lua (Precursor 0d of #78 arc): reconcile
     -- certs/ca-bundle.pem against lib/luadch/ca-bundle.pem on every
     -- boot (install missing, warn on outdated, opt-in auto-update).

@@ -4,6 +4,31 @@
 
         usage: [+!#]useruptime [CT1 <FIRSTNICK> | CT2 <NICK>]
 
+        v0.12: by Aybo
+            - fix undercounting on busy hubs and across +reload
+              (reported by Sopor: 24/7 users showing only a few hours
+              per month, "22h" common = time since the last restart).
+              Two bugs, both meaning accumulated online time lived only
+              in RAM and was lost on the next restart / crash:
+              (1) set_stop reset the global `start` timer-gate on EVERY
+              logout. onTimer only credits online users when
+              `os.time() - start >= delay` (60s), so on a hub with a
+              logout more than once per 60s that gate never reached 60
+              and the periodic credit block never fired - 24/7 users
+              (who never log out) were never credited by the timer,
+              only their RAM `now - last_tick` delta grew, and it was
+              dropped on restart. Fix: set_stop no longer touches
+              `start`; the timer's 60s cadence is now independent of
+              logout activity.
+              (2) last_tick is RAM-only, set only in set_start
+              (onLogin). A +reload re-runs onStart but fires no onLogin
+              for users who stayed connected, so their last_tick stayed
+              nil and the timer skipped them until they reconnected.
+              Fix: onStart re-seeds last_tick for users already online.
+              Max loss on a crash / restart is now <= one tick (60s)
+              per user. Pre-fix accumulated data cannot be
+              reconstructed and stays as-is.
+
         v0.11: by Aybo
             - drop always-zero "years" from per-month display
               (fix #328, reported by Sopor). A calendar month
@@ -89,7 +114,7 @@
 --------------
 
 local scriptname = "usr_uptime"
-local scriptversion = "0.11"
+local scriptversion = "0.12"
 
 local cmd = { "useruptime", "uu" }
 
@@ -226,7 +251,10 @@ local set_stop = function( user )
     credit_online_time( user, os.time() )
     last_tick[ user:firstnick() ] = nil
     util.savetable( uptime_tbl, "uptime", uptime_file )
-    start = os.time()
+    -- v0.12: do NOT reset the global `start` here. `start` gates the
+    -- onTimer 60s credit cadence; resetting it on every logout starved
+    -- the periodic crediting on busy hubs, so 24/7 users were never
+    -- credited and their online time was lost on the next restart.
 end
 
 local get_useruptime = function( firstnick )
@@ -343,6 +371,19 @@ hub.setlistener( "onStart", {},
         local hubcmd = hub.import( "etc_hubcommands" )
         assert( hubcmd )
         assert( hubcmd.add( cmd, onbmsg, minlevel ) )
+        -- v0.12: re-seed per-user tracking for users already online.
+        -- onStart also fires on +reload, which re-runs the script
+        -- WITHOUT a fresh onLogin for users who stayed connected;
+        -- without this their last_tick is nil and the timer skips them
+        -- until they reconnect, silently dropping their online time
+        -- across the reload. No-op on a fresh hub start (nobody online).
+        local now = os.time()
+        for sid, user in pairs( hub.getusers() ) do
+            if not user:isbot() then
+                new_entry( user )
+                last_tick[ user:firstnick() ] = now
+            end
+        end
         return nil
     end
 )

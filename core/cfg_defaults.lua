@@ -3422,6 +3422,32 @@ local defaults = {
         end
     },
 
+    -- etc_webhook.lua: inbound webhook receiver (Discourse / GitHub /
+    -- ...). Only the master switch lives in cfg.tbl; ALL endpoint config
+    -- (paths, headers, secrets, templates, ...) lives in the
+    -- operator-edited cfg/webhooks.tbl so cfg.tbl stays lean. Per-endpoint
+    -- secrets resolve env-var-first (LUADCH_ETC_WEBHOOK_<NAME>_SECRET),
+    -- else the etc_webhook_<name>_secret cfg key, else an inline secret in
+    -- cfg/webhooks.tbl. See docs/WEBHOOKS.md.
+    etc_webhook_activate = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
+    -- etc_prometheus.lua: Prometheus text-exposition /metrics endpoint
+    -- (#83). Off by default; the route is not registered when off.
+    -- Registered here (not only in examples/cfg/cfg.tbl) so a hub that
+    -- whitelists the plugin but whose cfg.tbl predates the key does NOT
+    -- crash at plugin load: etc_prometheus.lua reads this via cfg.get at
+    -- module scope, and cfg.get indexes _defaultsettings[key][1] with no
+    -- fallback for an unregistered key.
+    etc_prometheus_activate = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
     etc_trafficmanager_permission = { {
 
         [ 0 ] = 0,
@@ -4463,9 +4489,12 @@ local defaults = {
     --
     -- The practical effect of the strict default was kicking users
     -- with legitimate IP mismatches (VPN clients with stale cached
-    -- IPs, CGNAT users with manual WAN-IP misconfiguration, dual-
+    -- IPs, clients hand-set with the wrong External / WAN IP, dual-
     -- stack users where the kernel picked a different outbound family
-    -- than the user's configured advertise). Per-IP rate limits, GeoIP
+    -- than the user's configured advertise). The gate only concerns
+    -- this advertised-vs-source mismatch, and is unrelated to how the
+    -- hub blocks users (e.g. the Traffic Manager, which on 3.x decides
+    -- on level / share / account-nick, not IP). Per-IP rate limits, GeoIP
     -- rules, abuse logs, and the unified blocklist all operate on the
     -- TCP source IP anyway, so the gate is purely defence-in-depth -
     -- and post-Gap-2 there is nothing left to depend on.

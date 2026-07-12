@@ -11114,21 +11114,41 @@ def test_blom_roundtrip(staging_dir: Path, proc=None):
         )
 
         # ---- hash-search for TTH NOT in the filter; expect NO echo.
+        # The per-user filter installs ASYNCHRONOUSLY after the HSND
+        # counted-binary upload, and _blom_filter_check FAILS OPEN when no
+        # filter is installed yet (routes the search) - deliberate defence
+        # in depth, but indistinguishable from a real leak. The positive
+        # control above passes EITHER WAY (installed -> contains=true ->
+        # send; not-yet -> fail-open -> send), so it does NOT prove the
+        # filter is live. The not-in-filter DROP is the only observable
+        # proof the filter is installed AND consulted, so POLL for it
+        # rather than trust a fixed settle - the fixed 0.5s raced on a
+        # loaded CI runner and fail-opened this negative case (#147 T2.2
+        # flake: "bloom filter not consulted").
         tr_out = _b32_encode(not_in_filter_tth)
-        sock.sendall(f"BSCH {sid} TR{tr_out}\n".encode("utf-8"))
-        try:
-            unwanted = reader.recv_until(
-                lambda f: f.startswith(f"BSCH {sid} ") and f"TR{tr_out}" in f,
-                timeout=1.5,
-            )
+        deadline = time.monotonic() + 8.0
+        consulted = False
+        last_seen = None
+        while time.monotonic() < deadline:
+            sock.sendall(f"BSCH {sid} TR{tr_out}\n".encode("utf-8"))
+            try:
+                last_seen = reader.recv_until(
+                    lambda f: f.startswith(f"BSCH {sid} ") and f"TR{tr_out}" in f,
+                    timeout=1.0,
+                )
+                # reached the user: the filter is not consulted yet (still
+                # installing) -> wait a moment and retry.
+                time.sleep(0.3)
+            except TestFailure:
+                # timed out waiting for the echo -> the search was DROPPED
+                # -> filter is installed and consulted. Done.
+                consulted = True
+                break
+        if not consulted:
             raise TestFailure(
                 "hash-search for TTH not in filter still reached the user "
-                f"(bloom filter not consulted?); got {unwanted!r}"
+                f"after 8s (bloom filter not consulted?); got {last_seen!r}"
             )
-        except TestFailure as tf:
-            if "not consulted" in str(tf):
-                raise
-            # else: the timeout TestFailure is the expected outcome.
 
         # ---- keyword-search (no TR); expect echo regardless of filter.
         # This is the LOAD-BEARING spec-trap regression: the filter
@@ -11593,41 +11613,49 @@ def test_blom_zlif_combined(staging_dir: Path, proc=None):
         # search above usually MISSES the filter -> the test fails
         # there. This second assert covers the path where the random
         # bits happen to set the in_filter bit pattern.
+        # Poll for the not-in-filter DROP - same async-install / fail-open
+        # reasoning as test_blom_roundtrip: a not-yet-installed filter
+        # fail-opens and echoes the search, so the fixed 0.5s settle above
+        # is not a reliable gate. Re-send over the same compress stream and
+        # look ONLY at bytes produced AFTER each send (decoded[mark:]) so an
+        # earlier fail-open echo does not permanently trip the check.
         tr_out = _b32_encode(not_in_filter_tth)
-        bsch_out = f"BSCH {sid} TR{tr_out}\n".encode("utf-8")
-        sock.sendall(comp.compress(bsch_out) + comp.flush(zlib.Z_SYNC_FLUSH))
-
-        # Drain any pending bytes, then wait briefly and assert no
-        # echo arrives for tr_out.
-        end_drain = time.monotonic() + 1.5
-        before = bytes(decoded)
         echo_marker = f"BSCH {sid} ".encode("ascii") + f"TR{tr_out}".encode("ascii")
-        while time.monotonic() < end_drain:
-            if comp_buf:
-                decoded.extend(decomp.decompress(bytes(comp_buf)))
-                del comp_buf[:]
-            if echo_marker in bytes(decoded):
-                raise TestFailure(
-                    "combined: hash-search for not-in-filter TTH still "
-                    "reached the user; the BLOM filter was not built "
-                    "from decompressed bytes (insert_before_terminal "
-                    "regression)."
-                )
-            sock.settimeout(0.3)
-            try:
-                chunk = sock.recv(4096)
-            except socket.timeout:
-                continue
-            if not chunk:
+        deadline = time.monotonic() + 8.0
+        consulted = False
+        while time.monotonic() < deadline:
+            mark = len(decoded)
+            sock.sendall(
+                comp.compress(f"BSCH {sid} TR{tr_out}\n".encode("utf-8"))
+                + comp.flush(zlib.Z_SYNC_FLUSH)
+            )
+            window = time.monotonic() + 1.0
+            saw_echo = False
+            while time.monotonic() < window:
+                if comp_buf:
+                    decoded.extend(decomp.decompress(bytes(comp_buf)))
+                    del comp_buf[:]
+                if echo_marker in bytes(decoded[mark:]):
+                    saw_echo = True
+                    break
+                sock.settimeout(0.2)
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    continue
+                if not chunk:
+                    break
+                comp_buf.extend(chunk)
+            if not saw_echo:
+                consulted = True    # this send was DROPPED -> filter live + consulted
                 break
-            comp_buf.extend(chunk)
-        if comp_buf:
-            decoded.extend(decomp.decompress(bytes(comp_buf)))
-            del comp_buf[:]
-        if echo_marker in bytes(decoded):
+            time.sleep(0.3)
+        if not consulted:
             raise TestFailure(
-                "combined: not-in-filter TTH was echoed (filter built "
-                "from garbage bytes - #192 regression)."
+                "combined: hash-search for not-in-filter TTH still reached "
+                "the user after 8s; the BLOM filter was not built from "
+                "decompressed bytes (insert_before_terminal regression) or "
+                "was never installed."
             )
 
     finally:

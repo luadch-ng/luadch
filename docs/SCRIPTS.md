@@ -305,6 +305,29 @@ users.
 
 **Config:** `cmd_topic_permission`, `hub_topic`
 
+### cmd_upgrade
+
+Set or change a registered user's level by SID or nick. Enforces the
+operator's permission ceiling (an operator can only promote up to their
+own limit and cannot touch a user above their own level) and kicks the
+online target with `ISTA 230 ... TL300` so the client picks up the new
+permission set on reconnect. Works on offline registrations too.
+
+**Commands:** `+upgrade sid|nick <sid>|<nick> <level>`
+
+**HTTP API:** `PUT /v1/registered/{nick}/level` (admin) - mirrors the
+ADC `+upgrade nick` path; humans only (bots return 404). The bearer
+token's admin scope is the gate, so the ADC permission ladder does NOT
+apply on the HTTP path. See [HTTP_API.md](HTTP_API.md).
+
+**Audit events:** `reg.level.set` (meta `previous_level`; the HTTP
+path also records `online_kicked`).
+
+**Config:** `cmd_upgrade_permission` (level -> promotable-up-to
+ceiling table), `cmd_upgrade_advanced_rc`, `cmd_upgrade_report`,
+`cmd_upgrade_report_hubbot`, `cmd_upgrade_report_opchat`,
+`cmd_upgrade_llevel`
+
 ### cmd_uptime
 
 Display hub uptime (session and cumulative since first start) and the
@@ -678,6 +701,72 @@ etc. in `cfg.tbl`, then `+reload`).
 `etc_geoip_oplevel`, `etc_geoip_report[_hubbot|_opchat]`,
 `etc_geoip_llevel`. See [`BLOCKLIST.md`](BLOCKLIST.md) for the table.
 
+### etc_blocklist_feeds
+
+External IP/CIDR blocklist feed puller (#78 Phase E, closes
+[#79](https://github.com/luadch-ng/luadch/issues/79)). Fetches
+known-bad-IP lists over HTTPS on a per-feed timer and pushes them into
+the unified pre-handshake blocklist (`core/blocklist.lua`) with
+`source="external"` + `meta.feed=<name>`, so matched IPs are dropped at
+TCP accept before they cost a handshake.
+
+**Off by default at two levels:** the plugin master switch
+(`etc_blocklist_feeds_enabled`) AND each feed's own `_enabled` key are
+all `false`. Enabling the plugin alone pulls nothing; every feed is
+opted in individually.
+
+**Built-in feeds:**
+- `tor` - Tor exit-node list (plain IPv4, one per line). Interval
+  floor 30 min.
+- `spamhaus` / `spamhaus_v6` - Spamhaus DROP v4 / v6 (JSONL, `.cidr` +
+  `.sblid`). Interval floor 1 h (their published auto-fetch floor).
+- `abuseipdb` - AbuseIPDB blacklist (top-N reported IPs, plaintext).
+  Needs an API key (`Key` header, env-var-first via `core/secrets`);
+  the free-tier blacklist download is 5/day, so the interval floor is
+  6 h. Enabled without a key, the feed disables itself and warns once.
+- `generic` - operator-supplied line-list URL (IP/CIDR per line,
+  `#`/`;` comments tolerated). No key, no default URL.
+
+Each successful refresh REPLACES the feed's prior entries via
+`blocklist.bulk_replace` (one atomic disk write, not O(N^2) per-CIDR
+adds that would freeze the single hub thread on a real feed). Entries
+carry a TTL of 2x the refresh interval as a backstop, so a few missed
+refreshes do not instantly unblock but a permanently-dead feed ages
+out. A fetch / parse / HTTP failure keeps the last-good entries
+(`bulk_replace` refuses to wipe a feed on an all-invalid parse) and
+fires a `feed.refresh.fail` audit. The per-feed interval is clamped UP
+to the adapter minimum regardless of the cfg value - polling faster
+gets the hub's IP firewalled by the provider. The last-fetch time
+persists to `scripts/data/etc_blocklist_feeds.tbl` so repeated
+`+reload`s cannot re-pull a feed inside its interval and hammer the
+provider (v0.02).
+
+**Command:**
+- `+blfeeds` - read-only status: per-feed enabled state, interval,
+  entry count, last refresh. Requires `etc_blocklist_feeds_oplevel`
+  (default 80).
+
+**HTTP API:** `GET /v1/blocklist/feeds` (read scope) mirrors
+`+blfeeds`. No write endpoint - which feeds run is cfg-driven
+(edited in `cfg.tbl`, then `+reload`).
+
+**Audit events:** `feed.refresh.success` (feed / added / removed /
+skipped), `feed.refresh.fail` (feed / err). Op-chat reports are
+debounced to first-refresh + fail<->ok transitions so a steady feed
+does not spam the chat.
+
+**Config keys:** `etc_blocklist_feeds_enabled`, then a per-feed block
+for each of `tor` / `spamhaus` / `spamhaus_v6` / `abuseipdb` /
+`generic` (`_<feed>_enabled`, `_<feed>_url`,
+`_<feed>_refresh_interval_sec`, `_<feed>_stealth`;
+`spamhaus_v6` shares the `spamhaus` interval + stealth), plus
+`etc_blocklist_feeds_abuseipdb_key` (prefer the
+`LUADCH_ETC_BLOCKLIST_FEEDS_ABUSEIPDB_KEY` env var),
+`etc_blocklist_feeds_oplevel`, and
+`etc_blocklist_feeds_report[_hubbot|_opchat]` /
+`etc_blocklist_feeds_llevel`. See [`BLOCKLIST.md`](BLOCKLIST.md) for
+the table.
+
 ### etc_proxydetect
 
 Live proxy / VPN / Tor detection via an external provider API on connect
@@ -762,6 +851,69 @@ no token it stays inert. The token is read env-var-first via
 `etc_status_push_token` (prefer the `LUADCH_ETC_STATUS_PUSH_TOKEN` env
 var), `etc_status_push_interval`, `etc_status_push_tls_verify`,
 `etc_status_push_cafile`.
+
+### etc_prometheus
+
+Prometheus text-exposition `/metrics` endpoint for the HTTP API
+([#83](https://github.com/luadch-ng/luadch/issues/83)). A PULL model:
+a Prometheus scraper GETs `/metrics` and the hub returns 7 gauges +
+7 counters in the 0.0.4 exposition format. The pull counterpart to
+`etc_status_push` (push heartbeat) and the metrics sibling of
+`etc_webhook` (inbound receiver).
+
+**Off by default** (`etc_prometheus_activate`); when off the route is
+never registered and `GET /metrics` returns a generic 404. Counters
+are monotonic since plugin onStart and reset on `+reload` (the standard
+Prometheus scrape-target-restart convention). `/metrics` is `read`
+scope, so the scraper needs the bearer token; keep
+`http_api_log_reads` off (the default) so scrape pulls do not flood
+the API audit log.
+
+Gauges: online humans, online bots, total share bytes, total files,
+hub uptime, Lua memory KiB, active bans (0 when cmd_ban is not
+loaded). Counters: logins, logouts, failed auths, chat msgs, PMs,
+searches, script errors. The full metric catalog is in
+[HTTP_API.md](HTTP_API.md).
+
+**HTTP API:** `GET /metrics` (read scope), content-type
+`text/plain; version=0.0.4; charset=utf-8`.
+
+**Config:** `etc_prometheus_activate`
+
+### etc_regserver_announce
+
+Announces this hub to an external ADC hublist regserver by POSTing an
+ADC `IINF` line (public fields only) to the regserver's `/register`
+endpoint; external ADC pingers then take over liveness + removal.
+
+**Off by default** (`etc_regserver_announce_activate`) - this is the
+privacy gate: a private hub leaves it off and never appears on a
+hublist. Registers ONCE per advertised address
+(`adcs://<hub_hostaddress>:<ssl_port>`, preferring the TLS port, is the
+dedup key): after a confirmed 2xx it goes quiet and does not
+re-announce until the address changes - the pingers already maintain
+liveness, so re-announcing on a timer is wasted bandwidth. On a host
+change or an unconfirmed registration it retries every
+`etc_regserver_announce_retry_interval` (default 300s) up to
+`etc_regserver_announce_max_attempts`, then gives up until the next
+`+reload` / restart.
+
+Only PUBLIC hub fields are sent (name, app, version, address,
+description, website, network, owner, online human count, total
+share) - never a nick, secret, or internal state. The POST goes
+through the non-blocking `core/http_client` so a slow / unreachable
+regserver never freezes the hub. Multiple regservers are supported
+(`etc_regserver_announce_url` accepts a string OR an array).
+
+**Storage:** `scripts/data/etc_regserver_announce.tbl` (the per-target
+confirmed address, so a `+reload` with an unchanged address does not
+re-announce).
+
+**Config keys:** `etc_regserver_announce_activate`,
+`etc_regserver_announce_url`, `etc_regserver_announce_tls_verify`,
+`etc_regserver_announce_cafile`,
+`etc_regserver_announce_retry_interval`,
+`etc_regserver_announce_max_attempts`
 
 ### etc_clientblocker
 
@@ -983,6 +1135,35 @@ Display detailed user connection info on login (client type, tag,
 feature list, TLS cipher, upload / download speeds).
 
 **Config:** `etc_userlogininfo_activate`
+
+### etc_webhook
+
+INBOUND webhook receiver: an external service (a Discourse forum,
+GitHub, GitLab, CI, monitoring, ...) POSTs an HMAC-SHA256-signed JSON
+body to a hub HTTP endpoint; the hub verifies the signature over the raw
+body, filters + de-duplicates, renders a templated message and announces
+it in chat as a named bot. The push-inbound mirror of `etc_status_push`
+(outbound) and the inbound complement of `etc_prometheus` (pull
+`/metrics`).
+
+Multi-endpoint: the operator-edited `cfg/webhooks.tbl` holds an array of
+endpoints, each with its own path, signature / event / id headers, event
+filter, bot nick, min-level and `{dotted.path}` message templates.
+Per-endpoint secrets resolve env-var-first
+(`LUADCH_ETC_WEBHOOK_<NAME>_SECRET`), else the `etc_webhook_<name>_secret`
+cfg key, else an inline `secret` in the file; an endpoint with no secret
+is skipped (never runs unsigned). The endpoint registers with
+`scope="none"` and does its own HMAC auth (`adclib.constant_time_eq`
+over `req.raw_body`).
+
+Only the master switch `etc_webhook_activate` lives in `cfg.tbl`; all
+endpoint config lives in `cfg/webhooks.tbl` (copy
+`examples/cfg/webhooks.tbl`). The HTTP API listener must be reachable
+from the sender - put a reverse proxy with TLS in front. Full setup
+(Discourse / GitHub webhook config, reverse proxy, security) in
+[`docs/WEBHOOKS.md`](WEBHOOKS.md).
+
+**Config:** `etc_webhook_activate` + `cfg/webhooks.tbl`
 
 ---
 
