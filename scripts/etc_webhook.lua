@@ -32,6 +32,10 @@
         The HTTP listener itself is only reachable per the operator's
         http_port + reverse-proxy setup - see docs/WEBHOOKS.md.
 
+        v0.02: by Aybo - dedup_load probes with io.open before
+               util.loadtable, so a first run (no dedup file yet) no
+               longer logs a spurious checkfile error (the sibling
+               state-file loaders already did this).
         v0.01: by Aybo - initial release (#398).
 
 ]]--
@@ -42,7 +46,7 @@
 --------------
 
 local scriptname = "etc_webhook"
-local scriptversion = "0.01"
+local scriptversion = "0.02"
 
 local config_file = "cfg/webhooks.tbl"
 local dedup_file  = "scripts/data/etc_webhook.tbl"
@@ -166,6 +170,15 @@ end
 
 --// dedup
 local function dedup_load( )
+    -- first-run-silent: probe with io.open before util.loadtable, which
+    -- otherwise calls checkfile and logs an error.log line for the
+    -- absent file - the HubSecurity bot relays that to ops on every
+    -- fresh start. A missing dedup file is the normal "nothing seen
+    -- yet" state. Mirrors load_config() above + the sibling state
+    -- loaders (etc_regserver_announce, etc_blocklist_feeds).
+    local f = io.open( dedup_file, "r" )
+    if not f then return end
+    f:close()
     local ok, tbl = pcall( util_loadtable, dedup_file )
     if ok and type( tbl ) == "table" and type( tbl.seen ) == "table" then
         seen = tbl.seen

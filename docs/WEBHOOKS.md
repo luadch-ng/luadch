@@ -88,15 +88,16 @@ return {
             path             = "/v1/webhook/discourse",   -- default: /v1/webhook/<name>
             signature_header = "x-discourse-event-signature",  -- required
             signature_prefix = "sha256=",          -- stripped before compare ("" if the header is raw hex)
-            event_header     = "x-discourse-event-type",  -- optional
-            events           = { "topic_created", "post_created" },  -- optional; empty/omitted = all events
+            event_header     = "x-discourse-event",  -- optional; the SPECIFIC event (topic_created), NOT x-discourse-event-type (= category "topic")
+            events           = { "topic_created", "post_created" },  -- optional; must be values of event_header; empty/omitted = all events
             id_header        = "x-discourse-event-id",  -- optional; enables dedup
             bot_nick         = "Forum",            -- optional; omit to announce as the hub bot
             min_level        = 0,                  -- 0 = everyone; e.g. 50 = ops-only
-            templates = {
-                topic_created = "New topic by {topic.created_by.username}: {topic.title}",
-                post_created  = "New post by {post.username} in \"{post.topic_title}\"",
+            templates = {                          -- keyed by event_header value; a bare https:// URL is auto-linkified by DC clients
+                topic_created = "New topic by {topic.created_by.username}: {topic.title} -> https://forum.example.com/t/{topic.slug}/{topic.id}",
+                post_created  = "New post by {post.username} in \"{post.topic_title}\" -> https://forum.example.com/t/{post.topic_slug}/{post.topic_id}/{post.post_number}",
             },
+            -- default_template = "..."           -- optional TOP-LEVEL field (sibling of templates, NOT inside it); used when no per-event template matches
             -- secret: see section 4
         },
     },
@@ -108,7 +109,8 @@ Any number of endpoints is supported; edit the file and `+reload` to add
 more.
 
 **Templates** use `{dotted.path}` placeholders resolved against the
-decoded JSON body, plus `{event}` (the event-type header value). A
+decoded JSON body, plus `{event}` (the value of the header named by
+`event_header` - so `{event}` is empty unless `event_header` is set). A
 missing path renders empty. Every value is control-byte-stripped and
 truncated to `field_maxlen`. The example paths are typical but payloads
 differ by product / version - **check your webhook's own "Recent
@@ -151,12 +153,19 @@ Admin -> API -> Webhooks -> New:
   body types).
 - **Secret:** the value from section 4.
 - **Events:** pick "Topic Event" / "Post Event" (or "Send me everything"
-  and filter with `events` in `cfg/webhooks.tbl`).
+  and filter with `events` in `cfg/webhooks.tbl`). Note: with BOTH
+  categories enabled, a new topic fires `topic_created` AND
+  `post_created` (its first post), so it announces twice - subscribe to
+  only one category, or drop one key from `events`, if that bothers you.
 
 Discourse signs the body as `X-Discourse-Event-Signature: sha256=<hmac>`
-and sends `X-Discourse-Event-Type` + `X-Discourse-Event-Id` - the example
-config already maps these. Use the webhook's "Go" / ping to test (a ping
-validates the secret and returns 200 without announcing).
+and sends both `X-Discourse-Event` (the specific event, e.g.
+`topic_created`) and `X-Discourse-Event-Type` (only the category, e.g.
+`topic`), plus `X-Discourse-Event-Id`. Match `event_header` on
+`x-discourse-event` (the example config does) so `events` / template keys
+line up with `topic_created` / `post_created`. Use the webhook's "Go" /
+ping to test - a ping validates the secret and returns 200; with an
+`events` filter set it is not announced (ping is not in the list).
 
 ### GitHub
 

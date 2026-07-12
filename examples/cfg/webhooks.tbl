@@ -42,15 +42,18 @@ return {
             path             = "/v1/webhook/discourse",   -- the Payload URL you configure in Discourse (via your reverse proxy)
             signature_header = "x-discourse-event-signature",
             signature_prefix = "sha256=",
-            event_header     = "x-discourse-event-type",
-            events           = { "topic_created", "post_created" },   -- empty / omitted = announce every event
+            -- x-discourse-event carries the SPECIFIC event (topic_created);
+            -- x-discourse-event-type is only the category (topic). Match on -event.
+            event_header     = "x-discourse-event",
+            events           = { "topic_created", "post_created" },   -- must be values of event_header; empty/omitted = announce every event
             id_header        = "x-discourse-event-id",
             bot_nick         = "Forum",                    -- omit to announce as the hub bot
             min_level        = 0,                          -- 0 = everyone sees it; e.g. 20 = regs+, 50 = ops-only
             templates = {
-                -- adjust the placeholders to YOUR Discourse payload (see Recent Deliveries):
-                topic_created = "New forum topic by {topic.created_by.username}: {topic.title}",
-                post_created  = "New forum post by {post.username} in \"{post.topic_title}\"",
+                -- Adjust the placeholders + your forum URL to YOUR Discourse payload
+                -- (see Recent Deliveries). A bare https:// URL is auto-linkified by DC clients.
+                topic_created = "New forum topic by {topic.created_by.username}: {topic.title} -> https://forum.example.com/t/{topic.slug}/{topic.id}",
+                post_created  = "New forum post by {post.username} in \"{post.topic_title}\" -> https://forum.example.com/t/{post.topic_slug}/{post.topic_id}/{post.post_number}",
             },
             -- secret: set via env LUADCH_ETC_WEBHOOK_DISCOURSE_SECRET, or the
             -- cfg key etc_webhook_discourse_secret, or uncomment + set here.
