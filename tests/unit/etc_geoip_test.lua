@@ -437,6 +437,49 @@ do
 end
 
 ----------------------------------------------------------------------
+-- Phase D3 follow-up (#386 mirror): +reload must NOT re-check MaxMind
+-- ~30s after boot when the last check is recent. next_update is RAM-only,
+-- so onStart persists/reads the last-check time across reload.
+----------------------------------------------------------------------
+
+do
+    local real_os = _real.os
+    local clock = { t = 2000000 }
+    _G.os = { time = function( ) return clock.t end,
+              date = real_os.date, difftime = real_os.difftime, clock = real_os.clock }
+
+    _cfg.etc_geoip_country_db_path = FIX
+    _cfg.etc_geoip_enabled = true
+    _cfg.etc_geoip_auto_update = true
+    _cfg.etc_geoip_account_id = "12345"
+    _cfg.etc_geoip_edition_ids = { "GeoLite2-Country" }
+    _cfg.etc_geoip_update_interval_sec = 86400
+    _license = "LICKEY"; _update_cb = nil
+
+    -- A check happened 100s ago (far inside the 1-day interval), persisted.
+    _geoip_state = { last_update = clock.t - 100 }
+
+    load_plugin( )    -- onStart must schedule from last_update, NOT now+30
+
+    -- A reload right after a recent check must not re-check ~30s later.
+    _updates = { }
+    clock.t = clock.t + 31          -- past the pre-fix now+30 window
+    _listeners.onTimer( )
+    eq( "reload-throttle: no MaxMind re-check ~30s after reload when last check is recent", #_updates, 0 )
+
+    -- ...but once the interval elapses FROM the persisted last check, it fires.
+    _updates = { }
+    clock.t = ( 2000000 - 100 ) + 86400 + 1
+    _listeners.onTimer( )
+    eq( "reload-throttle: re-check fires once the interval elapses from last_update", #_updates, 1 )
+
+    _G.os = real_os
+    _cfg.etc_geoip_auto_update = nil
+    _cfg.etc_geoip_account_id = nil
+    _cfg.etc_geoip_edition_ids = nil
+end
+
+----------------------------------------------------------------------
 
 io.stderr:write( string.format( "\netc_geoip_test: %d passed, %d failed\n", _pass, _fail ) )
 os.exit( _fail == 0 and 0 or 1 )
