@@ -58,6 +58,11 @@
         validation is a precondition for any connect-time policy
         filter.
 
+        v0.02: by Aybo
+            - persist the auto-update check time (scripts/data/etc_geoip.tbl)
+              and schedule the next check from it across +reload, so a
+              reload no longer re-checks MaxMind ~30s after boot every time
+              (mirrors etc_blocklist_feeds #386).
         v0.01: by Aybo
             - initial implementation, Part of #78 (Phase D2)
 
@@ -69,7 +74,7 @@
 --------------
 
 local scriptname = "etc_geoip"
-local scriptversion = "0.01"
+local scriptversion = "0.02"
 
 local cmd_status = "geoip"
 
@@ -448,6 +453,14 @@ local function run_update( )
         local names = { }
         for _, it in ipairs( queue ) do names[ #names + 1 ] = it.edition end
         out_put( utf_format( msg_update_start, table_concat( names, ", " ) ) )
+        -- Persist the check time NOW, before the fetch, so a MaxMind
+        -- rate-limit / failure still counts (those are exactly who a
+        -- reload-loop must not re-hammer) and onStart schedules the next
+        -- check from it across +reload. "unchanged" editions save no state
+        -- (no sha256 change), so on an all-unchanged cycle this is the only
+        -- write. Mirrors etc_blocklist_feeds mark_fetched (#386).
+        state.last_update = os_time( )
+        util_savetable( state, "state", update_state_file )
     end
 
     local i, updated_count, last_err = 0, 0, nil
@@ -567,7 +580,23 @@ hub.setlistener( "onStart", { },
             if account_id == "" or not license_key or license_key == "" then
                 hub_debug( msg_update_missing_key )
             end
-            next_update = os_time( ) + 30
+            -- Honour the PERSISTED last-update time across +reload. onStart
+            -- fires on every reload (a full Lua restart) and next_update is
+            -- RAM-only - without this a reload would re-check MaxMind ~30s
+            -- after boot EVERY time, so an operator reloading several times a
+            -- day hits MaxMind's rate-limited download endpoint each time (the
+            -- DB only changes twice weekly). Schedule the next check at
+            -- last_update + interval instead; never-checked / overdue is
+            -- staggered shortly after boot. min() caps a bogus future
+            -- timestamp (clock skew / corrupt state) to one interval so it
+            -- can never freeze the updater. Mirrors etc_blocklist_feeds (#386).
+            local last = tonumber( load_update_state( ).last_update )
+            local now = os_time( )
+            if last and last + update_interval > now then
+                next_update = math.min( last + update_interval, now + update_interval )
+            else
+                next_update = now + 30
+            end
         end
 
         local help = hub_import( "cmd_help" )
