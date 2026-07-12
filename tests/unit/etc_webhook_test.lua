@@ -72,7 +72,15 @@ _G.utf = {
 }
 local _real_io = io
 _G.os = setmetatable( { time = function( ) return _now end }, { __index = _real_os } )
-_G.io = setmetatable( { open = function( p ) if p == CONFIG_FILE and _config then return { close = function( ) end } end return nil end }, { __index = _real_io } )
+-- io.open returns a handle only when the corresponding state exists, so
+-- the plugin's first-run-silent probes see "file present" iff we set the
+-- state (CONFIG_FILE <-> _config, DEDUP_FILE <-> _dedup). Mirrors on-disk
+-- reality: io.open succeeds iff the file exists.
+_G.io = setmetatable( { open = function( p )
+    if p == CONFIG_FILE and _config then return { close = function( ) end } end
+    if p == DEDUP_FILE  and _dedup  then return { close = function( ) end } end
+    return nil
+end }, { __index = _real_io } )
 
 _G.cfg = {
     get = function( k )
@@ -82,10 +90,11 @@ _G.cfg = {
     end,
     loadlanguage = function( ) return { }, nil end,
 }
+local _dedup_loadtable_called = false
 _G.util = {
     loadtable = function( p )
         if p == CONFIG_FILE then return _config end
-        if p == DEDUP_FILE then return _dedup end
+        if p == DEDUP_FILE then _dedup_loadtable_called = true; return _dedup end
         return nil
     end,
     savetable = function( t, _name, p ) if p == DEDUP_FILE then _dedup = t end end,
@@ -136,7 +145,8 @@ local function discourse_req( id, event, sig, body_str, body_tbl )
     return {
         headers = {
             [ "x-discourse-event-signature" ] = sig,
-            [ "x-discourse-event-type" ]      = event,
+            [ "x-discourse-event" ]           = event,   -- the SPECIFIC event (matches base_config event_header)
+            [ "x-discourse-event-type" ]      = "topic",  -- the category; present but not what we key on
             [ "x-discourse-event-id" ]        = id,
         },
         raw_body = body_str,
@@ -153,7 +163,7 @@ local function base_config( )
             {
                 name = "discourse", path = "/v1/webhook/discourse",
                 signature_header = "x-discourse-event-signature", signature_prefix = "sha256=",
-                event_header = "x-discourse-event-type", events = { "post_created" },
+                event_header = "x-discourse-event", events = { "post_created" },
                 id_header = "x-discourse-event-id", bot_nick = "Forum", min_level = 0,
                 templates = { post_created = "New post by {post.username}: {post.topic_title}" },
                 secret = SECRET,
@@ -316,6 +326,31 @@ _config = base_config( )
 load_plugin( )
 truthy( "activate=false: no routes registered", next( _routes ) == nil )
 _activate = true
+
+----------------------------------------------------------------------
+-- 13. first-run dedup state (#398 follow-up, v0.02): with no dedup file
+--     yet, dedup_load must probe io.open and NOT call util.loadtable -
+--     util.loadtable -> checkfile logs an error.log line the HubSecurity
+--     bot relays to ops on every fresh start.
+----------------------------------------------------------------------
+_config = base_config( )
+_dedup = nil                          -- dedup file absent (first run)
+_dedup_loadtable_called = false
+load_plugin( )                        -- fires onStart -> dedup_load
+eq( "first-run: dedup_load skips util.loadtable (no checkfile noise)", _dedup_loadtable_called, false )
+
+-- complement: an existing dedup file IS loaded, so an id persisted from a
+-- prior run is treated as a duplicate on the very first delivery. The
+-- stored key is namespaced by endpoint name (see the handler:
+-- entry.name .. ":" .. id), so seed the "discourse:" form.
+_config = base_config( )
+_dedup = { seen = { [ "discourse:persisted" ] = 1 } }
+_dedup_loadtable_called = false
+load_plugin( )
+eq( "existing dedup file loaded via util.loadtable", _dedup_loadtable_called, true )
+fire_handler( discourse_req( "persisted", "post_created", sig_for( BODY ), BODY, BTBL ) )
+eq( "pre-seen id from disk is deduped (no announce)", #_announced, 0 )
+_dedup = nil
 
 ----------------------------------------------------------------------
 if failures > 0 then
