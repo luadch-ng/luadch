@@ -151,6 +151,15 @@ jobs:
       - name: Run etc_clientblocker unit test
         run: lua5.4 tests/unit/etc_clientblocker_test.lua
 
+      # Coverage completeness: these two unit tests existed but were never
+      # wired into CI. Both pass; registering them keeps tests/README's
+      # "the whole tests/unit set runs in CI" statement true.
+      - name: Run etc_blocklist unit test
+        run: lua5.4 tests/unit/etc_blocklist_test.lua
+
+      - name: Run cmd_usercleaner orphan unit test
+        run: lua5.4 tests/unit/cmd_usercleaner_orphan_test.lua
+
       # #78 Precursor 0c: core/secrets.lua sensitive-key registry +
       # env-var-first cfg lookup. Stubbed cfg + os.getenv; verifies
       # registry semantics, _derive_env_name shape, and the env-vs-
@@ -399,6 +408,14 @@ jobs:
       - name: Run etc_clientblocker unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_clientblocker_test.lua
+
+      - name: Run etc_blocklist unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_blocklist_test.lua
+
+      - name: Run cmd_usercleaner orphan unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/cmd_usercleaner_orphan_test.lua
 
       - name: Run secrets unit test
         shell: msys2 {0}

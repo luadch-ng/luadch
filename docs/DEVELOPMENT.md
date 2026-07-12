@@ -112,6 +112,25 @@ The conventions below are either not in it or are easy to get wrong:
   (via `util.savetable` / `util.loadtable`). Operator-facing artifacts
   (exports, backups) go to `cfg/`. This matches `cmd_ban`, `etc_clientblocker`,
   `etc_blocklist` (all under `scripts/data/`).
+- **Bulky operator INPUT config goes in its own `cfg/<name>.tbl`, not `cfg.tbl`.**
+  When a plugin needs a large operator-edited structure (an array of endpoints,
+  per-item secrets / templates), keep only the master `_activate` switch in
+  `cfg.tbl` and load the rest from a dedicated `cfg/<name>.tbl` via
+  `util.loadtable`, pcall-wrapped and first-run-SILENT (a missing file is the
+  normal not-configured state, not an error). Ship an annotated template as
+  `examples/cfg/<name>.tbl`. Treat it as the same trust level as `cfg.tbl`
+  (chmod 600 if it can hold inline secrets); runtime/derived state still goes to
+  `scripts/data/`, never mixed into the operator's input file. Precedent:
+  `etc_webhook` + `examples/cfg/webhooks.tbl`.
+- **Bots at module-load; HTTP routes in `onStart`.** Create bots with
+  `hub.regbot{...}` at file scope (module-load), NOT inside an `onStart`
+  listener: `+reload` runs `killscripts()`, which kills every registered bot AND
+  re-runs the plugin file, so a module-load `regbot` re-creates the bot exactly
+  once with no duplicate accumulation (a bot created in `onStart` leaks on every
+  reload). HTTP routes are the mirror case - register them in `onStart`, because
+  the router `unregister_all()`s the whole route table on `+reload` before
+  plugin re-init (pcall each `hub.http_register` so one bad path does not abort
+  the rest). Precedents: `bot_opchat`, `etc_webhook`.
 - **Never export a mutable table across `+reload` (getter idiom).** `hub.import`
   shallow-copies the export table, so any consumer holding a direct reference
   goes stale the moment your plugin rebinds the local (e.g. `bans = {}` in a
@@ -150,6 +169,16 @@ The conventions below are either not in it or are easy to get wrong:
   otherwise. Send the key in a request HEADER, never a URL query param
   (`http_client` logs the URL on failure, never the headers). Precedents:
   `etc_blocklist_feeds` (AbuseIPDB key), `etc_status_push` (heartbeat bearer token).
+- **Verifying a signed request body (HMAC).** The sandbox exposes
+  `hmac.sha256(secret, raw_body)` (64-char lowercase hex, RFC 2104 over
+  `core/sha256.lua`) plus `adclib.constant_time_eq` for the compare - raw
+  `sha256` is deliberately withheld from plugins. Strip any `sha256=`-style
+  prefix from the signature header first, and verify BEFORE any side effect.
+  **Dynamically-named secret keys** (`etc_foo_<name>_secret`, one per configured
+  instance) are safe with `secrets.lookup` even when the key is NOT in
+  `cfg_defaults`: `lookup` pcall-guards `cfg.get` (which RAISES on a fully-
+  unknown key) and degrades to nil. Still `secrets.register` each derived key
+  before the activate gate. Precedent: `etc_webhook`.
 - **`scriptversion` bump on any semantic change** (behaviour, cfg keys, wire
   surface) - the companion `luadch-ng/scripts` repo syncs by version.
 - **Config defaults + validator go in `core/cfg_defaults.lua`.** Add the key
@@ -175,6 +204,17 @@ The conventions below are either not in it or are easy to get wrong:
   `scripts/cmd_disconnect.lua`, `scripts/cmd_redirect.lua`.
 - **Raw `hub.http_register`** for read endpoints, non-SID target keys (CIDR,
   numeric id, nick/cid/ip like `cmd_ban`), or a non-standard envelope.
+- **`scope="none"` for plugin-owned auth.** `hub.http_register`'s scope is
+  `"read"` / `"admin"` / `"none"`. `"none"` skips the router's bearer-token gate
+  entirely - use it ONLY when the endpoint does its OWN authentication (e.g. an
+  HMAC-signed webhook receiver, `etc_webhook` - the first plugin to use it). The
+  handler gets `req.raw_body` (exact unparsed bytes - required for signature
+  verification; `req.body` is the parsed JSON) and `req.headers` with keys
+  LOWERCASED. Obligations: verify before any side effect, constant-time compare,
+  and fail CLOSED - no resolvable secret means the endpoint must refuse to
+  register, never accept unsigned. A `scope="none"` route is still only reachable
+  per the operator's `http_port` + reverse-proxy exposure. Set
+  `meta.plugin = scriptname` for `/v1/endpoints` attribution.
 - Request schema uses `min`/`max` (not `minimum`/`maximum`); `enum` is
   supported. Filter/sort via `core/http_filter.lua` - pick the right field
   bucket (`string_fields` = substring, `boolean_fields` = strict true/false,
@@ -290,6 +330,16 @@ ceremony - but the default is strict.
   asynchronously; poll for the file instead of racing it.
 - **Deadlines use `socket.gettime()`, not `os.time()`** - integer-second
   precision creates flakes at fractional boundaries.
+- **Poll the NEGATIVE case when the asserted state installs asynchronously and
+  its guard fails open.** If the hub state you assert on (a bloom filter, a
+  cache, an enforcement object) is installed off the request path and its check
+  FAILS OPEN before installation, a positive control passes either way and
+  proves nothing - only the negative outcome (a drop / rejection) proves the
+  state is live AND consulted. A fixed `time.sleep()` before that assertion
+  races on a loaded runner and fail-opens the negative case (the #147 T2.2 BLOM
+  flake, #408). Poll the drop in a `time.monotonic()` deadline loop: re-send,
+  treat "echo still arrives" as not-ready-retry and "timeout waiting for echo"
+  as proof-of-drop. See `test_blom_roundtrip`.
 
 ---
 
@@ -369,6 +419,16 @@ crash / hang / OOM takes down the single-threaded hub. Required:
   until the next successful reload (a fail-*open*). Pattern: `reopen(path,
   current)` returns `current` on open failure and only swaps on success (closing
   the old handle then). Reviewer-caught in #78 D2.
+- **A remote peer can vanish between `accept()` and the first socket read.**
+  `getpeername()` then returns nil - remote-triggerable (connect + immediate
+  RST). Any accept-path guard that keys on the peer IP (blocklist, per-IP
+  ratelimit) MUST check for a nil peer address and DROP the socket first;
+  feeding nil into `ratelimit.accept_ip` raised inside the single-threaded
+  accept loop and took the whole listener down until restart (#401, v3.1.13,
+  Sopor). Belt-and-suspenders: the consuming guard also nil-guards (allow + let
+  the caller close the dead socket). A crash in the accept loop is hub-DOWN, not
+  one-connection-down - treat the accept path with the same paranoia as an
+  untrusted-input parser.
 
 ---
 
