@@ -79,7 +79,7 @@ luadch is a DC++ **ADC** hub server written in Lua with a thin C launcher
 
 - **Current source version:** `v3.2.0-dev` on `master`, `PROGRAM_NAME = "Luadch-NG"`
   (see `core/const.lua`). The 3.1.x maintenance line keeps `PROGRAM_NAME = "Luadch"`.
-- **Latest release:** `v3.1.12` (2026-07-10, on `release/3.1.x`)
+- **Latest release:** `v3.1.13` (2026-07-11, on `release/3.1.x`)
 - **Status:** the Phase 1-7 modernisation programme is content-complete; work is now
   3.2.x feature development (Phase 8+) plus 3.1.x security-only maintenance (see §8).
 - **Open issues:** check `gh issue list --repo luadch-ng/luadch` (never trust a
@@ -132,8 +132,8 @@ order (its inline comments explain each ordering constraint).
 | Boot + config | `init`, `const`, `cfg`, `cfg_defaults`, `cfg_users`, `cfg_lang`, `cfg_secret`, `secrets` | Restricted env + module loader; program constants; settings/user.tbl/language handling; AES-256-GCM at-rest crypto; env-var-first secret lookup |
 | Network + ADC | `server`, `iostream`, `adc`, `hub`, `hub_dispatch`, `hub_user_object`, `hub_bot_object`, `hbri`, `ratelimit`, `blocklist`, `ipmatch` | select() loop + SSL; framing pipeline; ADC parse/escape/format; main loop + login; command dispatch; user/bot objects; dual-stack secondary-IP verification; DoS limits; pre-handshake IP/CIDR blocklist; IP/CIDR primitives |
 | HTTP API | `http`, `http_router`, `http_client`, `http_filter`, `http_events`, `util_http` | Inbound HTTP/JSON API + router + auth; non-blocking OUTBOUND client; filter/sort/paginate helper; deferred-event endpoints; plugin endpoint helper |
-| Crypto + boot trust | `sha256`, `cert_bootstrap`, `cacert_bootstrap` | Pure-Lua SHA-256; first-boot TLS-cert auto-gen (#77); CA-bundle reconciliation |
-| Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `bloom`, `ensuredirs`, `doc` (disabled), `hci` (stub) | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader; bloom filter; boot-time runtime-dir self-heal; dormant |
+| Crypto + boot trust | `sha256`, `hmac`, `cert_bootstrap`, `cacert_bootstrap` | Pure-Lua SHA-256; HMAC-SHA256 (RFC 2104, sandbox-exposed for signed-webhook auth, #398); first-boot TLS-cert auto-gen (#77); CA-bundle reconciliation |
+| Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `geoip_update`, `bloom`, `ensuredirs`, `doc` (disabled), `hci` (stub) | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader + in-hub GeoLite2 auto-update; bloom filter; boot-time runtime-dir self-heal; dormant |
 
 Two hard ceilings (both enforced by review, not tooling):
 
@@ -248,10 +248,15 @@ cross-host to a signed CDN URL), boot-time runtime-dir self-heal
 (`core/ensuredirs.lua` + a `makedir` C primitive #382, #384) with a daemon
 `umask(027)` hardening, and an `etc_blocklist_feeds` reload-throttle (#386).
 
-**Current era: bug-issue triage** - working the `gh issue list --label bug`
-backlog one at a time (each: deep-dive from source per §1a.3/4, since many
-are old-version reports asking "fixed in 3.x?"). GitFlow A per fix; batch
-dev->master as a MERGE commit (never squash - see §8 branch hygiene).
+**Current era: feature plugins + bug-issue triage.** Recent dev: push/pull
+status export (`etc_status_push` #395), the inbound webhook receiver
+(`etc_webhook` #398, the first `scope="none"` plugin route), plus a run of
+Sopor-reported fixes (v3.1.13 ratelimit hub-crash #401, `usr_uptime`
+undercount #405, BLOM smoke de-flake #408). Alongside, the
+`gh issue list --label bug` backlog is worked one at a time (each: deep-dive
+from source per §1a.3/4, since many are old-version reports asking "fixed in
+3.x?"). GitFlow A per fix; batch dev->master as a MERGE commit (never squash
+- see §8 branch hygiene).
 
 **HTTP-endpoint authoring** (which helper for which endpoint shape, envelope
 contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and
@@ -275,7 +280,7 @@ contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and
   **this file**, not in memory, because they belong with the code. Durable
   engineering patterns belong in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) so
   they reach every assistant and contributor, not just one memory owner.
-- **Releases** — this fork's latest release is `v3.1.12` (see §2 and §8); UPSTREAM
+- **Releases** — this fork's latest release is `v3.1.13` (see §2 and §8); UPSTREAM
   `luadch/luadch` last released v2.23 back in 2022-04-02 (see Upstream policy below).
 
 ### Upstream policy
@@ -325,7 +330,7 @@ open a fresh issue here that references the upstream one in its body.
   source of truth (`wc -l`, `gh issue list`, CI) instead. Two exemptions, because
   they do NOT drift: (a) frozen historical facts about a CLOSED phase (e.g. "24
   findings / 22 closed" in the §5 table); (b) release/version/"verified-on"
-  markers (e.g. "latest release v3.1.12", the deps-table verified date). A live
+  markers (e.g. "latest release v3.1.13", the deps-table verified date). A live
   status line (like §5 "In flight") must name the tracker as its source of truth.
 
 ### Tooling gotchas (these have already burned us)
@@ -386,6 +391,16 @@ project follows a standard maintenance-branch model:
 | Documentation | yes | **no** |
 
 The bar for 3.1.x backport is high. When in doubt, don't.
+
+**Drop-in plugin patch as a lighter alternative to a 3.1.x release.**
+When a bug hits a plugin already shipped on 3.1.x but the fix does not
+merit cutting a full `v3.1.N` tag (maintainer judgement), an option
+between "backport + release" and "wontfix" is to hand the operator a
+standalone patched plugin file: bump `scriptversion`, add a header note
+describing the fix, and they drop it into `scripts/`. master/dev still
+carry the canonical fix. Use sparingly - it is an out-of-band artifact
+with no release record (e.g. the `usr_uptime.lua` v0.10.1 drop-in given
+to Sopor for the #405 undercount; master/dev carry v0.12).
 
 ### Branch hygiene
 

@@ -225,7 +225,7 @@ http_api_tokens = {
 
 | Scope | Can | Cannot |
 |---|---|---|
-| `none` | Reached without a bearer token; the route is part of the route table and listed by `/v1/endpoints`. Only used for `/health` today. | n/a (no auth gate) |
+| `none` | Reached without a bearer token; the route is part of the route table and listed by `/v1/endpoints`. Used by `/health` and by plugins that do their OWN authentication (e.g. `etc_webhook`'s HMAC-signed webhook routes - the handler verifies the signature over `req.raw_body`). | n/a (no router auth gate; the handler authenticates) |
 | `read` | GET endpoints + `GET /v1/endpoints` filtered to {`none`, `read`} routes | Any non-GET; admin-scoped GETs (none planned but reserved) |
 | `admin` | Everything `read` + all writes (POST/PUT/PATCH/DELETE) + admin-scoped GETs | n/a |
 
@@ -388,9 +388,9 @@ hub.http_register( method, path, scope, handler, meta )
 |---|---|---|
 | `method` | string | `"GET"` / `"POST"` / `"PUT"` / `"PATCH"` / `"DELETE"` |
 | `path` | string | URL path including version prefix, e.g. `"/v1/bans"`. Path variables in `{name}` form, e.g. `"/v1/bans/{id}"` |
-| `scope` | string | `"read"` or `"admin"` |
+| `scope` | string | `"read"`, `"admin"`, or `"none"`. `"none"` skips the router's bearer-token gate - use ONLY when the endpoint does its OWN authentication (e.g. an HMAC-signed webhook receiver, `etc_webhook`); see the §4.4 scope table |
 | `handler` | function | `function(req) -> result` (see §6 + §7) |
-| `meta` | table or nil | Optional metadata - `{description=, request_schema=, response_schema=, audit_redact_body=}`. Surfaced via `/v1/endpoints` (except `audit_redact_body`, which is router-internal). Used by WebUI for form rendering. `audit_redact_body = true` opts the route into §6.8 audit-body redaction (used by password endpoints) |
+| `meta` | table or nil | Optional metadata - `{plugin=, description=, request_schema=, response_schema=, audit_redact_body=}`. `plugin` is the source plugin name, for `/v1/endpoints` + `/v1/plugins` attribution. Surfaced via `/v1/endpoints` (except `audit_redact_body`, which is router-internal). Used by WebUI for form rendering. `audit_redact_body = true` opts the route into §6.8 audit-body redaction (used by password endpoints) |
 
 #### 5.1.1 Higher-level helper: `util_http.http_register_user_action`
 
