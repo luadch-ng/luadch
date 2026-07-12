@@ -262,6 +262,12 @@ local SANDBOX_GLOBALS = {
     -- auto-update. etc_geoip.lua calls geoip_update.update{...} on its
     -- update timer to fetch + refresh the .mmdb the reader reads.
     "geoip_update",
+    -- core/hmac.lua: HMAC-SHA256 (RFC 2104) built on core/sha256.lua.
+    -- Exposed for plugins that authenticate signed inbound webhooks
+    -- (etc_webhook: Discourse / GitHub sign the request body with
+    -- HMAC-SHA256). Raw sha256 deliberately stays OUT of the sandbox -
+    -- plugins get the MAC primitive, not the underlying hash.
+    "hmac",
     "unicode",
     -- read-only program constants (PROGRAM_NAME / VERSION / FORK /
     -- COPYRIGHT / CONFIG_PATH). Static strings, no capability; lets

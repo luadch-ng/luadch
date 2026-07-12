@@ -34,6 +34,7 @@ local _real = {
     string   = string,
     table    = table,
     os       = os,
+    pcall    = pcall,
     cfg      = {
         get = function( key )
             return _cfg_store[ key ]
@@ -233,6 +234,30 @@ assert_eq( "lookup: empty string input -> nil",
 
 assert_eq( "lookup: non-string input -> nil",
     secrets.lookup( 42 ), nil )
+
+-- Case 9 (regression): a cfg key that is unknown to BOTH cfg_defaults
+-- and cfg.tbl makes the REAL cfg.get raise - it indexes the nil
+-- default entry (`_defaultsettings[target][1]`, cfg.lua get()). The
+-- earlier cases use a mock get() that quietly returns nil for unknown
+-- keys, so they do NOT exercise that path; model the raise explicitly
+-- here. lookup() must swallow it and return nil, because dynamically
+-- named secret keys - e.g. the etc_webhook plugin's per-endpoint
+-- `etc_webhook_<name>_secret` - are not cfg_defaults keys and must not
+-- crash the caller's onStart on a miss. Provably fails pre-fix: without
+-- the pcall guard, secrets.lookup propagates the raise and the pcall
+-- below returns ok=false.
+local _plain_get = _real.cfg.get
+_real.cfg.get = function( key )
+    if key == "etc_webhook_unknown_secret" then
+        error( "cfg.lua: function 'get': unknown target (simulated)" )
+    end
+    return _plain_get( key )
+end
+_env[ "LUADCH_ETC_WEBHOOK_UNKNOWN_SECRET" ] = nil
+local _ok, _res = pcall( secrets.lookup, "etc_webhook_unknown_secret" )
+assert_true( "lookup: unknown cfg key does not propagate cfg.get crash", _ok )
+assert_eq( "lookup: unknown cfg key returns nil", _res, nil )
+_real.cfg.get = _plain_get
 
 -- Restore os.getenv
 os.getenv = _real_getenv
