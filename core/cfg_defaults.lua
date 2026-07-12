@@ -3435,6 +3435,19 @@ local defaults = {
         end
     },
 
+    -- etc_prometheus.lua: Prometheus text-exposition /metrics endpoint
+    -- (#83). Off by default; the route is not registered when off.
+    -- Registered here (not only in examples/cfg/cfg.tbl) so a hub that
+    -- whitelists the plugin but whose cfg.tbl predates the key does NOT
+    -- crash at plugin load: etc_prometheus.lua reads this via cfg.get at
+    -- module scope, and cfg.get indexes _defaultsettings[key][1] with no
+    -- fallback for an unregistered key.
+    etc_prometheus_activate = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
     etc_trafficmanager_permission = { {
 
         [ 0 ] = 0,

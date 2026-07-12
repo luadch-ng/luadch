@@ -175,6 +175,14 @@ jobs:
       - name: Run ratelimit unit test
         run: lua5.4 tests/unit/ratelimit_test.lua
 
+      # Regression: a bundled plugin reading a cfg key at module scope
+      # (etc_prometheus_activate) crashed at plugin load when the key was
+      # absent from BOTH the operator cfg.tbl AND cfg_defaults.lua -
+      # cfg.get indexes _defaultsettings[key][1] on nil. Loads the real
+      # cfg_defaults settings table and reproduces cfg.get's lookup path.
+      - name: Run cfg_defaults unit test
+        run: lua5.4 tests/unit/cfg_defaults_test.lua
+
       # #78 Precursor 0d: core/sha256.lua pure-Lua FIPS 180-4. Verifies
       # 8 canonical NIST vectors (empty / abc / message digest /
       # alphabet / alphanumeric / 55-byte / 112-byte / 1M-char) plus
@@ -424,6 +432,10 @@ jobs:
       - name: Run ratelimit unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/ratelimit_test.lua
+
+      - name: Run cfg_defaults unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/cfg_defaults_test.lua
 
       - name: Run sha256 unit test
         shell: msys2 {0}
