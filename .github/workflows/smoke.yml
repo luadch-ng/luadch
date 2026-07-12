@@ -234,6 +234,14 @@ jobs:
       - name: Run etc_status_push unit test
         run: lua5.4 tests/unit/etc_status_push_test.lua
 
+      # usr_uptime: per-user monthly online-time accounting. Regression
+      # for #405 - the periodic credit must not be starved by logout
+      # churn (set_stop no longer resets the timer gate) and must survive
+      # a +reload (onStart re-seeds already-online users). Drives the
+      # captured listeners over a controlled clock.
+      - name: Run usr_uptime unit test
+        run: lua5.4 tests/unit/usr_uptime_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -431,6 +439,10 @@ jobs:
       - name: Run etc_status_push unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_status_push_test.lua
+
+      - name: Run usr_uptime unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/usr_uptime_test.lua
 
       - name: Configure
         shell: msys2 {0}
