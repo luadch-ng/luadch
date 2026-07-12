@@ -138,6 +138,25 @@ The conventions below are either not in it or are easy to get wrong:
   #238 / #239. Fix: either mutate the table in place (never rebind the local),
   or export a **getter function** `function() return state end` so callers
   always read the live table. See the `scripts/etc_aliases.lua` header.
+- **A periodic outbound fetch must persist its next-fetch deadline across
+  `+reload`.** A plugin that polls an external endpoint on an `onTimer`
+  deadline (`if now >= next_fetch then ...; next_fetch = now + interval`)
+  holds `next_fetch` in a RAM-only file-local. `onStart` fires on every
+  `+reload` (a full Lua restart), so re-seeding `next_fetch = now + <small>`
+  there means every reload re-fetches shortly after boot - an operator
+  reloading several times a day hammers a rate-limited provider (a feed
+  gets the hub's IP firewalled; MaxMind / AbuseIPDB have daily quotas).
+  Fix: persist the last-fetch epoch to `scripts/data/<plugin>.tbl` - write
+  it when a request actually goes out, **including on failure** (a
+  429/500/timeout still hit the provider, so those are exactly who a
+  reload-loop must not re-hit) - and in `onStart` schedule
+  `next_fetch = min(last_fetch + interval, now + interval)`, or a staggered
+  `now + <small>` only if never-fetched / overdue (the `min` caps a bogus
+  future timestamp from clock skew / a corrupt state file). Note the state
+  file loses no protection on reload - the fetched data (feed entries, the
+  `.mmdb`) survives independently. Same class of bug fixed twice:
+  `etc_blocklist_feeds` (#386) and `etc_geoip` auto-update (#414); when you
+  add a third periodic fetcher, do this from the start.
 - **i18n: all-or-nothing, en + de.** If a plugin uses `cfg.loadlanguage`, every
   operator-visible string goes through it, and both `scripts/lang/<name>.lang.en`
   and `.lang.de` ship. Keep DC jargon (Hub, Slot, Share, OP, Kick, Ban, Nick,
