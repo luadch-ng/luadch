@@ -3422,6 +3422,19 @@ local defaults = {
         end
     },
 
+    -- etc_webhook.lua: inbound webhook receiver (Discourse / GitHub /
+    -- ...). Only the master switch lives in cfg.tbl; ALL endpoint config
+    -- (paths, headers, secrets, templates, ...) lives in the
+    -- operator-edited cfg/webhooks.tbl so cfg.tbl stays lean. Per-endpoint
+    -- secrets resolve env-var-first (LUADCH_ETC_WEBHOOK_<NAME>_SECRET),
+    -- else the etc_webhook_<name>_secret cfg key, else an inline secret in
+    -- cfg/webhooks.tbl. See docs/WEBHOOKS.md.
+    etc_webhook_activate = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
     etc_trafficmanager_permission = { {
 
         [ 0 ] = 0,

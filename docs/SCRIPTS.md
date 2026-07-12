@@ -984,6 +984,35 @@ feature list, TLS cipher, upload / download speeds).
 
 **Config:** `etc_userlogininfo_activate`
 
+### etc_webhook
+
+INBOUND webhook receiver: an external service (a Discourse forum,
+GitHub, GitLab, CI, monitoring, ...) POSTs an HMAC-SHA256-signed JSON
+body to a hub HTTP endpoint; the hub verifies the signature over the raw
+body, filters + de-duplicates, renders a templated message and announces
+it in chat as a named bot. The push-inbound mirror of `etc_status_push`
+(outbound) and the inbound complement of `etc_prometheus` (pull
+`/metrics`).
+
+Multi-endpoint: the operator-edited `cfg/webhooks.tbl` holds an array of
+endpoints, each with its own path, signature / event / id headers, event
+filter, bot nick, min-level and `{dotted.path}` message templates.
+Per-endpoint secrets resolve env-var-first
+(`LUADCH_ETC_WEBHOOK_<NAME>_SECRET`), else the `etc_webhook_<name>_secret`
+cfg key, else an inline `secret` in the file; an endpoint with no secret
+is skipped (never runs unsigned). The endpoint registers with
+`scope="none"` and does its own HMAC auth (`adclib.constant_time_eq`
+over `req.raw_body`).
+
+Only the master switch `etc_webhook_activate` lives in `cfg.tbl`; all
+endpoint config lives in `cfg/webhooks.tbl` (copy
+`examples/cfg/webhooks.tbl`). The HTTP API listener must be reachable
+from the sender - put a reverse proxy with TLS in front. Full setup
+(Discourse / GitHub webhook config, reverse proxy, security) in
+[`docs/WEBHOOKS.md`](WEBHOOKS.md).
+
+**Config:** `etc_webhook_activate` + `cfg/webhooks.tbl`
+
 ---
 
 ## Hub management plugins
