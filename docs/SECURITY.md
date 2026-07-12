@@ -535,11 +535,17 @@ unaffected either way.
 
 **With `kill_wrong_ips = false` (new default):**
 
-- VPN users with stale cached IPs, CGNAT users with manual WAN-IP
-  misconfiguration, and dual-stack users with kernel-vs-config
-  family mismatch all stay connected. Their broadcast INF carries
-  the authenticated TCP source IP, so peers reach them correctly
-  in the typical VPN-egress / CGNAT-egress / single-NAT scenarios.
+- Clients whose INF-advertised IP does not match their TCP source -
+  a VPN client with a stale cached IP, a client hand-set with the
+  wrong External / WAN IP, a dual-stack client where the kernel
+  picked a different outbound family than the configured advertise -
+  stay connected instead of being kicked. Their broadcast INF is
+  rewritten to the authenticated TCP source IP, so peers reach them
+  correctly wherever that source IP is itself reachable (VPN-egress,
+  single-NAT). This gate only concerns the advertised-vs-source
+  *mismatch*; it is unrelated to how the hub blocks users - e.g. the
+  Traffic Manager, which on 3.x decides on level / share / account-nick,
+  not IP ([#364](https://github.com/luadch-ng/luadch/issues/364)).
 - The edge case where the user's TCP source genuinely cannot reach
   their P2P listener (multi-WAN with policy routing, certain
   corporate setups) becomes a silent failure: user stays online,

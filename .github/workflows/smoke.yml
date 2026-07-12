@@ -158,6 +158,14 @@ jobs:
       - name: Run secrets unit test
         run: lua5.4 tests/unit/secrets_test.lua
 
+      # core/ratelimit.lua per-IP accept guard. Regression: accept_ip(nil)
+      # must not crash - server.lua passes a nil clientip when getpeername()
+      # races with a peer reset, which used to raise in the accept loop and
+      # take the listener down (Sopor, 3.1.11). Plus limiter-still-works
+      # sanity + disabled-passthrough.
+      - name: Run ratelimit unit test
+        run: lua5.4 tests/unit/ratelimit_test.lua
+
       # #78 Precursor 0d: core/sha256.lua pure-Lua FIPS 180-4. Verifies
       # 8 canonical NIST vectors (empty / abc / message digest /
       # alphabet / alphanumeric / 55-byte / 112-byte / 1M-char) plus
@@ -231,6 +239,14 @@ jobs:
       # guard, and the inert paths (no token / url / http_client).
       - name: Run etc_status_push unit test
         run: lua5.4 tests/unit/etc_status_push_test.lua
+
+      # usr_uptime: per-user monthly online-time accounting. Regression
+      # for #405 - the periodic credit must not be starved by logout
+      # churn (set_stop no longer resets the timer gate) and must survive
+      # a +reload (onStart re-seeds already-online users). Drives the
+      # captured listeners over a controlled clock.
+      - name: Run usr_uptime unit test
+        run: lua5.4 tests/unit/usr_uptime_test.lua
 
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -380,6 +396,10 @@ jobs:
         shell: msys2 {0}
         run: lua5.4 tests/unit/secrets_test.lua
 
+      - name: Run ratelimit unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/ratelimit_test.lua
+
       - name: Run sha256 unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/sha256_test.lua
@@ -429,6 +449,10 @@ jobs:
       - name: Run etc_status_push unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_status_push_test.lua
+
+      - name: Run usr_uptime unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/usr_uptime_test.lua
 
       - name: Configure
         shell: msys2 {0}
