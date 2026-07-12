@@ -444,6 +444,9 @@ local secrets = use "secrets"
 secrets.register( "etc_geoip_license_key" )
 secrets.register( "etc_proxydetect_api_key" )
 secrets.register( "etc_status_push_token" )   -- heartbeat bearer token
+-- etc_webhook registers one HMAC secret PER configured endpoint,
+-- dynamically named etc_webhook_<name>_secret, e.g.:
+secrets.register( "etc_webhook_discourse_secret" )
 ```
 
 `register()` is exposed to every plugin via `SANDBOX_GLOBALS` and
@@ -486,6 +489,39 @@ they already manage `cfg.tbl` (chmod 600 + backup separation).
 process environment, which Linux exposes via `/proc/<pid>/environ`
 to the process owner. Run the hub under its own dedicated user;
 the per-OS hardening recipes above already cover this.
+
+### Inbound webhook auth (`etc_webhook`)
+
+`etc_webhook` (operator guide: [`docs/WEBHOOKS.md`](WEBHOOKS.md)) is the
+first plugin to register an HTTP route with **`scope = "none"`** - the
+router's bearer-token gate is skipped and the handler does its OWN
+authentication:
+
+- **HMAC-SHA256 over the raw body.** Each endpoint has a shared secret;
+  the handler recomputes `hmac.sha256(secret, req.raw_body)` (the exact
+  received bytes, before any re-encode) and compares it to the sender's
+  signature header (`X-Discourse-Event-Signature` /
+  `X-Hub-Signature-256`) with `adclib.constant_time_eq`. A missing or
+  wrong signature returns 401 and nothing is announced. An endpoint with
+  no resolvable secret is not even registered (it can never run
+  unsigned).
+- **Secret at rest.** Per-endpoint secrets resolve env-var-first
+  (`LUADCH_ETC_WEBHOOK_<NAME>_SECRET`), else the
+  `etc_webhook_<name>_secret` cfg key, else inline in the chmod-600
+  `cfg/webhooks.tbl` (which is NOT emitted by `GET /v1/config`). The
+  value is never logged (debug lines name the key / env-var only).
+- **Replay / dedup.** Duplicate deliveries (sender retried) are dropped
+  by the delivery-id header (`X-Discourse-Event-Id` /
+  `X-GitHub-Delivery`), bounded to `dedup_max` entries.
+- **Content safety.** Every templated field is control-byte-stripped and
+  length-capped before broadcast; a per-minute flood cap bounds chat
+  spam. The announcement carries only the operator-authored template +
+  public payload fields.
+- **Exposure.** The HTTP listener is plain HTTP on `127.0.0.1` by
+  default and only binds once a token is configured; a webhook reachable
+  from the internet must sit behind a reverse proxy terminating TLS. The
+  64 KiB request-body cap is global - an oversized signed delivery is
+  rejected (a missed announcement, not a vulnerability).
 
 ---
 

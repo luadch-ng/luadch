@@ -248,6 +248,14 @@ jobs:
       - name: Run usr_uptime unit test
         run: lua5.4 tests/unit/usr_uptime_test.lua
 
+      # etc_webhook (#398): inbound webhook receiver. Uses the REAL
+      # core/hmac.lua so signature verification is genuinely exercised.
+      # Covers HMAC pass / wrong / missing, sha256= prefix, event filter,
+      # dedup, template {dotted.path}/{event}, control-byte strip +
+      # truncation, flood cap, min_level gating, no-secret-skip, inert.
+      - name: Run etc_webhook unit test
+        run: lua5.4 tests/unit/etc_webhook_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -453,6 +461,10 @@ jobs:
       - name: Run usr_uptime unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/usr_uptime_test.lua
+
+      - name: Run etc_webhook unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_webhook_test.lua
 
       - name: Configure
         shell: msys2 {0}
