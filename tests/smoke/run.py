@@ -3053,6 +3053,65 @@ def test_dual_stack_same_port_binds(staging_dir: Path, proc=None):
             )
 
 
+_HUBBOT_EMAIL_MARKER = "escq423mark"
+
+
+def _switch_to_hubbot_email_mode(staging_dir: Path, current_proc, current_log_file):
+    """#423 setup: enable hub_bot_email and set hub_email to a value carrying a
+    backslash + marker, then restart. The hub bot's BINF builds an EM field
+    from hub_email; if that value is not escaped, the backslash is an unknown
+    ADC escape and (since #419) the hub discards its OWN hub-bot INF - so the
+    bot never comes up. Returns the new (proc, log_file)."""
+    stop_hub(current_proc, current_log_file)
+    cfg_path = staging_dir / "cfg" / "cfg.tbl"
+    text = cfg_path.read_text(encoding="utf-8")
+    # cfg.tbl is Lua: a backslash in a string literal is written "\\" (two
+    # bytes), which Lua reads as one backslash. Build the file bytes explicitly
+    # and use a callable replacement so re does not reinterpret the backslashes.
+    lua_value = _HUBBOT_EMAIL_MARKER + "\\\\qmail"    # file bytes: escq423mark\\qmail -> Lua value has one backslash
+    text, n1 = re.subn(
+        r'^\s*hub_email\s*=\s*"[^"]*"\s*,',
+        lambda m: f'    hub_email = "{lua_value}",',
+        text, count=1, flags=re.MULTILINE,
+    )
+    text, n2 = re.subn(
+        r"^\s*hub_bot_email\s*=\s*false\s*,",
+        "    hub_bot_email = true,",
+        text, count=1, flags=re.MULTILINE,
+    )
+    if n1 != 1 or n2 != 1:
+        raise TestFailure(
+            f"could not set hub_email / hub_bot_email in cfg.tbl "
+            f"(hub_email n={n1}, hub_bot_email n={n2})"
+        )
+    cfg_path.write_text(text, encoding="utf-8")
+    time.sleep(1.0)
+    proc, log_file = start_hub(staging_dir)
+    return proc, log_file
+
+
+def test_hubbot_email_escaped(staging_dir: Path, proc=None):
+    """#423 regression: with hub_bot_email=true and a hub_email carrying a
+    backslash, the hub bot's EM field must be ESCAPED so the hub-bot INF is
+    valid. Pre-fix the value was concatenated raw, so (since #419) the hub
+    discards its own hub-bot INF as an unknown escape and the bot never loads.
+    createbot builds + parses the INF at boot, so we assert parse() logged no
+    'unknown escape' discard for the marker hub-bot INF."""
+    wait_for_port(HUB_HOST, TEST_PORT_PLAIN, START_TIMEOUT_SEC)
+    time.sleep(0.5)
+    log_path = staging_dir / "log" / "event.log"
+    txt = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+    bad = [
+        ln for ln in txt.splitlines()
+        if "unknown escape" in ln and _HUBBOT_EMAIL_MARKER in ln
+    ]
+    if bad:
+        raise AssertionError(
+            f"the hub-bot INF was discarded as an unknown escape - hub_email "
+            f"must be escaped in the EM field (#423). Line: {bad[0][:180]!r}"
+        )
+
+
 def _switch_to_hub_listen_loopback_mode(staging_dir: Path, current_proc, current_log_file):
     """#186 setup: stop the hub, set hub_listen to loopback-only and
     blank the IPv6 port arrays (a v4-only bind address yields no IPv6
@@ -13098,6 +13157,20 @@ def main():
         finally:
             if capture is not None:
                 capture.close()
+
+        # #423: hub_bot_email=true + a hub_email carrying a backslash - the
+        # hub-bot EM field must be escaped, else (since #419) the hub discards
+        # its own hub-bot INF. Runs before hub_listen (which is truly last).
+        try:
+            proc, log_file = _switch_to_hubbot_email_mode(
+                staging_dir, proc, log_file
+            )
+            test_hubbot_email_escaped(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  hub-bot EM field escaped (#423): {e}")
+            failed.append("hub-bot EM field escaped (#423)")
+        else:
+            log("PASS  hub-bot EM field escaped (#423)")
 
         # #186: hub_listen must actually restrict the bind address
         # (last test - mutates hub_listen + blanks v6; nothing after).
