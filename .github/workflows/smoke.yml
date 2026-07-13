@@ -157,6 +157,9 @@ jobs:
       - name: Run etc_blocklist unit test
         run: lua5.4 tests/unit/etc_blocklist_test.lua
 
+      - name: Run etc_whitelist unit test
+        run: lua5.4 tests/unit/etc_whitelist_test.lua
+
       - name: Run cmd_usercleaner orphan unit test
         run: lua5.4 tests/unit/cmd_usercleaner_orphan_test.lua
 
@@ -430,6 +433,10 @@ jobs:
       - name: Run etc_blocklist unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_blocklist_test.lua
+
+      - name: Run etc_whitelist unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_whitelist_test.lua
 
       - name: Run cmd_usercleaner orphan unit test
         shell: msys2 {0}

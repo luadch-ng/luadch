@@ -6915,6 +6915,114 @@ def test_blocklist_78_phase_b():
             raise TestFailure(f"+blocklist count (post-del) did not return zero: {reply!r}")
 
 
+def test_whitelist_78_phase_b():
+    """#78 allowlist Phase B etc_whitelist `+whitelist` admin CLI smoke.
+
+    End-to-end via a real ADC login as dummy (level 100 >
+    etc_whitelist_oplevel=80):
+
+      1. The bundled hublist-pinger seed lands on the FIRST boot
+         (store .tbl missing) - `+whitelist count` shows the seeded
+         entries with source=pinger. This is the seed-on-missing
+         validation the unit test can only mock.
+      2. `+whitelist add 198.51.100.0/24 reason="smoke"` -> "added"
+         (TEST-NET-3, never a real host). Capture the new id.
+      3. `+whitelist count` -> seed+1 total, now also "manual".
+      4. `+whitelist show` -> lists BOTH the added CIDR and a seed
+         entry (142.54.190.133), proving seed + operator add coexist.
+      5. `+whitelist del <id>` -> "removed".
+      6. `+whitelist count` -> back to the seed-only total.
+
+    Like the blocklist Phase B test this is registered in the initial
+    TESTS list (NOT the staging-runner block) so it runs in the
+    default-cfg phase, before the strict ratelimit_tiers overlay whose
+    2-BMSG burst would starve this multi-BMSG roundtrip.
+    """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
+    def _dcontains(f, substr):
+        return substr in f.replace("\\s", " ")
+
+    seed_n = 6    # len(BUNDLED_SEED) in scripts/etc_whitelist.lua
+
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+
+        # 1. count -> the bundled pinger seed is present (source=pinger)
+        sock.sendall(f"BMSG {sid} +whitelist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, f"{seed_n} entries total")
+                and _dcontains(f, "pinger"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist count (seed) did not show the pinger seed: {reply!r}")
+
+        # 2. add a TEST-NET-3 CIDR; capture the new entry id
+        sock.sendall(
+            f'BMSG {sid} +whitelist\\sadd\\s198.51.100.0/24\\sreason="smoke"\n'
+            .encode("utf-8")
+        )
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "added")
+                and _dcontains(f, "whitelist entry"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist add did not confirm: {reply!r}")
+        m = re.search(r"entry #(\d+)", reply.replace("\\s", " "))
+        if not m:
+            raise TestFailure(f"+whitelist add reply had no entry id: {reply!r}")
+        added_id = m.group(1)
+
+        # 3. count -> seed + 1, now also "manual"
+        sock.sendall(f"BMSG {sid} +whitelist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, f"{seed_n + 1} entries total")
+                and _dcontains(f, "manual"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist count (post-add) wrong total: {reply!r}")
+
+        # 4. show -> the added CIDR AND a seed entry both appear
+        sock.sendall(f"BMSG {sid} +whitelist\\sshow\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "198.51.100.0/24")
+                and _dcontains(f, "142.54.190.133"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist show missing add or seed entry: {reply!r}")
+
+        # 5. del the entry we added
+        sock.sendall(f"BMSG {sid} +whitelist\\sdel\\s{added_id}\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "removed")
+                and _dcontains(f, "whitelist entry"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist del did not confirm: {reply!r}")
+
+        # 6. count -> back to the seed-only total
+        sock.sendall(f"BMSG {sid} +whitelist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and _dcontains(f, f"{seed_n} entries total"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist count (post-del) did not return to seed total: {reply!r}")
+
+
 def test_blocklist_feeds_status():
     """#78 Phase E etc_blocklist_feeds `+blfeeds` read-only status smoke.
 
@@ -12153,6 +12261,7 @@ TESTS = [
     ("+cmd routing (post-login +help)", test_command_routing),
     ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
     ("blocklist admin CLI (#78 Phase B)", test_blocklist_78_phase_b),
+    ("whitelist admin CLI + pinger seed (#78 allowlist Phase B)", test_whitelist_78_phase_b),
     ("blocklist feeds status (#78 Phase E)", test_blocklist_feeds_status),
     ("proxydetect status (#78 Phase F)", test_proxydetect_status),
     ("S1: fragmented frame reassembled (phase8-io)", test_s1_fragmented_frame_reassembled),
