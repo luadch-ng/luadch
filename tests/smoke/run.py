@@ -1042,6 +1042,76 @@ def test_neg_inf_nick_escape_newline_rejected(staging_dir: Path):
     _neg_inf_nick_escape_sequence_rejected(staging_dir, "\\n")
 
 
+def _send_binf_with_ni(nick: str):
+    """Partial handshake + one BINF carrying the given NI, then drain+close.
+    Used by the #419 unknown-escape tests below."""
+    sock = socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    try:
+        _reader, sid = _neg_handshake_get_sid(sock)
+        cid_b32, pid_b32 = _neg_random_pid_cid_pair()
+        binf = (
+            f"BINF {sid} ID{cid_b32} PD{pid_b32} NI{nick}"
+            f" I40.0.0.0 SUTCP4\n"
+        ).encode("utf-8")
+        sock.sendall(binf)
+        _neg_drain_briefly(sock, timeout=1.0)
+    finally:
+        sock.close()
+
+
+def _event_log_discarded_escape(staging_dir: Path, marker: str) -> bool:
+    """True iff parse() logged an 'unknown escape ... discarding' line for a
+    message carrying `marker` (log_events=true in the smoke override)."""
+    log_path = staging_dir / "log" / "event.log"
+    if not log_path.exists():
+        raise AssertionError(f"event.log not found at {log_path}")
+    txt = log_path.read_text(encoding="utf-8", errors="replace")
+    return any(
+        "unknown escape" in line and marker in line
+        for line in txt.splitlines()
+    )
+
+
+def test_neg_unknown_escape_discarded(staging_dir: Path):
+    """#419 / ADC 1.0 section 3.1: a message containing an unknown escape
+    (anything other than \\s \\n \\\\) must be discarded. A BINF whose NI
+    carries \\q is dropped by parse(). Pre-fix it was accepted (no line)."""
+    marker = secrets.token_hex(4)
+    _send_binf_with_ni(f"esc{marker}\\qname")     # \q on the wire
+    if not _event_log_discarded_escape(staging_dir, marker):
+        raise AssertionError(
+            f"BINF with unknown escape \\q was NOT discarded; no 'unknown "
+            f"escape' log line with marker {marker!r} in event.log (#419)"
+        )
+
+
+def test_neg_trailing_backslash_discarded(staging_dir: Path):
+    """#419: a value ending in a lone backslash is an incomplete/unknown
+    escape and must be discarded (the issue's own naive regex misses this)."""
+    marker = secrets.token_hex(4)
+    _send_binf_with_ni(f"esc{marker}name\\")      # NI ends in a bare backslash
+    if not _event_log_discarded_escape(staging_dir, marker):
+        raise AssertionError(
+            f"BINF with a trailing backslash was NOT discarded; no 'unknown "
+            f"escape' log line with marker {marker!r} in event.log (#419)"
+        )
+
+
+def test_valid_escaped_backslash_not_discarded(staging_dir: Path):
+    """#419 positive control: \\\\ (an escaped backslash) is a VALID escape
+    and must NOT be discarded - exactly the case a naive
+    '\\ not followed by s/n/\\' scan would wrongly reject."""
+    marker = secrets.token_hex(4)
+    _send_binf_with_ni(f"esc{marker}\\\\name")    # \\ on the wire = valid escaped backslash
+    if _event_log_discarded_escape(staging_dir, marker):
+        raise AssertionError(
+            f"BINF with a VALID escaped backslash (\\\\) was wrongly "
+            f"discarded (over-rejection); marker {marker!r} (#419)"
+        )
+
+
 def test_binf_without_i4_or_i6_accepted():
     """#161 regression: a BINF that omits I4 AND I6 must NOT be rejected
     with ISTA 220 'No CID/PID/NICK/IP found in your INF.'. Per ADC 4.3.x
@@ -2981,6 +3051,65 @@ def test_dual_stack_same_port_binds(staging_dir: Path, proc=None):
                 f"existence check fired:\n  " +
                 "\n  ".join(offending[:3])
             )
+
+
+_HUBBOT_EMAIL_MARKER = "escq423mark"
+
+
+def _switch_to_hubbot_email_mode(staging_dir: Path, current_proc, current_log_file):
+    """#423 setup: enable hub_bot_email and set hub_email to a value carrying a
+    backslash + marker, then restart. The hub bot's BINF builds an EM field
+    from hub_email; if that value is not escaped, the backslash is an unknown
+    ADC escape and (since #419) the hub discards its OWN hub-bot INF - so the
+    bot never comes up. Returns the new (proc, log_file)."""
+    stop_hub(current_proc, current_log_file)
+    cfg_path = staging_dir / "cfg" / "cfg.tbl"
+    text = cfg_path.read_text(encoding="utf-8")
+    # cfg.tbl is Lua: a backslash in a string literal is written "\\" (two
+    # bytes), which Lua reads as one backslash. Build the file bytes explicitly
+    # and use a callable replacement so re does not reinterpret the backslashes.
+    lua_value = _HUBBOT_EMAIL_MARKER + "\\\\qmail"    # file bytes: escq423mark\\qmail -> Lua value has one backslash
+    text, n1 = re.subn(
+        r'^\s*hub_email\s*=\s*"[^"]*"\s*,',
+        lambda m: f'    hub_email = "{lua_value}",',
+        text, count=1, flags=re.MULTILINE,
+    )
+    text, n2 = re.subn(
+        r"^\s*hub_bot_email\s*=\s*false\s*,",
+        "    hub_bot_email = true,",
+        text, count=1, flags=re.MULTILINE,
+    )
+    if n1 != 1 or n2 != 1:
+        raise TestFailure(
+            f"could not set hub_email / hub_bot_email in cfg.tbl "
+            f"(hub_email n={n1}, hub_bot_email n={n2})"
+        )
+    cfg_path.write_text(text, encoding="utf-8")
+    time.sleep(1.0)
+    proc, log_file = start_hub(staging_dir)
+    return proc, log_file
+
+
+def test_hubbot_email_escaped(staging_dir: Path, proc=None):
+    """#423 regression: with hub_bot_email=true and a hub_email carrying a
+    backslash, the hub bot's EM field must be ESCAPED so the hub-bot INF is
+    valid. Pre-fix the value was concatenated raw, so (since #419) the hub
+    discards its own hub-bot INF as an unknown escape and the bot never loads.
+    createbot builds + parses the INF at boot, so we assert parse() logged no
+    'unknown escape' discard for the marker hub-bot INF."""
+    wait_for_port(HUB_HOST, TEST_PORT_PLAIN, START_TIMEOUT_SEC)
+    time.sleep(0.5)
+    log_path = staging_dir / "log" / "event.log"
+    txt = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+    bad = [
+        ln for ln in txt.splitlines()
+        if "unknown escape" in ln and _HUBBOT_EMAIL_MARKER in ln
+    ]
+    if bad:
+        raise AssertionError(
+            f"the hub-bot INF was discarded as an unknown escape - hub_email "
+            f"must be escaped in the EM field (#423). Line: {bad[0][:180]!r}"
+        )
 
 
 def _switch_to_hub_listen_loopback_mode(staging_dir: Path, current_proc, current_log_file):
@@ -12157,6 +12286,30 @@ def run_tests(staging_dir: Path):
     else:
         log("PASS  neg: BINF NI with \\n escape rejected (#265)")
 
+    try:
+        test_neg_unknown_escape_discarded(staging_dir)
+    except Exception as e:
+        log(f"FAIL  neg: unknown ADC escape \\q discarded (#419): {e}")
+        failed.append("neg: unknown ADC escape \\q discarded (#419)")
+    else:
+        log("PASS  neg: unknown ADC escape \\q discarded (#419)")
+
+    try:
+        test_neg_trailing_backslash_discarded(staging_dir)
+    except Exception as e:
+        log(f"FAIL  neg: trailing backslash discarded (#419): {e}")
+        failed.append("neg: trailing backslash discarded (#419)")
+    else:
+        log("PASS  neg: trailing backslash discarded (#419)")
+
+    try:
+        test_valid_escaped_backslash_not_discarded(staging_dir)
+    except Exception as e:
+        log(f"FAIL  pos: valid escaped backslash NOT discarded (#419): {e}")
+        failed.append("pos: valid escaped backslash NOT discarded (#419)")
+    else:
+        log("PASS  pos: valid escaped backslash NOT discarded (#419)")
+
     # The plugin-load test reads the hub log, so it runs after all
     # protocol tests have had a chance to exercise the listeners.
     try:
@@ -13004,6 +13157,20 @@ def main():
         finally:
             if capture is not None:
                 capture.close()
+
+        # #423: hub_bot_email=true + a hub_email carrying a backslash - the
+        # hub-bot EM field must be escaped, else (since #419) the hub discards
+        # its own hub-bot INF. Runs before hub_listen (which is truly last).
+        try:
+            proc, log_file = _switch_to_hubbot_email_mode(
+                staging_dir, proc, log_file
+            )
+            test_hubbot_email_escaped(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  hub-bot EM field escaped (#423): {e}")
+            failed.append("hub-bot EM field escaped (#423)")
+        else:
+            log("PASS  hub-bot EM field escaped (#423)")
 
         # #186: hub_listen must actually restrict the bind address
         # (last test - mutates hub_listen + blanks v6; nothing after).
