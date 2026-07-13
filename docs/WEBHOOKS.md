@@ -122,10 +122,13 @@ Deliveries" / test payload for the exact field names** and adjust.
 **Conditions** (optional) filter a delivery on a decoded body field, not
 just the event header. Each entry is `{ path = "dotted.path", equals = X }`
 or `{ path = ..., not_equals = X }`; ALL listed conditions must hold or the
-delivery is acknowledged (200) without announcing. Values compare as
-strings (write a number or a string). A path that does not resolve is
-`nil`, so `not_equals` passes when the field is absent. Conditions apply
-endpoint-wide (to every event the endpoint accepts). Two common uses:
+delivery is acknowledged (200) without announcing. Two numbers compare
+numerically (a config `1` matches JSON `1` or `1.0`); anything else
+compares as strings. A path that does not resolve is `nil`, so `not_equals`
+passes when the field is absent - but `equals` *fails* (drops it), so an
+`equals` condition also drops any accepted event that lacks the field
+(scope `events` accordingly). Conditions apply endpoint-wide (to every
+event the endpoint accepts). Two common uses:
 
 - **GitHub release action:** a GitHub `release` webhook fires for every
   action (`created` / `edited` / `published` / `released` / ...) under the

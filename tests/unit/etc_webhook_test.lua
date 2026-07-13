@@ -360,6 +360,7 @@ _dedup = nil
 -- 14a. not_equals: skip a Discourse topic's opening post (post_number == 1),
 --      but still announce real replies (>= 2) and payloads lacking the field.
 _config = base_config( )
+_config.max_per_minute = 100   -- decouple from the flood cap: suppression is the only variable
 _config.endpoints[ 1 ].templates.post_created = "post {post.post_number}"
 _config.endpoints[ 1 ].conditions = { { path = "post.post_number", not_equals = 1 } }
 load_plugin( )
@@ -368,6 +369,13 @@ _announced = { }
 local B_OPEN = '{"post":{"post_number":1}}'
 fire_handler( discourse_req( "c1", "post_created", sig_for( B_OPEN ), B_OPEN, { post = { post_number = 1 } } ) )
 eq( "conditions not_equals: opening post (post_number=1) suppressed", #_announced, 0 )
+
+-- numeric compare: JSON 1.0 decodes to a Lua float; it must still match the
+-- integer config 1 (a plain string compare would see "1.0" != "1" and leak).
+_announced = { }
+local B_OPENF = '{"post":{"post_number":1.0}}'
+fire_handler( discourse_req( "c1f", "post_created", sig_for( B_OPENF ), B_OPENF, { post = { post_number = 1.0 } } ) )
+eq( "conditions not_equals: float opening post (1.0) also suppressed", #_announced, 0 )
 
 _announced = { }
 local B_REPLY = '{"post":{"post_number":2}}'
@@ -382,6 +390,7 @@ eq( "conditions not_equals: absent field (nil) still announces", #_announced, 1 
 -- 14b. equals: GitHub-style action filter - announce only action == "released"
 --      (all release actions share event=release; only the body field differs).
 _config = base_config( )
+_config.max_per_minute = 100
 _config.endpoints[ 1 ].templates.post_created = "release {action}"
 _config.endpoints[ 1 ].conditions = { { path = "action", equals = "released" } }
 load_plugin( )

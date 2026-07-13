@@ -157,6 +157,11 @@ local function normalise_endpoint( raw )
                     conditions[ #conditions + 1 ] = { path = c.path, op = "eq", value = c.equals }
                 elseif c.not_equals ~= nil then
                     conditions[ #conditions + 1 ] = { path = c.path, op = "ne", value = c.not_equals }
+                else
+                    -- a path-only entry (e.g. a typo'd `equal`/`not_equal`)
+                    -- would otherwise vanish silently, leaving the endpoint
+                    -- with no filter and announcing everything.
+                    hub_debug( scriptname .. ": endpoint '" .. name .. "': condition on '" .. c.path .. "' has neither equals nor not_equals - ignored" )
                 end
             end
         end
@@ -273,19 +278,26 @@ local function resolve_path( body, path )
 end
 
 --// endpoint conditions: body-field predicates that ALL must hold for a
---// delivery to announce. Values are compared as strings so operators can
---// write a number or a string interchangeably. A path that does not
---// resolve is nil -> "nil", so `not_equals` passes when the field is absent
---// (e.g. a Discourse topic_created carries no post.post_number, so a
---// "post.post_number not_equals 1" endpoint still announces the topic).
+--// delivery to announce. Two numbers compare numerically (so a config `1`
+--// matches JSON `1` OR `1.0` - dkjson decodes `1.0` as a float); anything
+--// else compares as strings. A path that does not resolve is nil, so
+--// `not_equals` passes when the field is absent (a Discourse topic_created
+--// carries no post.post_number, so a "post.post_number not_equals 1"
+--// endpoint still announces the topic) while `equals` fails (drops it).
 --// Conditions apply endpoint-wide (to every event the endpoint accepts).
 local function conditions_pass( entry, body )
     for _, c in ipairs( entry.conditions ) do
-        local actual = tostring( resolve_path( body, c.path ) )
-        if c.op == "eq" then
-            if actual ~= tostring( c.value ) then return false end
+        local actual = resolve_path( body, c.path )
+        local match
+        if type( actual ) == "number" and type( c.value ) == "number" then
+            match = ( actual == c.value )
         else
-            if actual == tostring( c.value ) then return false end
+            match = ( tostring( actual ) == tostring( c.value ) )
+        end
+        if c.op == "eq" then
+            if not match then return false end
+        else
+            if match then return false end
         end
     end
     return true
