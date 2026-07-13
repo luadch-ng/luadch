@@ -256,11 +256,12 @@ plus Sopor-reported fixes (v3.1.13 ratelimit hub-crash #401, `usr_uptime`
 undercount #405, BLOM smoke de-flake #408; **v3.1.14** Windows `FD_SETSIZE`
 64->1024 hub-crash #416, Sopor - the Windows luasocket build inherited the
 Winsock-default 64-socket `select()` cap, `>1024` needs the `select`->`poll`
-port #310). In flight on `dev` (awaiting testhub + dev->master): the ADC
-parser now discards messages with unknown escape sequences per ADC 3.1
+port #310). Shipped to master 2026-07-13 (#419/#420/#423 all closed): the
+ADC parser now discards messages with unknown escape sequences per ADC 3.1
 (#419) + hub-bot INF `EM` escaping (#423), and an `etc_webhook` body-field
-`conditions` filter (#420, filter on a JSON field like a GitHub release
-`action` or a Discourse opening post, not just the event header). A
+`conditions` filter (#420 - fixed a live double-announce by filtering on a
+JSON body field like a GitHub release `action=released` or a Discourse
+opening post, not just the event header). A
 recurring pattern this era:
 a **periodic-fetch plugin must persist its next-fetch deadline across
 `+reload`**, or every reload re-hits a rate-limited provider - fixed twice
