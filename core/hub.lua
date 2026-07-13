@@ -1862,6 +1862,15 @@ end
 loop = function()
     signal_set( "external_exit_request", false )
     signal_set( "hub", "run" )
+    -- One-time boot line: the compile-time select() capacity (luasocket
+    -- FD_SETSIZE). server.tick() selects over every connected socket at once,
+    -- so once the hub holds this many sockets socket.select raises "too many
+    -- sockets" and this loop dies. On Windows this is the Winsock default 64
+    -- unless the luasocket build raises it (luasocket/CMakeLists.txt, #416);
+    -- on Linux glibc it is 1024. Logged (event.log) so operators can diagnose
+    -- that class of crash; watching more sockets needs the select->poll port
+    -- (#310).
+    out_put( "hub.lua: select() capacity (FD_SETSIZE): ", ( use "socket" )._SETSIZE, " sockets" )
     while signal_get "hub" == "run" do
         server.tick()
         if not signal_get( "external_exit_request" ) then
