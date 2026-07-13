@@ -97,6 +97,9 @@ return {
                 topic_created = "New topic by {topic.created_by.username}: {topic.title} -> https://forum.example.com/t/{topic.slug}/{topic.id}",
                 post_created  = "New post by {post.username} in \"{post.topic_title}\" -> https://forum.example.com/t/{post.topic_slug}/{post.topic_id}/{post.post_number}",
             },
+            -- optional: filter on a body field (see "Conditions" below).
+            -- Here: skip a new topic's own opening post so it announces once.
+            conditions = { { path = "post.post_number", not_equals = 1 } },
             -- default_template = "..."           -- optional TOP-LEVEL field (sibling of templates, NOT inside it); used when no per-event template matches
             -- secret: see section 4
         },
@@ -115,6 +118,23 @@ missing path renders empty. Every value is control-byte-stripped and
 truncated to `field_maxlen`. The example paths are typical but payloads
 differ by product / version - **check your webhook's own "Recent
 Deliveries" / test payload for the exact field names** and adjust.
+
+**Conditions** (optional) filter a delivery on a decoded body field, not
+just the event header. Each entry is `{ path = "dotted.path", equals = X }`
+or `{ path = ..., not_equals = X }`; ALL listed conditions must hold or the
+delivery is acknowledged (200) without announcing. Values compare as
+strings (write a number or a string). A path that does not resolve is
+`nil`, so `not_equals` passes when the field is absent. Conditions apply
+endpoint-wide (to every event the endpoint accepts). Two common uses:
+
+- **GitHub release action:** a GitHub `release` webhook fires for every
+  action (`created` / `edited` / `published` / `released` / ...) under the
+  same `x-github-event: release` header - only the body `action` differs.
+  `{ path = "action", equals = "released" }` announces just the final one.
+- **Discourse opening post:** a new topic fires `topic_created` AND
+  `post_created` (its auto opening post). `{ path = "post.post_number",
+  not_equals = 1 }` drops that duplicate opening post while still announcing
+  the topic (which carries no `post.post_number`) and real replies (>= 2).
 
 ---
 
@@ -154,9 +174,11 @@ Admin -> API -> Webhooks -> New:
 - **Secret:** the value from section 4.
 - **Events:** pick "Topic Event" / "Post Event" (or "Send me everything"
   and filter with `events` in `cfg/webhooks.tbl`). Note: with BOTH
-  categories enabled, a new topic fires `topic_created` AND
-  `post_created` (its first post), so it announces twice - subscribe to
-  only one category, or drop one key from `events`, if that bothers you.
+  categories enabled, a new topic fires `topic_created` AND `post_created`
+  (its opening post), so it would announce twice - the example config's
+  `conditions = { { path = "post.post_number", not_equals = 1 } }` drops
+  that duplicate opening post (real replies still announce). Or subscribe
+  to only one category.
 
 Discourse signs the body as `X-Discourse-Event-Signature: sha256=<hmac>`
 and sends both `X-Discourse-Event` (the specific event, e.g.
@@ -174,11 +196,16 @@ Repo (or org) -> Settings -> Webhooks -> Add webhook:
 - **Payload URL:** `https://hub.example.org/webhook/github`
 - **Content type:** `application/json`
 - **Secret:** the value from section 4.
-- **Events:** choose the individual events you want.
+- **Events:** subscribe to what you want (e.g. "Releases"). A "Releases"
+  subscription delivers every release action under one
+  `x-github-event: release`; use `conditions` to announce only the one you
+  want (the example filters to `action = "released"`).
 
 GitHub signs as `X-Hub-Signature-256: sha256=<hmac>` and sends
 `X-GitHub-Event` + `X-GitHub-Delivery`. Uncomment the GitHub block in
-`examples/cfg/webhooks.tbl` as a starting point.
+`examples/cfg/webhooks.tbl` as a starting point - it announces only the
+final `released` action (with the release URL); an org-level webhook
+covers all repos, and `{repository.name}` distinguishes them.
 
 ### Reverse proxy (nginx example)
 
@@ -201,7 +228,7 @@ TLS is terminated by the proxy; the hub speaks plain HTTP on loopback.
 | Log: `endpoint '<name>' has no secret ... skipped` | No secret resolved - set the env var, cfg key, or inline `secret`. |
 | Sender shows **401** | Signature mismatch. The secret differs between sender and hub, or `signature_header` / `signature_prefix` is wrong for that sender. |
 | Sender shows **415** | The sender isn't using `Content-Type: application/json`. |
-| **200 but no chat message** | The event isn't in your `events` filter, there's no `templates` entry for it, or the rendered text is empty. A ping is a 200-with-no-announce by design. |
+| **200 but no chat message** | The event isn't in your `events` filter, a `conditions` filter dropped it, there's no `templates` entry for it, or the rendered text is empty. A ping is a 200-with-no-announce by design. |
 | Sender shows **413** | The delivery body exceeds the 64 KiB cap. |
 | Sender can't reach the hub | The HTTP listener isn't up (`http_port` + a token needed) or the reverse proxy isn't forwarding to the loopback port. |
 | Duplicate announcements | Only if the source sends no delivery-id header (dedup needs `id_header`), or `dedup_max` is too small for the volume. |

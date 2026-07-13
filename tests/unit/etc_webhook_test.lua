@@ -14,7 +14,8 @@
     event filter (allowed / unlisted / ping), dedup, template rendering
     ({dotted.path}, {event}, missing path), control-byte strip +
     truncation, global flood cap, min_level gating (per-user reply vs
-    broadcast), missing-secret endpoint skipped, activate=false inert.
+    broadcast), missing-secret endpoint skipped, activate=false inert,
+    body-field conditions (equals / not_equals).
 
     Run: lua5.4 tests/unit/etc_webhook_test.lua
 
@@ -351,6 +352,49 @@ eq( "existing dedup file loaded via util.loadtable", _dedup_loadtable_called, tr
 fire_handler( discourse_req( "persisted", "post_created", sig_for( BODY ), BODY, BTBL ) )
 eq( "pre-seen id from disk is deduped (no announce)", #_announced, 0 )
 _dedup = nil
+
+----------------------------------------------------------------------
+-- 14. body-field conditions (v0.03). Fail pre-fix: without the feature
+--     every one of these would announce (the conditions field is ignored).
+----------------------------------------------------------------------
+-- 14a. not_equals: skip a Discourse topic's opening post (post_number == 1),
+--      but still announce real replies (>= 2) and payloads lacking the field.
+_config = base_config( )
+_config.endpoints[ 1 ].templates.post_created = "post {post.post_number}"
+_config.endpoints[ 1 ].conditions = { { path = "post.post_number", not_equals = 1 } }
+load_plugin( )
+
+_announced = { }
+local B_OPEN = '{"post":{"post_number":1}}'
+fire_handler( discourse_req( "c1", "post_created", sig_for( B_OPEN ), B_OPEN, { post = { post_number = 1 } } ) )
+eq( "conditions not_equals: opening post (post_number=1) suppressed", #_announced, 0 )
+
+_announced = { }
+local B_REPLY = '{"post":{"post_number":2}}'
+fire_handler( discourse_req( "c2", "post_created", sig_for( B_REPLY ), B_REPLY, { post = { post_number = 2 } } ) )
+eq( "conditions not_equals: reply (post_number=2) announced", #_announced, 1 )
+
+_announced = { }
+local B_NOFIELD = '{"post":{}}'   -- field absent (like a topic_created payload) -> nil passes not_equals
+fire_handler( discourse_req( "c3", "post_created", sig_for( B_NOFIELD ), B_NOFIELD, { post = { } } ) )
+eq( "conditions not_equals: absent field (nil) still announces", #_announced, 1 )
+
+-- 14b. equals: GitHub-style action filter - announce only action == "released"
+--      (all release actions share event=release; only the body field differs).
+_config = base_config( )
+_config.endpoints[ 1 ].templates.post_created = "release {action}"
+_config.endpoints[ 1 ].conditions = { { path = "action", equals = "released" } }
+load_plugin( )
+
+_announced = { }
+local B_CREATED = '{"action":"created"}'
+fire_handler( discourse_req( "e1", "post_created", sig_for( B_CREATED ), B_CREATED, { action = "created" } ) )
+eq( "conditions equals: action=created suppressed", #_announced, 0 )
+
+_announced = { }
+local B_RELEASED = '{"action":"released"}'
+fire_handler( discourse_req( "e2", "post_created", sig_for( B_RELEASED ), B_RELEASED, { action = "released" } ) )
+eq( "conditions equals: action=released announced", #_announced, 1 )
 
 ----------------------------------------------------------------------
 if failures > 0 then

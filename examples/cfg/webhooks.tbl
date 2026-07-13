@@ -22,6 +22,12 @@
     but payloads differ by product/version - check your webhook's own
     "Recent Deliveries" / test payload for the exact field names.
 
+    Optional per-endpoint `conditions` filter a delivery on a body field
+    (not just the event header): each { path = "dotted.path", equals = X }
+    or { path = ..., not_equals = X }; ALL must hold to announce. Use it to
+    announce only a specific GitHub release `action`, or to skip a Discourse
+    topic's own opening post (see the two endpoints below).
+
     See docs/WEBHOOKS.md for the full setup (reverse proxy, Discourse /
     GitHub webhook config, security notes).
 
@@ -55,13 +61,22 @@ return {
                 topic_created = "New forum topic by {topic.created_by.username}: {topic.title} -> https://forum.example.com/t/{topic.slug}/{topic.id}",
                 post_created  = "New forum post by {post.username} in \"{post.topic_title}\" -> https://forum.example.com/t/{post.topic_slug}/{post.topic_id}/{post.post_number}",
             },
+            -- Discourse fires BOTH topic_created AND post_created for a NEW
+            -- topic (the auto opening post). Drop that duplicate opening post
+            -- (post_number == 1) so a new topic announces once; real replies
+            -- (post_number >= 2) still announce. topic_created carries no
+            -- post.post_number, so nil passes not_equals and the topic is
+            -- unaffected. Remove this block to announce every post.
+            conditions = {
+                { path = "post.post_number", not_equals = 1 },
+            },
             -- secret: set via env LUADCH_ETC_WEBHOOK_DISCOURSE_SECRET, or the
             -- cfg key etc_webhook_discourse_secret, or uncomment + set here.
             -- Until a secret is set, this endpoint is skipped (never runs unsigned).
             -- secret = "paste-your-discourse-webhook-secret-here",
         },
 
-        -- ============================ GitHub repo (example, disabled) ============================
+        -- ============================ GitHub repo/org (example, disabled) ============================
         --[[
         {
             name             = "github",
@@ -69,13 +84,22 @@ return {
             signature_header = "x-hub-signature-256",
             signature_prefix = "sha256=",
             event_header     = "x-github-event",
-            events           = { "push", "release" },
+            events           = { "release" },              -- x-github-event is "release" for EVERY release action
             id_header        = "x-github-delivery",
             bot_nick         = "GitHub",
             min_level        = 0,
             templates = {
-                push    = "{pusher.name} pushed to {repository.name}",
-                release = "New release {release.tag_name} of {repository.name}",
+                release = "New release {release.tag_name} of {repository.name} -> {release.html_url}",
+            },
+            -- A GitHub "release" webhook fires for every action (created,
+            -- edited, published, released, ...); the event header does not
+            -- tell them apart, the `action` body field does. Announce only
+            -- the final "released" - one clean message with the tag URL.
+            -- (For pre-releases use "published"; "released" does not fire for
+            -- them. An org-level webhook covers all repos - {repository.name}
+            -- distinguishes them.)
+            conditions = {
+                { path = "action", equals = "released" },
             },
             -- secret via env LUADCH_ETC_WEBHOOK_GITHUB_SECRET / cfg etc_webhook_github_secret / inline
         },
