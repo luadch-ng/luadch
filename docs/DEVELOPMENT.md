@@ -405,6 +405,21 @@ crash / hang / OOM takes down the single-threaded hub. Required:
   next `loadtable` fail, so the WHOLE store loads empty (fail-open, taking
   operator pins with it). Coerce to a length-capped scalar at the trust boundary
   (#78 E1).
+- **ADC wire-encoding IS spec-enforceable; validate escapes PAIRWISE.** ADC 1.0
+  section 3.1 defines only `\s` `\n` `\\` and mandates "any message containing
+  unknown escapes must be discarded" - the parser now does (#419). This is
+  malformed *wire encoding* (reject per spec; a compliant client never emits it,
+  so nothing legitimate is dropped), distinct from advisory *field semantics*
+  (`TL`/`RD`/`MS` - do NOT over-enforce; clients treat them as hints, see the
+  ADC-protocol-semantics discipline). Validate PAIRWISE - strip the valid
+  `\s`/`\n`/`\\`, and any leftover backslash is unknown: a naive "`\` not followed
+  by s/n/`\`" scan is WRONG (false-positives on `\\q` = an escaped backslash +
+  literal `q`, and misses a lone trailing `\`). Corollary for CONSTRUCTION: escape
+  every value you concatenate into an ADC message you then re-parse. The hub
+  parses its own bot INFs, so since #419 an unescaped operator value (e.g.
+  `hub_email` in the hub-bot `EM` field) makes the hub discard its OWN output and
+  the bot fails to load (#423) - use `adclib.escape` per field, like the bot
+  nick/desc.
 
 ### Privilege / hierarchy checklist
 

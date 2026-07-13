@@ -79,7 +79,7 @@ luadch is a DC++ **ADC** hub server written in Lua with a thin C launcher
 
 - **Current source version:** `v3.2.0-dev` on `master`, `PROGRAM_NAME = "Luadch-NG"`
   (see `core/const.lua`). The 3.1.x maintenance line keeps `PROGRAM_NAME = "Luadch"`.
-- **Latest release:** `v3.1.13` (2026-07-11, on `release/3.1.x`)
+- **Latest release:** `v3.1.14` (2026-07-13, on `release/3.1.x`)
 - **Status:** the Phase 1-7 modernisation programme is content-complete; work is now
   3.2.x feature development (Phase 8+) plus 3.1.x security-only maintenance (see §8).
 - **Open issues:** check `gh issue list --repo luadch-ng/luadch` (never trust a
@@ -253,7 +253,15 @@ cross-host to a signed CDN URL), boot-time runtime-dir self-heal
 #395), the inbound webhook receiver (`etc_webhook` #398, the first
 `scope="none"` plugin route - live against a Discourse forum + a GitHub org),
 plus Sopor-reported fixes (v3.1.13 ratelimit hub-crash #401, `usr_uptime`
-undercount #405, BLOM smoke de-flake #408). A recurring pattern this era:
+undercount #405, BLOM smoke de-flake #408; **v3.1.14** Windows `FD_SETSIZE`
+64->1024 hub-crash #416, Sopor - the Windows luasocket build inherited the
+Winsock-default 64-socket `select()` cap, `>1024` needs the `select`->`poll`
+port #310). In flight on `dev` (awaiting testhub + dev->master): the ADC
+parser now discards messages with unknown escape sequences per ADC 3.1
+(#419) + hub-bot INF `EM` escaping (#423), and an `etc_webhook` body-field
+`conditions` filter (#420, filter on a JSON field like a GitHub release
+`action` or a Discourse opening post, not just the event header). A
+recurring pattern this era:
 a **periodic-fetch plugin must persist its next-fetch deadline across
 `+reload`**, or every reload re-hits a rate-limited provider - fixed twice
 (`etc_blocklist_feeds` #386, `etc_geoip` auto-update #414); general rule in
@@ -285,7 +293,7 @@ contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and
   **this file**, not in memory, because they belong with the code. Durable
   engineering patterns belong in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) so
   they reach every assistant and contributor, not just one memory owner.
-- **Releases** — this fork's latest release is `v3.1.13` (see §2 and §8); UPSTREAM
+- **Releases** - this fork's latest release is `v3.1.14` (see §2 and §8); UPSTREAM
   `luadch/luadch` last released v2.23 back in 2022-04-02 (see Upstream policy below).
 
 ### Upstream policy
@@ -335,7 +343,7 @@ open a fresh issue here that references the upstream one in its body.
   source of truth (`wc -l`, `gh issue list`, CI) instead. Two exemptions, because
   they do NOT drift: (a) frozen historical facts about a CLOSED phase (e.g. "24
   findings / 22 closed" in the §5 table); (b) release/version/"verified-on"
-  markers (e.g. "latest release v3.1.13", the deps-table verified date). A live
+  markers (e.g. "latest release v3.1.14", the deps-table verified date). A live
   status line (like §5 "In flight") must name the tracker as its source of truth.
 
 ### Tooling gotchas (these have already burned us)
@@ -349,6 +357,16 @@ open a fresh issue here that references the upstream one in its body.
   use `Closes #N` normally.
 - **Backport security fixes master-first**, then cherry-pick to `release/3.1.x` (see
   §8). Never open a fix PR directly against the maintenance branch.
+- **Verify a merge's CONTENT landed; check PR state before folding in follow-ups.**
+  Two misses in one session (2026-07-13): `git merge dev` used a STALE local `dev`
+  ref and silently dropped a whole change from the merge commit (operate on
+  `origin/dev`, or `git fetch` + `git branch -f dev origin/dev` first); and a commit
+  pushed onto a PR that was already green / on auto-merge was LOST (dev landed #419
+  without the folded-in #423, because #422 merged at the pre-#423 HEAD). After any
+  merge, `git reset --hard origin/<target>` and grep the working tree for a signature
+  line of EACH change - a squash subject can be the PR title and hide a missing delta.
+  Recover a dropped commit by cherry-picking its still-local sha (it survives branch
+  deletion). If the base PR may merge imminently, do the follow-up as its OWN PR.
 
 ---
 
