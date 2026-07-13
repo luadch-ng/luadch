@@ -7,6 +7,7 @@ luadch blocks unwanted connections in two complementary layers:
 | **Pre-handshake IP/CIDR blocklist** | TCP accept, before ADC/TLS | known-bad IPs and CIDR ranges (manual + future feeds) | `+blocklist` ([`SCRIPTS.md`](SCRIPTS.md) etc_blocklist) |
 | **Post-handshake bans** | after login | nick / CID / short-term IP bans | `+ban` (cmd_ban) |
 | **GeoIP policy** | on connect, post-handshake | country / ASN policy | `etc_geoip` (this doc) |
+| **Allowlist (whitelist)** | consulted first by every automated blocker | trusted IPs / CIDRs (hublist pingers) exempted | `+whitelist` ([`SCRIPTS.md`](SCRIPTS.md) etc_whitelist) |
 
 The pre-handshake blocklist is your DoS/scanner shield (a hostile IP is
 dropped before it costs you a TLS handshake). GeoIP is *policy*: it
@@ -14,6 +15,15 @@ decides whether users from a given country or network are welcome, and
 kicks them post-handshake with a reason they can read - the same layer
 `+ban` and the client blocker use. This is deliberate; see the design
 note at the end.
+
+The **allowlist** (`+whitelist`, the #78 allowlist) sits in front of all
+of the automated layers: a whitelisted IP is exempt from GeoIP, proxy
+detection, the external feeds, the hub-limit ban and the automated
+blocklist-store entries - but NOT from a deliberate manual `+ban` /
+`+blocklist add` (a manual block wins). A small set of known
+hublist-pinger IPs is seeded by default so the pingers do not pollute
+your log. It does NOT (yet) exempt from the share / slots / nick-policy
+plugins. Full reference: [`SCRIPTS.md`](SCRIPTS.md) etc_whitelist.
 
 ---
 

@@ -88,10 +88,15 @@ _G.whitelist = {
 ----------------------------------------------------------------------
 
 local _cfg_overrides = { }
+local _listeners = { }         -- captured hub.setlistener callbacks
+local _http_routes = { }       -- captured hub.http_register registrations
 _G.hub = {
-    setlistener = function( ) end,
+    setlistener = function( ev, _opts, fn ) _listeners[ ev ] = fn end,
     debug = function( ) end,
     getbot = function( ) return "stub-bot" end,
+    http_register = function( method, path, scope, handler, meta )
+        _http_routes[ method .. " " .. path ] = { scope = scope, handler = handler, meta = meta }
+    end,
     import = function( name )
         if name == "etc_hubcommands" then
             return { add = function( ) return true end, has = function( ) return false end,
@@ -103,6 +108,31 @@ _G.hub = {
         return nil
     end,
 }
+
+-- Minimal http_filter stub: source-filter emulation, pass-through
+-- otherwise (real filter/sort/paginate is core/http_filter's own test).
+_G.http_filter = {
+    apply = function( query, spec, rows )
+        if query and query.source and query.source ~= "" then
+            local filtered = { }
+            for _, e in ipairs( rows ) do
+                if e.source == query.source then filtered[ #filtered + 1 ] = e end
+            end
+            rows = filtered
+        end
+        return true, rows, { total = #rows, limit = 100, offset = 0 }, nil
+    end,
+}
+
+-- audit stub: capture fired events for the HTTP create/delete assertions.
+local _audit_fired = { }
+_G.audit = {
+    build = function( action, actor, target, reason, meta )
+        return { action = action, actor = actor, reason = reason, meta = meta }
+    end,
+    fire = function( ev ) _audit_fired[ #_audit_fired + 1 ] = ev end,
+}
+_G.setmetatable = setmetatable
 
 _G.cfg = {
     get = function( key )
@@ -416,6 +446,82 @@ do
     local lok, lcode = wl._do_import_jsonl( path, "lowop", 80 )
     eq( "import below min_level rejected", lok, false )
     truthy( "import level err", lcode and lcode:find( "Import requires" ) )
+end
+
+----------------------------------------------------------------------
+-- HTTP API (Phase D): registration + scope + schema + handler shapes
+----------------------------------------------------------------------
+
+_reset_engine( )
+do
+    _vfs = { }
+    _cfg_overrides = { etc_whitelist_seed = false }   -- boot with an empty store
+    wl = load_plugin( )
+    assert( _listeners.onStart, "onStart not captured" )
+    _listeners.onStart( )    -- register the routes
+
+    -- registration + scope
+    truthy( "http GET /v1/whitelist registered", _http_routes[ "GET /v1/whitelist" ] )
+    truthy( "http GET counts registered", _http_routes[ "GET /v1/whitelist/counts" ] )
+    truthy( "http POST registered", _http_routes[ "POST /v1/whitelist" ] )
+    truthy( "http DELETE registered", _http_routes[ "DELETE /v1/whitelist/{id}" ] )
+    eq( "http GET scope read", _http_routes[ "GET /v1/whitelist" ].scope, "read" )
+    eq( "http POST scope admin", _http_routes[ "POST /v1/whitelist" ].scope, "admin" )
+    eq( "http DELETE scope admin", _http_routes[ "DELETE /v1/whitelist/{id}" ].scope, "admin" )
+
+    -- POST schema uses min/max (not minimum/maximum) + no stealth field
+    local ps = _http_routes[ "POST /v1/whitelist" ].meta.request_schema
+    eq( "http POST cidr required", ps.cidr.required, true )
+    eq( "http POST cidr max_length", ps.cidr.max_length, 45 )
+    truthy( "http POST source enum", ps.source.enum )
+    eq( "http POST expires_at min", ps.expires_at.min, 1 )
+    eq( "http POST no stealth field", ps.stealth, nil )
+
+    -- create (happy)
+    _reset_engine( )
+    local rc = wl._http_handler_create_entry{
+        body = { cidr = "203.0.113.0/24", source = "pinger", reason = "api",
+                 expires_at = 2000000000 },
+        token_label = "tok",
+    }
+    eq( "http create 201", rc.status, 201 )
+    eq( "http create action added", rc.data.action, "added" )
+    eq( "http create cidr echoed", rc.data.cidr, "203.0.113.0/24" )
+    eq( "http create source echoed", rc.data.source, "pinger" )
+    eq( "http create engine by_level 100", _entries[ 1 ].by_level, 100 )
+    eq( "http create engine by_nick token", _entries[ 1 ].by_nick, "tok" )
+    local la = _audit_fired[ #_audit_fired ]
+    eq( "http create audit action", la and la.action, "whitelist.add" )
+    eq( "http create audit by_level 100", la and la.meta and la.meta.by_level, 100 )
+
+    -- create bad / missing cidr
+    eq( "http create bad cidr 400",
+        wl._http_handler_create_entry{ body = { cidr = "INVALIDx" }, token_label = "t" }.status, 400 )
+    eq( "http create missing cidr 400",
+        wl._http_handler_create_entry{ body = { }, token_label = "t" }.status, 400 )
+
+    -- counts
+    local rct = wl._http_handler_get_counts{ }
+    eq( "http counts 200", rct.status, 200 )
+    eq( "http counts total 1", rct.data.total, 1 )
+    eq( "http counts by_source pinger 1", rct.data.by_source.pinger, 1 )
+
+    -- list
+    local rl = wl._http_handler_list_entries{ query = { } }
+    eq( "http list 200", rl.status, 200 )
+    truthy( "http list raw_body string", type( rl.raw_body ) == "string" )
+    eq( "http list content_type", rl.content_type, "application/json; charset=utf-8" )
+
+    -- delete (happy + not_found + bad id)
+    local rd = wl._http_handler_delete_entry{ path_vars = { id = "1" }, token_label = "tok" }
+    eq( "http delete 200", rd.status, 200 )
+    eq( "http delete action removed", rd.data.action, "removed" )
+    eq( "http delete not_found 404",
+        wl._http_handler_delete_entry{ path_vars = { id = "9999" }, token_label = "t" }.status, 404 )
+    eq( "http delete bad id 400",
+        wl._http_handler_delete_entry{ path_vars = { id = "abc" }, token_label = "t" }.status, 400 )
+
+    _cfg_overrides = { }
 end
 
 ----------------------------------------------------------------------
