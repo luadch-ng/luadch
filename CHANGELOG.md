@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The upstream project (`luadch/luadch`) is a separate codebase; its release
 history is at https://github.com/luadch/luadch/releases.
 
+## [v3.1.14] - 2026-07-13
+
+Maintenance patch release on the `release/3.1.x` line. One bugfix: a Windows-only hub-crash once the hub holds ~64 concurrent sockets. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.13. Linux operators are unaffected (no functional change - the boot log gains one informational line).
+
+### Bugfixes
+
+- [#416](https://github.com/luadch-ng/luadch/issues/416) (Sopor) - **Windows: the hub crashed once it held ~64 concurrent sockets** with `/core/server.lua:...: bad argument #1 to 'socket_select' (too many sockets)`. The event loop's `tick()` calls `socket.select` over every connected socket at once; on Windows luasocket's `select.c` hard-caps that at `FD_SETSIZE`, and the bundled build inherited the Winsock default of **64** (`luasocket/CMakeLists.txt` set only `WINVER`, never `FD_SETSIZE`). Once a hub held ~64 sockets (users + v4/v6 listeners + HBRI + HTTP) the unguarded `select` in `tick()` raised and the main loop died, dropping every user. Reported on Windows Server 2008 R2 running 3.1.13, but it affects any Windows version. Fix: define `FD_SETSIZE=1024` for the Windows luasocket build (`socket` module + `luasocket_static`), i.e. parity with the Linux glibc `fd_set`. Windows-only by design: on Linux redefining `FD_SETSIZE` cannot enlarge glibc's fixed 1024-bit `fd_set` (the >1024 case there needs the `select`->`poll` port tracked in [#310](https://github.com/luadch-ng/luadch/issues/310), 3.2.x). The hub now logs the compile-time select capacity (`socket._SETSIZE`) once at boot from `hub.loop` so operators can confirm the raised cap. The 3.2.x line (`master`, PR [#417](https://github.com/luadch-ng/luadch/pull/417)) carries the identical fix plus a smoke regression that provably fails pre-fix on the Windows CI leg; 3.1.x's smoke harness does not enable `log_events`, so the test lives on 3.2.x - the code here is identical and reviewer-verified, and was validated green on master's Windows smoke.
+
+### Notes
+
+- **No breaking changes, no cfg / lang-file edits required.** Drop-in upgrade from v3.1.13.
+- **Windows operators should upgrade**, especially busier hubs - the crash triggers organically once ~64 concurrent connections are held (or via a distributed connect flood; a single IP is capped at `ratelimit_perip_max_conns`). **Linux is unaffected** - its glibc select cap is already 1024, so this release makes no functional change there.
+
+[v3.1.14]: https://github.com/luadch-ng/luadch/releases/tag/v3.1.14
+
+
 ## [v3.1.13] - 2026-07-11
 
 Maintenance patch release on the `release/3.1.x` line. One security bugfix: a remotely-triggerable hub-crash. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.12.
