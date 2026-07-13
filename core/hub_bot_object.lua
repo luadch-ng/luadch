@@ -134,7 +134,12 @@ local function createbot( _sid, p )
                --" AW" .. "2" ..
                " SU" .. "ADC0,ADCS,TCP4,UDP4" ..
                " VE" .. "HubBot"
-               if hub_bot_email then _inf = _inf .. " EM" .. hub_email end
+               -- #423: escape the operator-set email like the nick/desc above
+               -- (an unescaped space/backslash would break this INF - and since
+               -- #419 the hub would then discard its own hub-bot INF, so the
+               -- bot fails to come up). hub_bot_email is the boolean toggle
+               -- "advertise hub_email in the userlist"; hub_email is the value.
+               if hub_bot_email then _inf = _inf .. " EM" .. escapeto( hub_email ) end
         _inf = adc_parse( _inf )
         if not _inf then
         return nil, "invalid inf"-----!
