@@ -128,6 +128,10 @@ _G.blocklist = {
         return true, #_adds
     end,
 }
+-- #78 allowlist stub: the plugin's whitelist guard. Default: nothing
+-- whitelisted (existing tests unaffected). A test flips `_wl[ip] = true`.
+local _wl = { }
+_G.whitelist = { is_whitelisted = function( ip ) return _wl[ ip ] == true end }
 _G.http_client = {
     request = function( req )
         _requests[ #_requests + 1 ] = req
@@ -318,6 +322,28 @@ do
     local op = mkuser( 80, "1.2.3.4", "SIDOP", "CIDOP" )   -- [80]=false in check_levels
     connect( op )
     eq( "exempt: no request for exempt op", #_requests, 0 )
+end
+
+----------------------------------------------------------------------
+-- #78 allowlist: a whitelisted IP skips the provider query + kick.
+-- Provably FAILS pre-fix (without the guard the fresh IP fires a
+-- request); the whitelisted IP must add NO new request.
+----------------------------------------------------------------------
+do
+    load_plugin( { _resolved_key = "SECRET42" } )
+
+    -- baseline: a blockable-level user at a fresh IP fires one request
+    _wl = { }
+    connect( mkuser( 20, "9.9.9.9", "SIDW1", "CIDW1" ) )
+    eq( "proxy wl baseline: request fired", #_requests, 1 )
+
+    -- whitelist a DIFFERENT fresh IP -> no new request, no kick
+    _wl = { [ "8.8.8.8" ] = true }
+    local u2 = mkuser( 20, "8.8.8.8", "SIDW2", "CIDW2" )
+    connect( u2 )
+    eq( "proxy whitelisted -> NO new request", #_requests, 1 )
+    truthy( "proxy whitelisted -> not kicked", u2._killed == nil )
+    _wl = { }
 end
 
 ----------------------------------------------------------------------

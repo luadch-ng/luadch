@@ -291,6 +291,10 @@ local check_geoip = function( user )
     local ip = user:ip( )
     if not ip or ip == "" then return end
 
+    -- #78 allowlist: a whitelisted IP (trusted infra / hublist pinger)
+    -- is exempt from the country/ASN block and its report + audit.
+    if whitelist.is_whitelisted( ip ) then return end
+
     local country, asn, org = classify( ip )
     local matched = resolve( country, asn )
     if not matched then return end    -- allowed
