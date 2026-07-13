@@ -32,6 +32,14 @@
         The HTTP listener itself is only reachable per the operator's
         http_port + reverse-proxy setup - see docs/WEBHOOKS.md.
 
+        v0.03: by Aybo - per-endpoint `conditions` body-field filter
+               (equals / not_equals) so a delivery can be filtered on a
+               decoded JSON field, not just the event header. Solves two
+               real cases: announce only the GitHub release `action` you
+               want (all release actions share event=release, only the
+               `action` field differs), and skip a Discourse topic's own
+               opening post (topic_created + post_created both fire for a
+               new topic; post.post_number == 1 is that duplicate).
         v0.02: by Aybo - dedup_load probes with io.open before
                util.loadtable, so a first run (no dedup file yet) no
                longer logs a spurious checkfile error (the sibling
@@ -46,7 +54,7 @@
 --------------
 
 local scriptname = "etc_webhook"
-local scriptversion = "0.02"
+local scriptversion = "0.03"
 
 local config_file = "cfg/webhooks.tbl"
 local dedup_file  = "scripts/data/etc_webhook.tbl"
@@ -139,6 +147,25 @@ local function normalise_endpoint( raw )
             if type( k ) == "string" and type( v ) == "string" then templates[ k ] = v end
         end
     end
+    -- optional body-field conditions: each { path = "dotted.path", equals = X }
+    -- or { path = ..., not_equals = X }. ALL must hold (see conditions_pass).
+    local conditions = { }
+    if type( raw.conditions ) == "table" then
+        for _, c in ipairs( raw.conditions ) do
+            if type( c ) == "table" and type( c.path ) == "string" and c.path ~= "" then
+                if c.equals ~= nil then
+                    conditions[ #conditions + 1 ] = { path = c.path, op = "eq", value = c.equals }
+                elseif c.not_equals ~= nil then
+                    conditions[ #conditions + 1 ] = { path = c.path, op = "ne", value = c.not_equals }
+                else
+                    -- a path-only entry (e.g. a typo'd `equal`/`not_equal`)
+                    -- would otherwise vanish silently, leaving the endpoint
+                    -- with no filter and announcing everything.
+                    hub_debug( scriptname .. ": endpoint '" .. name .. "': condition on '" .. c.path .. "' has neither equals nor not_equals - ignored" )
+                end
+            end
+        end
+    end
     local path = raw.path
     if type( path ) ~= "string" or path:sub( 1, 1 ) ~= "/" then
         path = "/v1/webhook/" .. name
@@ -161,6 +188,8 @@ local function normalise_endpoint( raw )
         bot_nick         = ( type( raw.bot_nick ) == "string" and raw.bot_nick ~= "" and raw.bot_nick ) or nil,
         min_level        = min_level,
         templates        = templates,
+        conditions       = conditions,
+        has_conditions   = next( conditions ) ~= nil,
         default_template = ( type( raw.default_template ) == "string" and raw.default_template ) or "",
         inline_secret    = ( type( raw.secret ) == "string" and raw.secret ~= "" and raw.secret ) or nil,
         secret           = nil,             -- filled by caller
@@ -248,6 +277,32 @@ local function resolve_path( body, path )
     return cur
 end
 
+--// endpoint conditions: body-field predicates that ALL must hold for a
+--// delivery to announce. Two numbers compare numerically (so a config `1`
+--// matches JSON `1` OR `1.0` - dkjson decodes `1.0` as a float); anything
+--// else compares as strings. A path that does not resolve is nil, so
+--// `not_equals` passes when the field is absent (a Discourse topic_created
+--// carries no post.post_number, so a "post.post_number not_equals 1"
+--// endpoint still announces the topic) while `equals` fails (drops it).
+--// Conditions apply endpoint-wide (to every event the endpoint accepts).
+local function conditions_pass( entry, body )
+    for _, c in ipairs( entry.conditions ) do
+        local actual = resolve_path( body, c.path )
+        local match
+        if type( actual ) == "number" and type( c.value ) == "number" then
+            match = ( actual == c.value )
+        else
+            match = ( tostring( actual ) == tostring( c.value ) )
+        end
+        if c.op == "eq" then
+            if not match then return false end
+        else
+            if match then return false end
+        end
+    end
+    return true
+end
+
 local function sanitise_value( v )
     local t = type( v )
     -- only scalars render. A non-leaf path (table / array) would else
@@ -311,6 +366,13 @@ local function make_handler( entry )
         -- 2. event filter (ping / unlisted events are acknowledged, not announced)
         local event = entry.event_header and req.headers[ entry.event_header ] or nil
         if entry.has_events and not ( event and entry.events[ event ] ) then
+            return RESP_OK
+        end
+
+        -- 2b. body-field conditions (e.g. GitHub action=released; or skip a
+        -- Discourse topic's own opening post via post.post_number != 1).
+        -- Evaluated against the decoded body; ALL must hold to announce.
+        if entry.has_conditions and not conditions_pass( entry, req.body or { } ) then
             return RESP_OK
         end
 
