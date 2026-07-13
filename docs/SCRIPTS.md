@@ -662,6 +662,77 @@ set `blocklist_store_path = "cfg/blocklist.tbl"` in `cfg.tbl`
 to pin the old location). No auto-migration is provided; the
 old-path window was small.
 
+### etc_whitelist
+
+Operator-facing chat command for the global IP/CIDR allowlist (the
+deferred #78 allowlist). Engine is `core/whitelist.lua` (Phase A);
+this plugin ships the `+whitelist` admin CLI (Phase B) and the HTTP
+API (Phase D). A whitelisted IP is exempt from the AUTOMATED
+blockers - GeoIP, proxy detection, external feeds, the hub-limit ban
+- and from automated blocklist-store entries, but NOT from a
+deliberate manual `+ban` / `+blocklist add` (a manual block wins). To
+block a whitelisted IP, remove it from the whitelist first.
+
+**Commands** (all require `etc_whitelist_oplevel`, default 80):
+
+- `+whitelist show [source]` - list active entries; optional filter
+  by source (`manual`, `pinger`). Capped at `etc_whitelist_show_limit`
+  (default 200).
+- `+whitelist add <cidr|ip> [reason="..."] [expires=YYYY-MM-DD]` -
+  allow a CIDR (or single IP = `/32` v4 / `/128` v6). Host-bits-set
+  CIDRs are rejected (`1.2.3.4/24` -> use `1.2.3.0/24`).
+- `+whitelist del <id>` - remove by numeric id; same `by_level`
+  hierarchy guard as `+blocklist`.
+- `+whitelist count` - `{total, by_source}` summary.
+- `+whitelist export` - write
+  `cfg/whitelist-export-YYYYMMDD-HHMMSS.jsonl` with the operator-added
+  (`source=manual`) entries. The bundled pinger seed is NOT exported
+  (it re-seeds itself on a fresh hub).
+- `+whitelist import <path>` - read JSONL; every string field is
+  control-byte stripped; master-only via `etc_whitelist_import_min_level`
+  (default 100), rows reattributed to the importing operator.
+
+**Bundled pinger seed.** On the FIRST run (store `.tbl` missing) the
+plugin seeds a small set of known hublist-pinger IPs as
+`source=pinger` (v6 as `/64`, v4 as `/32`) so the pingers are not
+flagged by the automated blockers out of the box. Seed-on-missing
+ONLY - once the `.tbl` exists your edits (including deletions) are
+authoritative and never re-seeded. Set `etc_whitelist_seed = false`
+to boot with an empty whitelist. The list bit-rots (pinger IPs
+rotate); review + extend via `+whitelist add`. A `/64` exempts a
+whole subnet - each seeded range is meant to be a single per-VPS
+pinger allocation; narrow to `/128` if that matters for your hub.
+
+**Precedence (which blocker wins).** whitelist > automated blockers
+(GeoIP / proxydetect / feeds / hub-limit ban + automated
+blocklist-store entries); a manual `+ban` / `+blocklist add`
+(`source=manual`) > whitelist. Enforced in `core/blocklist.check_ip`
+and in each blocker plugin's per-connection guard. NOT yet extended
+to the share / slots / nick-policy plugins (`usr_share` / `usr_slots`
+/ `usr_nick_*`) - a whitelisted IP still faces those.
+
+**Audit fires:** `whitelist.add` / `whitelist.remove` /
+`whitelist.export` / `whitelist.import`.
+
+**Storage and reload.** `scripts/data/etc_whitelist.tbl`, written on
+every add / remove; path via `whitelist_store_path`. `+reload`
+re-snapshots `whitelist_enabled` / `whitelist_store_path` and
+re-reads the .tbl (config-only changes need no restart).
+
+**HTTP API surface (v0.02 / Phase D).** Four endpoints mirroring the
+blocklist API (in `docs/HTTP_API.md`): `GET /v1/whitelist` (read,
+filter/sort/paginate), `GET /v1/whitelist/counts` (read), `POST
+/v1/whitelist` (admin, body `{cidr, source?, reason?, expires_at?}`,
+source enum `{manual, pinger}`), `DELETE /v1/whitelist/{id}` (admin).
+HTTP admin tokens bypass the ADC hierarchy guard (token = trust
+surface; entries attributed `by_nick = <token label>`, `by_level = 100`).
+
+**Enabling.** Ships enabled in `examples/cfg/cfg.tbl`. An operator
+upgrading a pre-existing `cfg.tbl` adds
+`{ "etc_whitelist.lua", enabled = true },` to `cfg.scripts` and runs
+`+reload`; the cfg keys all have safe defaults via
+`core/cfg_defaults.lua`.
+
 ### etc_geoip
 
 Country / ASN policy blocking via a MaxMind GeoLite2 database (#78

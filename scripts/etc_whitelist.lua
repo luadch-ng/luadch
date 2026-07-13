@@ -45,8 +45,12 @@
     add time, is the comparison source. The bundled seed has no
     by_level (= 0), so any operator can prune it.
 
-    Phase D will add the HTTP API (GET/POST/DELETE /v1/whitelist)
-    alongside this ADC surface.
+    Phase D (v0.02) adds the HTTP API alongside the ADC surface:
+    GET /v1/whitelist (list + filter/sort/paginate), GET
+    /v1/whitelist/counts (summary), POST /v1/whitelist (add),
+    DELETE /v1/whitelist/{id} (remove). HTTP admin tokens bypass the
+    ADC hierarchy guard - the token is the trust surface, so a token
+    can undo any entry regardless of who added it.
 
 ]]--
 
@@ -56,7 +60,7 @@
 --------------
 
 local scriptname    = "etc_whitelist"
-local scriptversion = "0.01"
+local scriptversion = "0.02"
 
 local cmd_main = "whitelist"
 
@@ -605,6 +609,186 @@ local function on_whitelist( user, command, parameters )
 end
 
 
+-------------------
+--[HTTP HANDLERS]--
+-------------------
+-- #78 allowlist, Phase D: HTTP API mirrors the ADC surface. Raw
+-- hub.http_register (target is a CIDR / id, not a SID). HTTP
+-- admin-token requests carry no operator level; they bypass the ADC
+-- hierarchy guard via a synthetic by_level = 100 (the token is the
+-- trust surface, per the etc_blocklist HTTP contract).
+
+-- Accepted `source` labels on POST. The whitelist source is a label
+-- only (no priority): "manual" for an operator add, "pinger" for the
+-- bundled seed.
+local _SOURCE_ENUM = { "manual", "pinger" }
+
+-- #264 filter/sort spec for GET /v1/whitelist. All rows are pre-listed
+-- via whitelist.list() so http_filter sees a stable shape.
+local _list_filter_spec = {
+    string_fields = {
+        source  = function( e ) return e.source  or "" end,
+        by_nick = function( e ) return e.by_nick or "" end,
+        reason  = function( e ) return e.reason  or "" end,
+        cidr    = function( e ) return e.cidr or "" end,
+    },
+    integer_fields = {
+        by_level   = function( e ) return tonumber( e.by_level ) or 0 end,
+        created_at = function( e ) return tonumber( e.created_at ) or 0 end,
+        expires_at = function( e ) return tonumber( e.expires_at ) or 0 end,
+    },
+    sortable_fields = {
+        id         = function( e ) return tonumber( e.id ) or 0  end,
+        cidr       = function( e ) return e.cidr or ""            end,
+        source     = function( e ) return e.source or ""          end,
+        created_at = function( e ) return tonumber( e.created_at ) or 0 end,
+        expires_at = function( e ) return tonumber( e.expires_at ) or 0 end,
+    },
+    default_sort_field      = "id",
+    default_sort_descending = false,
+}
+
+local function _format_entry_for_wire( e )
+    return {
+        id         = e.id,
+        cidr       = e.cidr,
+        source     = e.source,
+        reason     = e.reason or "",
+        by_nick    = e.by_nick or "",
+        by_level   = e.by_level,
+        expires_at = e.expires_at,
+        created_at = e.created_at,
+        meta       = e.meta,
+    }
+end
+
+local http_handler_list_entries = function( req )
+    local raw = whitelist.list( )
+    local entries = { }
+    for _, e in ipairs( raw ) do
+        entries[ #entries + 1 ] = _format_entry_for_wire( e )
+    end
+    local ok, rows, code, msg = http_filter.apply(
+        req.query or { }, _list_filter_spec, entries )
+    if not ok then
+        return { status = rows, error = { code = code, message = msg } }
+    end
+    local pagination = code
+    local wire = json.encode{
+        ok         = true,
+        data       = { entries = rows },
+        pagination = pagination,
+    }
+    return { status = 200, raw_body = wire,
+        content_type = "application/json; charset=utf-8" }
+end
+
+local http_handler_get_counts = function( req )
+    -- Force object shape on an empty by_source (dkjson emits {} not [])
+    -- so a typed decoder reading it as an object survives a fresh store.
+    local c = whitelist.count( )
+    setmetatable( c.by_source, { __jsontype = "object" } )
+    return { status = 200, data = c }
+end
+
+local http_handler_create_entry = function( req )
+    local body = req.body or { }
+    local cidr = body.cidr
+    if type( cidr ) ~= "string" or cidr == "" then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "missing or empty `cidr` field" } }
+    end
+    cidr = util_strip( cidr )
+    local reason = body.reason
+    if reason then reason = util_strip( reason ) end
+    local source = body.source or "manual"
+    local expires_at = body.expires_at    -- schema-forced number|nil
+
+    local actor_label = util_strip( req.token_label or "http-api" )
+
+    -- by_level = 100 (master) so a subsequent DELETE by the same token
+    -- clears the ADC hierarchy guard - the token is the trust surface.
+    local ok, id, engine_err = whitelist.add( cidr, {
+        source     = source,
+        reason     = reason,
+        by_nick    = actor_label,
+        by_level   = 100,
+        expires_at = expires_at,
+    } )
+    if not ok then
+        local err_s = tostring( engine_err or "" )
+        local status, code
+        if err_s:find( "^save failed" ) then
+            status, code = 500, "E_INTERNAL"
+        else
+            status, code = 400, "E_BAD_INPUT"
+        end
+        return { status = status, error = {
+            code = code, message = err_s ~= "" and err_s or "add failed",
+        } }
+    end
+    local msg = utf_format( msg_added, actor_label, id, cidr, source )
+    if report then
+        report.send( report_activate, report_hubbot, report_opchat,
+            report_llevel, msg )
+    end
+    audit.fire( audit.build( "whitelist.add",
+        { nick = actor_label, sid = "<http>" }, nil, reason, {
+            cidr     = cidr,
+            source   = source,
+            id       = id,
+            by_level = 100,
+        } ) )
+    return { status = 201, data = {
+        action = "added",
+        id     = id,
+        cidr   = cidr,
+        source = source,
+    } }
+end
+
+local http_handler_delete_entry = function( req )
+    local id_str = req.path_vars and req.path_vars.id
+    local id = tonumber( id_str )
+    if not id or id < 1 or id ~= math.floor( id ) then
+        return { status = 400, error = { code = "E_BAD_INPUT",
+            message = "invalid {id} - must be a positive integer" } }
+    end
+    local actor_label = util_strip( req.token_label or "http-api" )
+    -- Level 100 (master) -> hierarchy guard passes for any entry.
+    local ok, payload, msg = do_del_entry( id, actor_label, 100 )
+    if not ok then
+        local err_code = payload
+        local status = err_code == "not_found" and 404 or 400
+        return { status = status, error = {
+            code = err_code == "not_found" and "E_NOT_FOUND" or "E_BAD_INPUT",
+            message = msg,
+        } }
+    end
+    local entry = payload
+    if report then
+        report.send( report_activate, report_hubbot, report_opchat,
+            report_llevel, msg )
+    end
+    audit.fire( audit.build( "whitelist.remove",
+        { nick = actor_label, sid = "<http>" }, nil, entry.reason, {
+            id     = id,
+            cidr   = entry.cidr,
+            source = entry.source,
+        } ) )
+    return { status = 200, data = {
+        action  = "removed",
+        id      = id,
+        removed = {
+            cidr    = util_strip( entry.cidr or "" ),
+            source  = util_strip( entry.source or "" ),
+            reason  = util_strip( entry.reason or "" ),
+            by_nick = util_strip( entry.by_nick or "" ),
+        },
+    } }
+end
+
+
 -----------------
 --[LIFECYCLE ]--
 -----------------
@@ -639,6 +823,56 @@ hub.setlistener( "onStart", { },
         assert( hubcmd )
         assert( hubcmd.add( cmd_main, on_whitelist, oplevel ) )
 
+        -- #78 Phase D HTTP API. Raw hub.http_register (target is a
+        -- CIDR / id, not a SID). Schema field names use min/max.
+        if hub.http_register then
+            hub.http_register( "GET", "/v1/whitelist", "read",
+                http_handler_list_entries, {
+                    plugin = scriptname,
+                    description = "list whitelist entries (= ADC `+whitelist show`); supports filter (source, cidr_contains, reason_contains, by_nick, by_level, created_at, expires_at) + sort + pagination via the standard http_filter convention",
+                    response_schema = {
+                        entries = { type = "array", required = true },
+                    },
+                } )
+            hub.http_register( "GET", "/v1/whitelist/counts", "read",
+                http_handler_get_counts, {
+                    plugin = scriptname,
+                    description = "counts summary (= ADC `+whitelist count`); prometheus + WebUI dashboard friendly",
+                    response_schema = {
+                        total     = { type = "integer", required = true },
+                        by_source = { type = "object",  required = true },
+                    },
+                } )
+            hub.http_register( "POST", "/v1/whitelist", "admin",
+                http_handler_create_entry, {
+                    plugin = scriptname,
+                    description = "add a whitelist entry (= ADC `+whitelist add`); body `{cidr, source?, reason?, expires_at?}`. source enum {manual, pinger}; expires_at is a unix timestamp (integer). CIDRs with host bits set are rejected (`1.2.3.4/24` -> use `1.2.3.0/24`).",
+                    request_schema = {
+                        cidr    = { type = "string",  required = true,  max_length = 45 },
+                        source  = { type = "string",  required = false, enum = _SOURCE_ENUM },
+                        reason  = { type = "string",  required = false, max_length = 256 },
+                        expires_at = { type = "integer", required = false,
+                            min = 1, max = 2147483647 },
+                    },
+                    response_schema = {
+                        action = { type = "string",  required = true },
+                        id     = { type = "integer", required = true },
+                        cidr   = { type = "string",  required = true },
+                        source = { type = "string",  required = true },
+                    },
+                } )
+            hub.http_register( "DELETE", "/v1/whitelist/{id}", "admin",
+                http_handler_delete_entry, {
+                    plugin = scriptname,
+                    description = "remove a whitelist entry by numeric id (= ADC `+whitelist del <id>`). Ids are stable across the store lifetime; a re-add gets a fresh id. HTTP admin tokens bypass the ADC-side hierarchy guard - the token is the trust surface.",
+                    response_schema = {
+                        action  = { type = "string",  required = true },
+                        id      = { type = "integer", required = true },
+                        removed = { type = "object",  required = true },
+                    },
+                } )
+        end
+
         return nil
     end
 )
@@ -659,4 +893,10 @@ return {
     _format_count        = format_count,
     _seed_if_first_run   = seed_if_first_run,
     _BUNDLED_SEED        = BUNDLED_SEED,
+    _http_handler_list_entries = http_handler_list_entries,
+    _http_handler_get_counts   = http_handler_get_counts,
+    _http_handler_create_entry = http_handler_create_entry,
+    _http_handler_delete_entry = http_handler_delete_entry,
+    _list_filter_spec          = _list_filter_spec,
+    _SOURCE_ENUM               = _SOURCE_ENUM,
 }

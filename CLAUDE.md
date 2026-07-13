@@ -272,17 +272,20 @@ from source per §1a.3/4, since many are old-version reports asking "fixed in
 3.x?"). GitFlow A per fix; batch dev->master as a MERGE commit (never squash
 - see §8 branch hygiene).
 
-**In flight on `dev`: the #78 allowlist (global whitelist).** The allowlist
-deferred from the unified-blocklist arc, now its own 4-PR feature. A
-`core/whitelist.lua` engine consulted by every IP-blocking path so trusted
-infrastructure (hublist pingers etc.) is exempt from the AUTOMATED blockers
-(GeoIP / proxydetect / feeds / hub-limit) - but NOT from a deliberate manual
-`+ban` / `+blocklist` (Model A: a manual block wins). Phase A (engine +
-`blocklist.check_ip` precedence + `whitelist.is_whitelisted` sandbox global)
-on `dev`; Phases B (`+whitelist` plugin + bundled pinger seed), C (per-plugin
-guards in etc_geoip / etc_proxydetect / usr_hubs), D (HTTP `/v1/whitelist`)
-follow, each its own PR + review gate. Source of truth: the whitelist-arc
-PRs (deferred item of [#78](https://github.com/luadch-ng/luadch/issues/78)).
+**In flight: the #78 allowlist (global whitelist) - 4-PR arc A-D complete on
+stacked branches, pending dev merge.** The allowlist deferred from the
+unified-blocklist arc. A `core/whitelist.lua` engine consulted by every
+IP-blocking path so trusted infrastructure (hublist pingers etc.) is exempt
+from the AUTOMATED blockers (GeoIP / proxydetect / feeds / hub-limit) - but
+NOT from a deliberate manual `+ban` / `+blocklist` (Model A: a manual block
+wins). Phase A (engine + `blocklist.check_ip` precedence +
+`whitelist.is_whitelisted` sandbox global), B (`+whitelist` plugin +
+bundled hublist-pinger seed, `etc_whitelist`), C (per-plugin guards in
+etc_geoip / etc_proxydetect / usr_hubs - where the log goes quiet), D (HTTP
+`/v1/whitelist`). NOT extended to the share / slots / nick-policy plugins
+(`usr_share` / `usr_slots` / `usr_nick_*`). Source of truth: the
+whitelist-arc PRs (deferred item of
+[#78](https://github.com/luadch-ng/luadch/issues/78)).
 
 **HTTP-endpoint authoring** (which helper for which endpoint shape, envelope
 contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and

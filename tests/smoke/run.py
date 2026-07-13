@@ -9196,6 +9196,116 @@ def test_http_reload(staging_dir: Path, proc=None):
         )
 
 
+def test_http_phase_d_whitelist(staging_dir: Path, proc=None):
+    """#78 allowlist Phase D HTTP API for the global whitelist.
+
+    Four endpoints on etc_whitelist.lua v0.02 (GET /v1/whitelist and
+    /counts, POST, DELETE /v1/whitelist/{id}) - the same shape as the
+    blocklist HTTP API. Seed-aware: a fresh hub already holds the bundled
+    pinger entries (source=pinger), so the baseline count is captured
+    rather than assumed.
+
+    Coverage: anonymous POST -> 401; counts baseline carries a pinger
+    source; POST create -> 201 + id; GET reflects it + counts baseline+1;
+    POST host-bits-set cidr -> 400; DELETE created -> 200 removed;
+    DELETE 999 -> 404; counts back to baseline.
+    """
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def post(path: bytes, body: bytes) -> str:
+        return _http_roundtrip(
+            b"POST " + path + b" HTTP/1.1\r\n" + auth +
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"\r\n" + body
+        )
+
+    def get(path: bytes) -> str:
+        return _http_roundtrip(b"GET " + path + b" HTTP/1.1\r\n" + auth + b"\r\n")
+
+    def delete_id(id_str: str) -> str:
+        return _http_roundtrip(
+            b"DELETE /v1/whitelist/" + id_str.encode("ascii") +
+            b" HTTP/1.1\r\n" + auth + b"\r\n"
+        )
+
+    # 1. Anonymous POST -> 401 (admin scope requires a token).
+    anon_body = b'{"cidr":"203.0.113.9"}'
+    r = _http_roundtrip(
+        b"POST /v1/whitelist HTTP/1.1\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: " + str(len(anon_body)).encode("ascii") + b"\r\n"
+        b"\r\n" + anon_body
+    )
+    if "401" not in status(r):
+        raise TestFailure(f"anonymous POST /v1/whitelist should be 401, got {status(r)!r}")
+
+    # 2. Baseline counts: the bundled pinger seed is present. Capture the
+    #    total (robust to any prior whitelist test in the same run).
+    r = get(b"/v1/whitelist/counts")
+    b = body_of(r).replace(" ", "")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"GET counts pre-flight: expected 200, got {status(r)!r}")
+    m0 = re.search(r'"total":(\d+)', b)
+    if not m0:
+        raise TestFailure(f"counts had no total; body={b!r}")
+    base = int(m0.group(1))
+    if '"pinger"' not in b:
+        raise TestFailure(f"seed counts missing pinger source; body={b!r}")
+
+    # 3. POST create -> 201 + id.
+    r = post(b"/v1/whitelist", b'{"cidr":"203.0.113.0/24","reason":"api test"}')
+    if "201" not in status(r):
+        raise TestFailure(f"POST create: expected 201, got {status(r)!r}; body={body_of(r)!r}")
+    m = re.search(r'"id":(\d+)', body_of(r).replace(" ", ""))
+    if not m:
+        raise TestFailure(f"POST create response had no id; body={body_of(r)!r}")
+    new_id = m.group(1)
+
+    # 4. GET reflects the addition; counts == baseline + 1.
+    r = get(b"/v1/whitelist")
+    if '"203.0.113.0/24"' not in body_of(r).replace(" ", ""):
+        raise TestFailure("GET /v1/whitelist did not reflect the created entry")
+    r = get(b"/v1/whitelist/counts")
+    if f'"total":{base + 1}' not in body_of(r).replace(" ", ""):
+        raise TestFailure(f"counts after create: expected {base + 1}; body={body_of(r)!r}")
+
+    # 5. POST host-bits-set cidr -> 400.
+    r = post(b"/v1/whitelist", b'{"cidr":"1.2.3.4/24"}')
+    if "400" not in status(r):
+        raise TestFailure(f"POST host-bits-set should be 400, got {status(r)!r}")
+
+    # 6. DELETE the created entry -> 200 removed.
+    r = delete_id(new_id)
+    if "200" not in status(r) or '"action":"removed"' not in body_of(r).replace(" ", ""):
+        raise TestFailure(f"DELETE id={new_id}: expected 200 removed, got {status(r)!r}; body={body_of(r)!r}")
+
+    # 7. DELETE non-existent -> 404.
+    r = delete_id("999999")
+    if "404" not in status(r):
+        raise TestFailure(f"DELETE 999999 should be 404, got {status(r)!r}")
+
+    # 8. Counts back to the baseline.
+    r = get(b"/v1/whitelist/counts")
+    if f'"total":{base}' not in body_of(r).replace(" ", ""):
+        raise TestFailure(f"counts after delete: expected {base}; body={body_of(r)!r}")
+
+
 def test_http_phase_c_blocklist(staging_dir: Path, proc=None):
     """#78 Phase C HTTP API for the unified blocklist.
 
@@ -13013,6 +13123,14 @@ def main():
             failed.append("HTTP API blocklist (#78 Phase C)")
         else:
             log("PASS  HTTP API blocklist (#78 Phase C)")
+
+        try:
+            test_http_phase_d_whitelist(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API whitelist (#78 allowlist Phase D): {e}")
+            failed.append("HTTP API whitelist (#78 allowlist Phase D)")
+        else:
+            log("PASS  HTTP API whitelist (#78 allowlist Phase D)")
 
         # #261 plugin-management endpoints: GET /v1/plugins (read) +
         # PUT /v1/plugins/{name}/enabled (admin). Full toggle cycle on
