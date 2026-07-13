@@ -4563,6 +4563,23 @@ local defaults = {
             return value >= 60 and value <= 86400
         end
     },
+    -- #78 allowlist (core/whitelist.lua): a global IP/CIDR allowlist
+    -- consulted by every IP-blocking path. A match exempts the IP from
+    -- the AUTOMATED blockers (GeoIP / proxydetect / feeds / hub-limit)
+    -- and from automated blocklist-store entries, but NOT from a
+    -- deliberate manual +blocklist/+ban (a manual block wins). Engine
+    -- ships enabled with an empty store; Phase B's `+whitelist` plugin
+    -- seeds the bundled hublist-pinger allowlist on first run.
+    whitelist_enabled = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    whitelist_store_path = { "scripts/data/etc_whitelist.tbl",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
     -- #78 Phase B: `+blocklist` admin plugin (etc_blocklist.lua).
     -- Operator-facing chat command + JSONL export/import. The
     -- engine in core/blocklist.lua is independent; these keys
