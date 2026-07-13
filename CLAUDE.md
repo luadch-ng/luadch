@@ -130,7 +130,7 @@ order (its inline comments explain each ordering constraint).
 | Subsystem | Modules | Responsibility |
 |---|---|---|
 | Boot + config | `init`, `const`, `cfg`, `cfg_defaults`, `cfg_users`, `cfg_lang`, `cfg_secret`, `secrets` | Restricted env + module loader; program constants; settings/user.tbl/language handling; AES-256-GCM at-rest crypto; env-var-first secret lookup |
-| Network + ADC | `server`, `iostream`, `adc`, `hub`, `hub_dispatch`, `hub_user_object`, `hub_bot_object`, `hbri`, `ratelimit`, `blocklist`, `ipmatch` | select() loop + SSL; framing pipeline; ADC parse/escape/format; main loop + login; command dispatch; user/bot objects; dual-stack secondary-IP verification; DoS limits; pre-handshake IP/CIDR blocklist; IP/CIDR primitives |
+| Network + ADC | `server`, `iostream`, `adc`, `hub`, `hub_dispatch`, `hub_user_object`, `hub_bot_object`, `hbri`, `ratelimit`, `blocklist`, `whitelist`, `ipmatch` | select() loop + SSL; framing pipeline; ADC parse/escape/format; main loop + login; command dispatch; user/bot objects; dual-stack secondary-IP verification; DoS limits; pre-handshake IP/CIDR blocklist; global allowlist (whitelist beats automated blocks, not manual pins); IP/CIDR primitives |
 | HTTP API | `http`, `http_router`, `http_client`, `http_filter`, `http_events`, `util_http` | Inbound HTTP/JSON API + router + auth; non-blocking OUTBOUND client; filter/sort/paginate helper; deferred-event endpoints; plugin endpoint helper |
 | Crypto + boot trust | `sha256`, `hmac`, `cert_bootstrap`, `cacert_bootstrap` | Pure-Lua SHA-256; HMAC-SHA256 (RFC 2104, sandbox-exposed for signed-webhook auth, #398); first-boot TLS-cert auto-gen (#77); CA-bundle reconciliation |
 | Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `geoip_update`, `bloom`, `ensuredirs`, `doc` (disabled), `hci` (stub) | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader + in-hub GeoLite2 auto-update; bloom filter; boot-time runtime-dir self-heal; dormant |
@@ -271,6 +271,18 @@ a **periodic-fetch plugin must persist its next-fetch deadline across
 from source per §1a.3/4, since many are old-version reports asking "fixed in
 3.x?"). GitFlow A per fix; batch dev->master as a MERGE commit (never squash
 - see §8 branch hygiene).
+
+**In flight on `dev`: the #78 allowlist (global whitelist).** The allowlist
+deferred from the unified-blocklist arc, now its own 4-PR feature. A
+`core/whitelist.lua` engine consulted by every IP-blocking path so trusted
+infrastructure (hublist pingers etc.) is exempt from the AUTOMATED blockers
+(GeoIP / proxydetect / feeds / hub-limit) - but NOT from a deliberate manual
+`+ban` / `+blocklist` (Model A: a manual block wins). Phase A (engine +
+`blocklist.check_ip` precedence + `whitelist.is_whitelisted` sandbox global)
+on `dev`; Phases B (`+whitelist` plugin + bundled pinger seed), C (per-plugin
+guards in etc_geoip / etc_proxydetect / usr_hubs), D (HTTP `/v1/whitelist`)
+follow, each its own PR + review gate. Source of truth: the whitelist-arc
+PRs (deferred item of [#78](https://github.com/luadch-ng/luadch/issues/78)).
 
 **HTTP-endpoint authoring** (which helper for which endpoint shape, envelope
 contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and

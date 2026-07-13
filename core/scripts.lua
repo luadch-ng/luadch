@@ -245,6 +245,12 @@ local SANDBOX_GLOBALS = {
     -- webhook tokens) call `secrets.lookup(cfg_key)` so Docker
     -- operators can set keys via env vars instead of cfg.tbl.
     "secrets",
+    -- core/whitelist.lua (#78 allowlist): global IP/CIDR allowlist.
+    -- Every IP-blocking plugin (etc_geoip / etc_proxydetect / usr_hubs
+    -- / ...) calls whitelist.is_whitelisted(ip) before its own block so
+    -- trusted infrastructure (hublist pingers etc.) is exempt from the
+    -- automated blockers. Phase B's etc_whitelist.lua manages entries.
+    "whitelist",
     -- core/blocklist.lua (#78 Phase A): unified pre-handshake
     -- IP/CIDR blocklist engine. Phase B's etc_blocklist.lua and
     -- Phase D/E/F's auto-feed plugins call blocklist.add /

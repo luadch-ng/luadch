@@ -83,6 +83,7 @@
 local use = use
 
 local type      = use "type"
+local pcall     = use "pcall"
 local next      = use "next"
 local pairs     = use "pairs"
 local ipairs    = use "ipairs"
@@ -120,6 +121,12 @@ local ipmatch_format_bytes = ipmatch.format_bytes
 local cfg_get
 local out_put
 local out_error
+
+-- Whitelist (core/whitelist.lua) precedence hook. Captured in init()
+-- once all _core modules are present; nil until then (and in a unit
+-- test that stubs `use` without the whitelist module - the check_ip
+-- guard below is a no-op in that case, preserving legacy behaviour).
+local whitelist_is_whitelisted
 
 -- Source priority: higher number = higher priority. When multiple
 -- entries match the same IP, the winner is the highest-priority.
@@ -473,6 +480,22 @@ local function check_ip( ip )
 
     local entry = _resolve_decision( ip )
     if not entry then return false end
+
+    -- Whitelist precedence (#78 allowlist, Model A): a whitelisted IP
+    -- overrides an AUTOMATED block (geoip / proxycheck / external feed)
+    -- but NOT a deliberate manual pin. source == "manual" is the
+    -- operator's explicit "block this" and wins, so a manual
+    -- +blocklist/+ban still applies inside a whitelisted range. On an
+    -- override we return BEFORE the per-attempt log + rollup so a
+    -- trusted IP produces zero block noise (the point of the allowlist).
+    -- pcall-guarded: check_ip runs on the accept path (server.lua ->
+    -- hub.loop) with no pcall in the chain, so a throw in the whitelist
+    -- module would kill the hub loop (the #401 accept-path crash class).
+    -- Fail CLOSED - an error keeps the block, the safe direction.
+    if entry.source ~= "manual" and whitelist_is_whitelisted then
+        local ok_wl, hit = pcall( whitelist_is_whitelisted, ip )
+        if ok_wl and hit then return false end
+    end
 
     local now = socket_gettime( )
     -- Per-attempt visible log when NOT stealth; the rollup picks
@@ -941,6 +964,15 @@ local function init( )
     local out_mod = use "out"
     out_put = out_mod.put
     out_error = out_mod.error
+
+    -- Capture whitelist.is_whitelisted for the check_ip precedence hook.
+    -- Post-load (every _core module present); pcall-guarded so a unit
+    -- test that stubs `use` without the whitelist module still loads and
+    -- the guard stays a no-op (legacy block-only behaviour).
+    local ok_wl, wl = pcall( use, "whitelist" )
+    if ok_wl and type( wl ) == "table" then
+        whitelist_is_whitelisted = wl.is_whitelisted
+    end
 
     _resnapshot_cfg( )
     reload( )
