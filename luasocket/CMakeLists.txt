@@ -59,7 +59,18 @@ add_library(socket MODULE
 )
 target_compile_definitions(socket PRIVATE LUASOCKET_NODEBUG LUASOCKET_INET_PTON)
 if(WIN32)
-    target_compile_definitions(socket PRIVATE WINVER=0x0501)
+    # FD_SETSIZE (Winsock default 64) is the hard cap on how many sockets a
+    # single select() call can watch: select.c raises "too many sockets" at
+    # n >= FD_SETSIZE. The hub event loop (core/server.lua tick()) selects
+    # over EVERY connected socket at once, so the default 64 crashes the hub
+    # once it holds ~64 sockets (users + v4/v6 listeners + HBRI + HTTP).
+    # Raise to 1024 = parity with the Linux glibc fd_set. On Windows fd_set
+    # is a SOCKET array sized by this macro, so bumping it genuinely enlarges
+    # the set; the -D lands before <winsock2.h> (which defines FD_SETSIZE
+    # only #ifndef). WINDOWS-ONLY: on Linux, glibc's fd_set is a fixed 1024-
+    # bit buffer, so redefining FD_SETSIZE would overflow it - the >1024 case
+    # there needs the select->poll port (#310). See luadch-ng/luadch#416.
+    target_compile_definitions(socket PRIVATE WINVER=0x0501 FD_SETSIZE=1024)
     target_link_libraries(socket PRIVATE ws2_32)
 endif()
 target_include_directories(socket PRIVATE ${LSOCKET_SRC})
@@ -95,7 +106,10 @@ endif()
 add_library(luasocket_static STATIC ${LSOCKET_STATIC_SOURCES})
 target_compile_definitions(luasocket_static PRIVATE LUASOCKET_NODEBUG LUASOCKET_INET_PTON)
 if(WIN32)
-    target_compile_definitions(luasocket_static PRIVATE WINVER=0x0501)
+    # Match the `socket` module's FD_SETSIZE (see above) so wsocket.c's
+    # socket_waitfd / socket_select agree on the fd_set size across the
+    # luasec link. luadch-ng/luadch#416.
+    target_compile_definitions(luasocket_static PRIVATE WINVER=0x0501 FD_SETSIZE=1024)
 endif()
 target_include_directories(luasocket_static PUBLIC ${LSOCKET_SRC})
 target_link_libraries(luasocket_static PUBLIC lua)
