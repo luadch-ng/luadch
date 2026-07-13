@@ -106,9 +106,11 @@ endif()
 add_library(luasocket_static STATIC ${LSOCKET_STATIC_SOURCES})
 target_compile_definitions(luasocket_static PRIVATE LUASOCKET_NODEBUG LUASOCKET_INET_PTON)
 if(WIN32)
-    # Match the `socket` module's FD_SETSIZE (see above) so wsocket.c's
-    # socket_waitfd / socket_select agree on the fd_set size across the
-    # luasec link. luadch-ng/luadch#416.
+    # Keep luasocket_static's FD_SETSIZE in sync with the `socket` module
+    # (see above) for consistency. This is future-proofing, NOT an ABI
+    # requirement: luasec links this static lib but no fd_set crosses that
+    # boundary (ssl.c only calls socket_waitfd, which builds a single-fd set
+    # that is correct at any FD_SETSIZE). luadch-ng/luadch#416.
     target_compile_definitions(luasocket_static PRIVATE WINVER=0x0501 FD_SETSIZE=1024)
 endif()
 target_include_directories(luasocket_static PUBLIC ${LSOCKET_SRC})
