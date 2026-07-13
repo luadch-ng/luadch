@@ -4,6 +4,10 @@
 
         Usage: [+!#]hideshare <NICK>
 
+        v0.5:
+            - also hide the shared-file count (ADC INF SF), not just the
+              share size (SS) - the file count stayed visible in clients
+
         v0.4:
             - removed table lookups
             - simplify 'activate' logic
@@ -30,7 +34,7 @@
 --------------
 
 local scriptname = "usr_hide_share"
-local scriptversion = "0.4"
+local scriptversion = "0.5"
 
 local cmd = "hideshare"
 
@@ -83,9 +87,12 @@ local share = "0"
 --// check user on listener
 checkOnListener = function( user, cmdx, se )
     if restrictions[ user:level() ] or hide_share_tbl[ user:firstnick() ] then
-        if cmdx then cmdx:setnp( "SS", share ) end
+        -- ADC INF: SS = share size, SF = shared-file count. Both must be
+        -- zeroed or the client still shows how many files the user shares.
+        if cmdx then cmdx:setnp( "SS", share ); cmdx:setnp( "SF", share ) end
         user:inf():setnp( "SS", share )
-        if se then hub.sendtoall( "BINF " .. user:sid() .. " SS" .. share .. "\n" ) end
+        user:inf():setnp( "SF", share )
+        if se then hub.sendtoall( "BINF " .. user:sid() .. " SS" .. share .. " SF" .. share .. "\n" ) end
     end
 end
 
@@ -98,9 +105,10 @@ checkOnCommand = function( user, target )
             --// add user to db
             hide_share_tbl[ target:firstnick() ] = 1
             util.savetable( hide_share_tbl, "hide_share_tbl", path )
-            --// target share flag manipulation
+            --// target share flag manipulation (SS = size, SF = file count)
             target:inf():setnp( "SS", share )
-            hub.sendtoall( "BINF " .. target:sid() .. " SS" .. share .. "\n" )
+            target:inf():setnp( "SF", share )
+            hub.sendtoall( "BINF " .. target:sid() .. " SS" .. share .. " SF" .. share .. "\n" )
             --// report
             target:reply( utf.format( msg_hide_target, user:nick() ), hub.getbot() )
             user:reply( utf.format( msg_hide_user, target:nick() ), hub.getbot() )
