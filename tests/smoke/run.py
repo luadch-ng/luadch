@@ -1042,6 +1042,76 @@ def test_neg_inf_nick_escape_newline_rejected(staging_dir: Path):
     _neg_inf_nick_escape_sequence_rejected(staging_dir, "\\n")
 
 
+def _send_binf_with_ni(nick: str):
+    """Partial handshake + one BINF carrying the given NI, then drain+close.
+    Used by the #419 unknown-escape tests below."""
+    sock = socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    )
+    try:
+        _reader, sid = _neg_handshake_get_sid(sock)
+        cid_b32, pid_b32 = _neg_random_pid_cid_pair()
+        binf = (
+            f"BINF {sid} ID{cid_b32} PD{pid_b32} NI{nick}"
+            f" I40.0.0.0 SUTCP4\n"
+        ).encode("utf-8")
+        sock.sendall(binf)
+        _neg_drain_briefly(sock, timeout=1.0)
+    finally:
+        sock.close()
+
+
+def _event_log_discarded_escape(staging_dir: Path, marker: str) -> bool:
+    """True iff parse() logged an 'unknown escape ... discarding' line for a
+    message carrying `marker` (log_events=true in the smoke override)."""
+    log_path = staging_dir / "log" / "event.log"
+    if not log_path.exists():
+        raise AssertionError(f"event.log not found at {log_path}")
+    txt = log_path.read_text(encoding="utf-8", errors="replace")
+    return any(
+        "unknown escape" in line and marker in line
+        for line in txt.splitlines()
+    )
+
+
+def test_neg_unknown_escape_discarded(staging_dir: Path):
+    """#419 / ADC 1.0 section 3.1: a message containing an unknown escape
+    (anything other than \\s \\n \\\\) must be discarded. A BINF whose NI
+    carries \\q is dropped by parse(). Pre-fix it was accepted (no line)."""
+    marker = secrets.token_hex(4)
+    _send_binf_with_ni(f"esc{marker}\\qname")     # \q on the wire
+    if not _event_log_discarded_escape(staging_dir, marker):
+        raise AssertionError(
+            f"BINF with unknown escape \\q was NOT discarded; no 'unknown "
+            f"escape' log line with marker {marker!r} in event.log (#419)"
+        )
+
+
+def test_neg_trailing_backslash_discarded(staging_dir: Path):
+    """#419: a value ending in a lone backslash is an incomplete/unknown
+    escape and must be discarded (the issue's own naive regex misses this)."""
+    marker = secrets.token_hex(4)
+    _send_binf_with_ni(f"esc{marker}name\\")      # NI ends in a bare backslash
+    if not _event_log_discarded_escape(staging_dir, marker):
+        raise AssertionError(
+            f"BINF with a trailing backslash was NOT discarded; no 'unknown "
+            f"escape' log line with marker {marker!r} in event.log (#419)"
+        )
+
+
+def test_valid_escaped_backslash_not_discarded(staging_dir: Path):
+    """#419 positive control: \\\\ (an escaped backslash) is a VALID escape
+    and must NOT be discarded - exactly the case a naive
+    '\\ not followed by s/n/\\' scan would wrongly reject."""
+    marker = secrets.token_hex(4)
+    _send_binf_with_ni(f"esc{marker}\\\\name")    # \\ on the wire = valid escaped backslash
+    if _event_log_discarded_escape(staging_dir, marker):
+        raise AssertionError(
+            f"BINF with a VALID escaped backslash (\\\\) was wrongly "
+            f"discarded (over-rejection); marker {marker!r} (#419)"
+        )
+
+
 def test_binf_without_i4_or_i6_accepted():
     """#161 regression: a BINF that omits I4 AND I6 must NOT be rejected
     with ISTA 220 'No CID/PID/NICK/IP found in your INF.'. Per ADC 4.3.x
@@ -12156,6 +12226,30 @@ def run_tests(staging_dir: Path):
         failed.append("neg: BINF NI with \\n escape rejected (#265)")
     else:
         log("PASS  neg: BINF NI with \\n escape rejected (#265)")
+
+    try:
+        test_neg_unknown_escape_discarded(staging_dir)
+    except Exception as e:
+        log(f"FAIL  neg: unknown ADC escape \\q discarded (#419): {e}")
+        failed.append("neg: unknown ADC escape \\q discarded (#419)")
+    else:
+        log("PASS  neg: unknown ADC escape \\q discarded (#419)")
+
+    try:
+        test_neg_trailing_backslash_discarded(staging_dir)
+    except Exception as e:
+        log(f"FAIL  neg: trailing backslash discarded (#419): {e}")
+        failed.append("neg: trailing backslash discarded (#419)")
+    else:
+        log("PASS  neg: trailing backslash discarded (#419)")
+
+    try:
+        test_valid_escaped_backslash_not_discarded(staging_dir)
+    except Exception as e:
+        log(f"FAIL  pos: valid escaped backslash NOT discarded (#419): {e}")
+        failed.append("pos: valid escaped backslash NOT discarded (#419)")
+    else:
+        log("PASS  pos: valid escaped backslash NOT discarded (#419)")
 
     # The plugin-load test reads the hub log, so it runs after all
     # protocol tests have had a chance to exercise the listeners.
