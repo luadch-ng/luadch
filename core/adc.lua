@@ -952,6 +952,23 @@ parse = function( data )
         return nil
     end
 
+    -- ADC 1.0 section 3.1: the only defined escapes are \s (space), \n
+    -- (newline) and \\ (backslash); "any message containing unknown escapes
+    -- must be discarded" (#419). Validate PAIRWISE - strip the valid escapes
+    -- first, and any leftover backslash is then an unknown escape (\q) or an
+    -- unescaped/trailing backslash. A naive "\ not followed by s/n/\" scan is
+    -- wrong: it false-positives on \\q (an escaped backslash followed by a
+    -- literal q, i.e. the valid wire form of the text "\q") and misses a lone
+    -- trailing backslash. A backslash-free message (most protocol commands)
+    -- skips the gsub via the single plain find; a message with escapes (e.g.
+    -- any multi-word chat, which carries \s) takes one bounded O(n) gsub -
+    -- both cheap.
+    if string_find( data, "\\", 1, true )
+       and string_find( ( string_gsub( data, "\\[sn\\]", "" ) ), "\\", 1, true ) then
+        out_put( "adc.lua: function 'parse': message contains an unknown escape sequence (ADC 3.1), discarding: '", data, "'" )
+        return nil
+    end
+
     out_put( "adc.lua: try to parse '", data, "'" )
 
     local command = { }    -- array with parsed and checked message params (includes seperators and "\n"); is used also as adc command object with methods
