@@ -210,6 +210,19 @@ The conventions below are either not in it or are easy to get wrong:
   disabled per its default policy). Array order in `cfg.scripts` = listener-chain
   order; structural plugins (e.g. `hub_inf_manager`) must precede plugins that
   depend on their effect.
+- **Auto-kick plugins consult the whitelist first (#78 allowlist).** Any plugin that
+  would auto-kick / ban / block trusted infrastructure - whether it decides on the
+  connecting IP (GeoIP, proxy detection, feed blocklists) or on a signal that trusted
+  infra legitimately trips (a hublist pinger's high hub count) - should call
+  `whitelist.is_whitelisted(user:ip())` at the top of its per-connection decision and
+  skip on a match, so operator-trusted infrastructure (hublist pingers etc.) is
+  exempt. `whitelist` is a sandbox global (mirrors `blocklist`). Precedence is
+  deliberate: the whitelist overrides AUTOMATED blocks only - a manual `+ban` /
+  `+blocklist` still applies (enforced in `core/blocklist.check_ip`). Put the guard
+  BEFORE any cache / quota / network step so a trusted IP costs nothing. Precedents:
+  the one-line guard in `etc_geoip`, `etc_proxydetect`, `usr_hubs`. Not yet extended
+  to the share / slots / nick-policy plugins (`usr_share` / `usr_slots` /
+  `usr_nick_*`) - a whitelisted IP still faces those unless a follow-up adds the guard.
 - **Audit fire-sites:** state-changing actions emit `audit.build` / `audit.fire`
   with the firstnick-canonical actor. See [`SECURITY.md`](SECURITY.md) and the
   `#84` audit-log conventions.

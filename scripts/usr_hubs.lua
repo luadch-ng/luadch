@@ -132,6 +132,10 @@ local check = function( user )
     local user_ip = user:ip()
     local user_cid = user:cid()
     local hn, hr, ho = user:hubs()
+    -- #78 allowlist: a whitelisted IP (trusted infra / hublist pinger)
+    -- is exempt from BOTH the invalid-hubcount kick and the hub-limit
+    -- ban - pingers legitimately report many hubs / omit the triplet.
+    if whitelist.is_whitelisted( user_ip ) then return nil end
     -- Phase 8a F-INF-1b: a client BINF without the HN/HR/HO triplet
     -- returns nil from user:hubs(). Pre-fix, the arithmetic on the
     -- next line crashed with "attempt to perform arithmetic on a nil
