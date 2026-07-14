@@ -36,4 +36,6 @@ desktop.ini
 # tree. This entry is a safety net for older binaries or unusual
 # invocation paths that could still drop the file at the repo root.
 exception.txt
+# Single-instance lock file, created at runtime in the install tree.
+luadch.lock
 __pycache__/

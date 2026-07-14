@@ -222,6 +222,30 @@ default account is hubowner — **delete it as soon as you have your own**.
 
 ---
 
+## Single instance per install
+
+The hub refuses to start a second time from the **same install
+directory**: the launcher holds an exclusive lock on `luadch.lock` in
+that directory for its whole lifetime. A second `./luadch` /
+`Luadch.exe` against the same tree exits non-zero with `another instance
+is already running in this directory` (also written to
+`log/exception.txt`). This stops two hubs racing on the shared
+`cfg/user.tbl`, `master.key`, `scripts/data/*.tbl` and logs.
+
+- Running **several hubs on one machine** is fully supported - give each
+  its own install directory; each gets its own lock and they never
+  collide.
+- The lock is released by the OS when the process exits or crashes, so
+  there is **no stale lock file to clean up** after a crash.
+- `+reload` keeps the lock (it re-runs in place, it is not a new
+  process).
+- If you script a restart, let the old process finish exiting before
+  starting the new one: during the old hub's shutdown drain the lock is
+  still held and the replacement is refused. `systemd` and
+  `docker restart` do this sequentially and are unaffected.
+
+---
+
 ## File permissions for secrets
 
 `cfg/user.tbl` (registered users with their cleartext passwords - see

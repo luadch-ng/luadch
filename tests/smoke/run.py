@@ -71,6 +71,10 @@ HUB_HOST = "127.0.0.1"
 START_TIMEOUT_SEC = 20
 STOP_TIMEOUT_SEC = 10
 PROTOCOL_TIMEOUT_SEC = 5
+# How long to wait for a rejected second instance to exit. The launcher
+# guard fires before Lua/socket init so it exits near-instantly; the
+# slack is for slow CI. A timeout here means the guard did NOT fire.
+SINGLE_INSTANCE_TIMEOUT_SEC = 15
 
 
 class TestFailure(Exception):
@@ -12550,6 +12554,78 @@ def run_tests(staging_dir: Path):
     return failed
 
 
+def _start_second_hub(staging_dir: Path):
+    """Spawn a SECOND hub against the same staging tree, capturing its
+    own stdout/stderr to log/second-instance.log. Deliberately does NOT
+    reuse start_hub(): that opens the shared log/smoke-hub.log in "wb"
+    mode and would truncate the first (running) hub's log."""
+    binary = staging_dir / ("Luadch.exe" if sys.platform == "win32" else "luadch")
+    out_path = staging_dir / "log" / "second-instance.log"
+    out = open(out_path, "wb")
+    proc = subprocess.Popen(
+        [str(binary)],
+        cwd=str(staging_dir.parent),
+        stdout=out,
+        stderr=subprocess.STDOUT,
+    )
+    return proc, out, out_path
+
+
+def test_single_instance_lock(staging_dir: Path, proc=None):
+    """A second hub launched against the same install tree must refuse to
+    start: the single-instance lock in hub.c (flock on unix, exclusive
+    CreateFile on Windows) makes it exit non-zero with an "already
+    running" message, and the first instance keeps running untouched.
+    Guards against two hubs sharing cfg/user.tbl/master.key/logs and
+    corrupting them via interleaved saves.
+
+    Provably fails pre-fix: without the launcher guard the second process
+    either boots a full second hub (on Windows SO_REUSEADDR lets it
+    re-bind the ports -> wait() times out) or dies on a bind error with
+    no single-instance message - neither matches the assertions here."""
+    if proc is None or proc.poll() is not None:
+        raise TestFailure("precondition failed: the first hub is not running")
+
+    second, second_out, second_log_path = _start_second_hub(staging_dir)
+    try:
+        try:
+            rc = second.wait(timeout=SINGLE_INSTANCE_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            raise TestFailure(
+                f"second hub did not exit within {SINGLE_INSTANCE_TIMEOUT_SEC}s; "
+                "the single-instance guard is missing (two instances ran "
+                "concurrently)"
+            )
+    finally:
+        # Never leave a stray second process behind, even on assert paths.
+        # Swallow a second TimeoutExpired on the reap so it cannot mask the
+        # real TestFailure or orphan the process.
+        if second.poll() is None:
+            second.kill()
+            try:
+                second.wait(timeout=STOP_TIMEOUT_SEC)
+            except subprocess.TimeoutExpired:
+                pass
+        second_out.close()
+
+    if rc == 0:
+        raise TestFailure("second hub exited 0; expected a non-zero refusal")
+
+    text = second_log_path.read_text(encoding="utf-8", errors="replace")
+    if "already running" not in text:
+        raise TestFailure(
+            "second hub exited non-zero but its log lacks the single-instance "
+            f"refusal message; log was:\n{text!r}"
+        )
+
+    # The rejected second start must not disturb the running first hub.
+    if proc.poll() is not None:
+        raise TestFailure(
+            f"first hub died (rc={proc.poll()}) after the second start attempt; "
+            "the guard must not disturb the already-running instance"
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -12586,6 +12662,18 @@ def main():
             (staging_dir / "certs" / stale).unlink(missing_ok=True)
         proc, log_file = start_hub(staging_dir)
         failed = run_tests(staging_dir)
+
+        # Single-instance lock: with the shared hub still running, a
+        # second launch against the same tree must be refused by the
+        # hub.c guard. Runs BEFORE the plaintext-mode switch below stops
+        # this hub (it needs a live first instance holding the lock).
+        try:
+            test_single_instance_lock(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  single-instance lock refuses second start: {e}")
+            failed.append("single-instance lock refuses second start")
+        else:
+            log("PASS  single-instance lock refuses second start")
 
         # #128 plaintext-mode test runs AFTER the regular battery
         # because cfg_secret.init() reads encrypt_usertbl once at

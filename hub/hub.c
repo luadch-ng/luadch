@@ -11,6 +11,7 @@
 #ifdef __unix__
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/file.h>   /* flock */
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
@@ -342,6 +343,147 @@ static void handle_args(int argc, char **argv)
   }
 }
 
+/* ---- single-instance lock -------------------------------------------
+ *
+ * Refuse to start a second hub against the same install tree. Two hubs
+ * sharing one cfg/ race on user.tbl, master.key, the plugin .tbl stores
+ * and the logs; interleaved saveusers()/savetable() writes can corrupt
+ * them (data loss). The guard is a lock FILE in the install directory -
+ * chdir_to_binary_dir() anchored the CWD there, so a relative name
+ * resolves per-install automatically: a second hub in a DIFFERENT
+ * directory has its own lock and starts fine (a test hub + a prod hub on
+ * one box is a supported setup). The lock is held open for the whole
+ * process lifetime:
+ *   - unix:    flock(LOCK_EX | LOCK_NB). The kernel releases it when the
+ *              process dies, so a crash never leaves a blocking stale
+ *              lock. fork() shares the open file description, so the
+ *              daemon child keeps the lock after the parent exits.
+ *   - windows: CreateFile with dwShareMode = 0 (deny sharing) - a second
+ *              open fails with ERROR_SHARING_VIOLATION. FILE_FLAG_DELETE_
+ *              ON_CLOSE removes the file on exit/crash.
+ *
+ * Fail-open: if the lock file cannot even be created (read-only fs and
+ * the like) we warn and continue rather than brick the hub over a
+ * missing convenience guard - only a definitive "already held" refuses
+ * startup. Survives +reload: restart() re-enters run_lua via atexit
+ * without closing this fd/handle, so the lock persists with no gap. */
+#define LOCKFILE_NAME "luadch.lock"
+
+#ifdef _WIN32
+static HANDLE g_lock_handle = INVALID_HANDLE_VALUE;
+#elif defined(__unix__)
+static int g_lock_fd = -1;
+#endif
+
+/* 0 = we hold the lock (or the guard degraded to a no-op; continue).
+ * 1 = another instance already holds it (caller must abort startup). */
+static int acquire_single_instance_lock(void)
+{
+#ifdef _WIN32
+  HANDLE h = CreateFileA(
+    LOCKFILE_NAME,
+    GENERIC_READ | GENERIC_WRITE,
+    0,                                  /* dwShareMode = 0 -> exclusive */
+    NULL,
+    OPEN_ALWAYS,
+    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
+    NULL);
+  if (h == INVALID_HANDLE_VALUE)
+  {
+    DWORD e = GetLastError();
+    /* A concurrent instance holding the file with dwShareMode = 0 ALWAYS
+     * surfaces as ERROR_SHARING_VIOLATION - that is the only definitive
+     * "already running" signal. ERROR_ACCESS_DENIED means something else
+     * (a read-only or ACL-denied stale lock file, a directory of that
+     * name) with no instance necessarily running, so it must fail-open
+     * rather than wrongly refuse startup. */
+    if (e == ERROR_SHARING_VIOLATION)
+    {
+      return 1;   /* another instance holds the exclusive handle */
+    }
+    fprintf(stderr, "warning: cannot create lock file '%s' (error %lu); "
+                    "single-instance guard disabled\n",
+                    LOCKFILE_NAME, (unsigned long)e);
+    fflush(stderr);
+    return 0;     /* fail-open */
+  }
+  g_lock_handle = h;
+  return 0;
+#elif defined(__unix__)
+  /* O_CLOEXEC so a fork+exec child (io.popen / os.execute) does NOT
+   * inherit this fd: an inherited fd that outlives the hub would keep the
+   * flock held and wrongly refuse the next restart. daemonize() forks
+   * WITHOUT exec, so the daemon child still shares the open file
+   * description and correctly retains the lock. */
+  int fd = open(LOCKFILE_NAME, O_CREAT | O_RDWR | O_CLOEXEC, 0640);
+  if (fd < 0)
+  {
+    fprintf(stderr, "warning: cannot create lock file '%s' (%s); "
+                    "single-instance guard disabled\n",
+                    LOCKFILE_NAME, strerror(errno));
+    fflush(stderr);
+    return 0;     /* fail-open */
+  }
+  if (flock(fd, LOCK_EX | LOCK_NB) != 0)
+  {
+    if (errno == EWOULDBLOCK)
+    {
+      close(fd);
+      return 1;   /* another instance holds the lock */
+    }
+    fprintf(stderr, "warning: cannot lock '%s' (%s); "
+                    "single-instance guard disabled\n",
+                    LOCKFILE_NAME, strerror(errno));
+    fflush(stderr);
+    close(fd);
+    return 0;     /* fail-open */
+  }
+  g_lock_fd = fd;
+  return 0;
+#else
+  return 0;       /* unknown platform: no guard */
+#endif
+}
+
+/* Record the running process's PID in the (already-held) lock file for
+ * operator diagnostics. Called AFTER daemonize() so the value is the
+ * surviving process, not the pre-fork parent. Best-effort: a write
+ * failure is not fatal - the lock is the open handle, not the content. */
+static void write_lock_pid(void)
+{
+  char buf[32];
+  int n;
+#ifdef _WIN32
+  if (g_lock_handle == INVALID_HANDLE_VALUE) return;
+  n = snprintf(buf, sizeof(buf), "%lu\n",
+               (unsigned long)GetCurrentProcessId());
+  if (n > 0)
+  {
+    DWORD written = 0;
+    if (n >= (int)sizeof(buf)) n = (int)sizeof(buf) - 1;   /* clamp */
+    SetFilePointer(g_lock_handle, 0, NULL, FILE_BEGIN);
+    WriteFile(g_lock_handle, buf, (DWORD)n, &written, NULL);
+    SetEndOfFile(g_lock_handle);   /* truncate: OPEN_ALWAYS may reopen a
+                                    * survived-hard-crash file with a
+                                    * longer stale PID */
+  }
+#elif defined(__unix__)
+  if (g_lock_fd < 0) return;
+  n = snprintf(buf, sizeof(buf), "%ld\n", (long)getpid());
+  if (n > 0 && lseek(g_lock_fd, 0, SEEK_SET) == 0)
+  {
+    ssize_t w;
+    if (n >= (int)sizeof(buf)) n = (int)sizeof(buf) - 1;   /* clamp */
+    w = write(g_lock_fd, buf, (size_t)n);
+    if (w > 0)
+    {
+      int t = ftruncate(g_lock_fd, w);
+      (void)t;
+    }
+  }
+#endif
+}
+
 int main(int argc, char **argv)
 {
   handle_signals();
@@ -354,7 +496,17 @@ int main(int argc, char **argv)
     fprintf(stderr, "warning: could not anchor cwd to binary directory; "
                     "falling back to inherited cwd\n");
   }
+  // Acquire BEFORE daemonize() so a foreground start reports the refusal
+  // straight to the invoking shell (non-zero exit), and a second `-d`
+  // start is rejected before it forks.
+  if (acquire_single_instance_lock() != 0)
+  {
+    log_error("luadch: another instance is already running in this "
+              "directory; refusing to start.");
+    return EXIT_FAILURE;
+  }
   daemonize();
+  write_lock_pid();
   run_lua();
   return EXIT_SUCCESS;
 }
