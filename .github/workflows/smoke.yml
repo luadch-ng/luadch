@@ -46,6 +46,9 @@ jobs:
       - name: Run bloom unit test
         run: lua5.4 tests/unit/bloom_test.lua
 
+      - name: Run sysinfo unit test
+        run: lua5.4 tests/unit/sysinfo_test.lua
+
       # Phase 1b of #82 HTTP API: router unit tests cover the pure-Lua
       # bits (constant_time_eq, schema validator, envelope helpers,
       # token resolution, request-id shape, register guards).
@@ -365,6 +368,10 @@ jobs:
       - name: Run bloom unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/bloom_test.lua
+
+      - name: Run sysinfo unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/sysinfo_test.lua
 
       - name: Run http_router unit test
         shell: msys2 {0}

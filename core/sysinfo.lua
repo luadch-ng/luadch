@@ -71,6 +71,24 @@ local capture = function( cmd )
     return trim( s )
 end
 
+-- Windows: Get-CimInstance is PowerShell 3.0+ and is ABSENT on the
+-- PowerShell 2.0 that ships with Server 2008 R2 / Windows 7 (it raises
+-- a catchable CommandNotFoundException there). Get-WmiObject exists in
+-- EVERY Windows PowerShell (2.0 through 5.1); `powershell.exe` is
+-- Windows PowerShell, not the PS-7/Core `pwsh` where the WMI cmdlets
+-- were dropped. So try the modern CIM cmdlet and fall back to WMI in
+-- one popen: PS 3.0+ takes the try branch, PS 2.0 the catch. Both expose
+-- the identical `(<query>).<Property>` shape. Fixes "<UNKNOWN>" OS/CPU/RAM
+-- (and the pre-refactor cmd_hubinfo nil-concat crash) on old Windows.
+local win_cim = function( wmi_class, property )
+    return capture(
+        'powershell -NoProfile -Command "try { (Get-CimInstance '
+        .. wmi_class .. ').' .. property
+        .. ' } catch { (Get-WmiObject '
+        .. wmi_class .. ').' .. property .. ' }"'
+    )
+end
+
 -- Pull a colon-delimited field from /proc/cpuinfo-style output.
 -- Matches cmd_hubinfo's old `split( s, ":", "\n" )` shape:
 -- take the first line, strip everything up to and including the
@@ -100,9 +118,9 @@ local os_kind = function( ) return _os_kind end
 
 local os_name = function( )
     if _os_kind == "win" then
-        -- wmic was removed in Windows 11 24H2+; use PowerShell's
-        -- CIM cmdlets instead (matches cmd_hubinfo v0.29).
-        local s = capture( 'powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).Caption"' )
+        -- CIM with a WMI fallback (see win_cim) so PS 2.0 hosts
+        -- (Server 2008 R2 / Win7) report a real caption, not the default.
+        local s = win_cim( "Win32_OperatingSystem", "Caption" )
         return s or "Microsoft Windows"
     elseif _os_kind == "unix" then
         local s = capture( "uname -s -r -v -m" )
@@ -114,7 +132,7 @@ end
 
 local cpu_info = function( )
     if _os_kind == "win" then
-        local s = capture( 'powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).Name"' )
+        local s = win_cim( "Win32_Processor", "Name" )
         return s
     elseif _os_kind == "unix" then
         -- Try /proc/cpuinfo with three known label variants:
@@ -138,7 +156,7 @@ end
 
 local ram_total = function( )
     if _os_kind == "win" then
-        local s = capture( 'powershell -NoProfile -Command "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"' )
+        local s = win_cim( "Win32_ComputerSystem", "TotalPhysicalMemory" )
         if not s then return nil end
         return util.formatbytes( tonumber( s ) or s )
     elseif _os_kind == "unix" then
@@ -158,8 +176,8 @@ end
 -- `check_ram_total`. Preserved deliberately.
 local ram_free = function( )
     if _os_kind == "win" then
-        -- FreePhysicalMemory is in KiB on both PowerShell paths.
-        local s = capture( 'powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory"' )
+        -- FreePhysicalMemory is in KiB on both the CIM and WMI paths.
+        local s = win_cim( "Win32_OperatingSystem", "FreePhysicalMemory" )
         if not s then return nil end
         return util.formatbytes( ( tonumber( s ) or 0 ) * 1024 )
     elseif _os_kind == "unix" then
