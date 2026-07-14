@@ -71,6 +71,10 @@ HUB_HOST = "127.0.0.1"
 START_TIMEOUT_SEC = 20
 STOP_TIMEOUT_SEC = 10
 PROTOCOL_TIMEOUT_SEC = 5
+# How long to wait for a second hub (ports already held) to log the clear
+# port-in-use message. The bind attempt happens during boot; slack is for
+# a slow runner + cert auto-gen preceding the listener setup.
+PORT_IN_USE_TIMEOUT_SEC = 25
 
 
 class TestFailure(Exception):
@@ -12550,6 +12554,66 @@ def run_tests(staging_dir: Path):
     return failed
 
 
+def test_port_in_use_message(source_install: Path, proc=None, keep_staging=False):
+    """A second hub started with ports the running first hub already holds
+    must log a clear operator-facing "port ... already in use - change the
+    port in cfg/cfg.tbl" message (core/hub.lua add_server_handler). Uses a
+    SEPARATE install dir staged from the pristine source (so nothing about
+    the same-dir single-instance lock is involved) pointed at the SAME
+    test ports as the live shared hub.
+
+    The assertion is on the NEW guidance phrase, not just "already in use":
+    on Linux the raw luasocket bind error ("...bind: address already in
+    use") is logged pre-fix too, so a naive "already in use" check would
+    false-pass. Provably fails pre-fix: on Windows the second hub's
+    pre-bind SO_REUSEADDR let it silently re-bind the port (no failure, no
+    message); on Linux the bind failed but only the cryptic line was
+    logged, never the actionable guidance this asserts."""
+    if proc is None or proc.poll() is not None:
+        raise TestFailure("precondition failed: the first hub is not running")
+
+    second_staging = stage_install(source_install)
+    second = None
+    second_log = None
+    try:
+        override_test_ports(second_staging)   # same TEST_PORT_* as the shared hub
+        for stale in ("servercert.pem", "serverkey.pem", "cacert.pem", "cakey.pem"):
+            (second_staging / "certs" / stale).unlink(missing_ok=True)
+        second, second_log = start_hub(second_staging)
+
+        # The guidance goes to error.log via out.error (log_errors=true by
+        # default). "change the port in cfg/cfg.tbl" is unique to the new
+        # message - absent from the pre-fix cryptic luasocket line.
+        err_log = second_staging / "log" / "error.log"
+        needle = "change the port in cfg/cfg.tbl"
+        deadline = time.monotonic() + PORT_IN_USE_TIMEOUT_SEC
+        found = False
+        while time.monotonic() < deadline:
+            if err_log.exists():
+                text = err_log.read_text(encoding="utf-8", errors="replace")
+                if needle in text:
+                    found = True
+                    break
+            if second.poll() is not None:
+                break   # process died; one more read below then fail
+            time.sleep(0.2)
+        if not found:
+            tail = ""
+            if err_log.exists():
+                tail = err_log.read_text(encoding="utf-8", errors="replace")[-1000:]
+            raise TestFailure(
+                "second hub did not log the clear port-in-use guidance "
+                f"({needle!r}); error.log tail:\n{tail!r}"
+            )
+    finally:
+        if second is not None:
+            stop_hub(second, second_log)
+        if keep_staging:
+            log(f"second-hub staging kept at {second_staging.parent}")
+        else:
+            shutil.rmtree(second_staging.parent, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -12586,6 +12650,21 @@ def main():
             (staging_dir / "certs" / stale).unlink(missing_ok=True)
         proc, log_file = start_hub(staging_dir)
         failed = run_tests(staging_dir)
+
+        # Port-in-use guidance: with the shared hub still holding the test
+        # ports, a second hub (separate dir, same ports) must log a clear
+        # "change the port in cfg/cfg.tbl" message. Runs BEFORE the
+        # plaintext switch below stops the shared hub.
+        try:
+            test_port_in_use_message(
+                args.install_dir.resolve(), proc=proc,
+                keep_staging=args.keep_staging,
+            )
+        except Exception as e:
+            log(f"FAIL  port-in-use guidance on second hub: {e}")
+            failed.append("port-in-use guidance on second hub")
+        else:
+            log("PASS  port-in-use guidance on second hub")
 
         # #128 plaintext-mode test runs AFTER the regular battery
         # because cfg_secret.init() reads encrypt_usertbl once at
