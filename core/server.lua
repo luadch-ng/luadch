@@ -87,6 +87,7 @@ local ssl_newcontext = ( luasec and luasec.newcontext )
 
 local cfg = use "cfg"
 local out = use "out"
+local util = use "util"
 local mem = use "mem"
 local signal = use "signal"
 local ratelimit = use "ratelimit"
@@ -102,6 +103,14 @@ local out_error = out.error
 local signal_set = signal.set
 local signal_get = signal.get
 local ratelimit_accept_ip = ratelimit.accept_ip
+-- Platform gate for SO_REUSEADDR (see addserver): Linux needs it for the
+-- TIME_WAIT fast-restart (#128); on Windows SO_REUSEADDR instead lets a
+-- SECOND process re-bind a port already in use (SO_REUSEPORT-like
+-- semantics), so a same-port second hub binds silently and any process
+-- could hijack a luadch port. Skipping it on Windows makes that second
+-- bind fail with WSAEADDRINUSE ("address already in use") so the operator
+-- gets a clear message instead of two hubs racing.
+local _is_windows = ( util.path_sep( ) == "\\" )
 local ratelimit_release_ip = ratelimit.release_ip
 local blocklist_check_ip = blocklist.check_ip
 local ratelimit_handshake_started = ratelimit.handshake_started
@@ -1098,18 +1107,22 @@ addserver = function( p ) -- listeners, port, addr, pattern, sslctx, maxconnecti
         out_error( "server.lua: function 'addserver', luasocket cannot create master obejct: ", err )
         return nil, err
     end
-    -- Set SO_REUSEADDR BEFORE bind. On Linux the option only takes
-    -- effect on the next bind() call; setting it after bind is a
-    -- no-op and a fast restart hits "address already in use" if the
-    -- previous listener left the port in TIME_WAIT. Surfaced by
-    -- the #128 plaintext-mode smoke test which stops + restarts the
-    -- hub against the same staging tree. Pre-existing latent bug;
-    -- the post-bind setoption stays for completeness but the
-    -- pre-bind one is what actually unblocks the rebind.
-    local _, prebind_err = server:setoption( "reuseaddr", true )
-    if prebind_err then
-        out_error( "server.lua: function 'addserver', luasocket socket pre-bind setoption: ", prebind_err )
-        return nil, prebind_err
+    -- Set SO_REUSEADDR BEFORE bind (Linux only - see _is_windows above).
+    -- On Linux the option only takes effect on the next bind() call;
+    -- setting it after bind is a no-op and a fast restart hits "address
+    -- already in use" if the previous listener left the port in
+    -- TIME_WAIT. Surfaced by the #128 plaintext-mode smoke test which
+    -- stops + restarts the hub against the same staging tree. Pre-existing
+    -- latent bug; the post-bind setoption stays for completeness but the
+    -- pre-bind one is what actually unblocks the rebind. Deliberately
+    -- SKIPPED on Windows so a same-port second bind fails visibly instead
+    -- of silently succeeding (SO_REUSEADDR = SO_REUSEPORT there).
+    if not _is_windows then
+        local _, prebind_err = server:setoption( "reuseaddr", true )
+        if prebind_err then
+            out_error( "server.lua: function 'addserver', luasocket socket pre-bind setoption: ", prebind_err )
+            return nil, prebind_err
+        end
     end
     local num, err = server:bind( p.addr, p.port )
     if err then
@@ -1128,11 +1141,18 @@ addserver = function( p ) -- listeners, port, addr, pattern, sslctx, maxconnecti
         return nil, err
     end
     server:settimeout( 0 )
-    local _, err = server:setoption( "reuseaddr", true )
+    -- reuseaddr on the bound socket is Linux-only for the same reason as
+    -- the pre-bind call above: on Windows it would re-open the port to
+    -- being hijacked by another process. keepalive is set on every
+    -- platform.
+    local err
+    if not _is_windows then
+        _, err = server:setoption( "reuseaddr", true )
+    end
     local _, err2 = server:setoption( "keepalive", true )
     if err or err2 then
         out_error( "server.lua: function 'addserver', luasocket socket setoption: ", err or err2 )
-        return nil, err
+        return nil, err or err2
     end
     _readlistlen = _readlistlen + 1
     _readlist[ _readlistlen ] = server
