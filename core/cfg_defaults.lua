@@ -4563,6 +4563,74 @@ local defaults = {
             return value >= 60 and value <= 86400
         end
     },
+    -- #78 allowlist (core/whitelist.lua): a global IP/CIDR allowlist
+    -- consulted by every IP-blocking path. A match exempts the IP from
+    -- the AUTOMATED blockers (GeoIP / proxydetect / feeds / hub-limit)
+    -- and from automated blocklist-store entries, but NOT from a
+    -- deliberate manual +blocklist/+ban (a manual block wins). Engine
+    -- ships enabled with an empty store; Phase B's `+whitelist` plugin
+    -- seeds the bundled hublist-pinger allowlist on first run.
+    whitelist_enabled = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    whitelist_store_path = { "scripts/data/etc_whitelist.tbl",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    -- #78 allowlist, Phase B: `+whitelist` admin plugin
+    -- (etc_whitelist.lua). Operator-facing chat command + JSONL
+    -- export/import + a bundled hublist-pinger seed. The engine in
+    -- core/whitelist.lua is independent; these keys gate the plugin.
+    etc_whitelist_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    etc_whitelist_show_limit = { 200,
+        function( value )
+            if not types_number( value, nil, true ) then return false end
+            return value >= 1 and value <= 10000
+        end
+    },
+    -- Seed the bundled known-hublist-pinger allowlist on the FIRST run
+    -- (store .tbl missing). Seed-on-missing only; operator edits are
+    -- never overwritten. Set false to boot with an empty whitelist.
+    etc_whitelist_seed = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_whitelist_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_whitelist_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_whitelist_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_whitelist_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Minimum level to RUN `+whitelist import <path>`. Same threat
+    -- model as etc_blocklist_import_min_level: JSONL rows may carry
+    -- master-added entries; default 100 = master-only.
+    etc_whitelist_import_min_level = { 100,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
     -- #78 Phase B: `+blocklist` admin plugin (etc_blocklist.lua).
     -- Operator-facing chat command + JSONL export/import. The
     -- engine in core/blocklist.lua is independent; these keys

@@ -1660,7 +1660,19 @@ add_server_handler = function( p )
     local hndl, err = server.addserver( p )
     if hndl then
         _servers[ hndl ] = true
-    elseif err and err:find("address already in use") then
+        return
+    end
+    -- addserver failed. server.addserver already logged the raw luasocket
+    -- error; add a clear operator-facing line so a port clash is obvious.
+    -- The #1 cause is a second hub (or another program) on the same port -
+    -- on Windows the SO_REUSEADDR skip in server.lua makes that clash
+    -- surface here instead of the second bind silently succeeding.
+    local proto = p.sslctx and "TLS" or "plain"
+    local fam = ( p.family == "ipv6" ) and "IPv6" or "IPv4"
+    if err and err:find( "address already in use" ) then
+        out_error( "server: ", fam, " ", proto, " port ", p.port,
+            " is already in use - another process (or a second hub) holds it.",
+            " Stop it or change the port in cfg/cfg.tbl; retrying every 30s." )
         local starttime = os.time()
         server.addtimer(
             coroutine.create(
@@ -1679,6 +1691,9 @@ add_server_handler = function( p )
                 end
             )
         )
+    else
+        out_error( "server: could not start the ", fam, " ", proto,
+            " listener on port ", p.port, ": ", err or "unknown error" )
     end
 end
 

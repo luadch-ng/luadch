@@ -37,6 +37,7 @@ local function _stub_use_factory( opts )
     local cfg_values = opts.cfg or { }
     return function( name )
         if name == "type" then return type end
+        if name == "pcall" then return pcall end
         if name == "next" then return next end
         if name == "pairs" then return pairs end
         if name == "ipairs" then return ipairs end

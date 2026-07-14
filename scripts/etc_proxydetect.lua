@@ -685,6 +685,12 @@ local check_proxydetect = function( user )
     local ip, family = query_ip( user:ip( ) )
     if not ip then return end    -- unparseable IP -> skip (fail-open)
 
+    -- #78 allowlist: a whitelisted IP (trusted infra / hublist pinger)
+    -- is never sent to the provider (saves the paid query), cached, or
+    -- kicked. Checked before the cache + quota so a trusted IP costs
+    -- nothing.
+    if whitelist.is_whitelisted( ip ) then return end
+
     -- Cache hit: decide against the LIVE block_types (policy changes
     -- take effect without waiting for expiry).
     local c = cache_get( ip )

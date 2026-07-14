@@ -210,6 +210,19 @@ The conventions below are either not in it or are easy to get wrong:
   disabled per its default policy). Array order in `cfg.scripts` = listener-chain
   order; structural plugins (e.g. `hub_inf_manager`) must precede plugins that
   depend on their effect.
+- **Auto-kick plugins consult the whitelist first (#78 allowlist).** Any plugin that
+  would auto-kick / ban / block trusted infrastructure - whether it decides on the
+  connecting IP (GeoIP, proxy detection, feed blocklists) or on a signal that trusted
+  infra legitimately trips (a hublist pinger's high hub count) - should call
+  `whitelist.is_whitelisted(user:ip())` at the top of its per-connection decision and
+  skip on a match, so operator-trusted infrastructure (hublist pingers etc.) is
+  exempt. `whitelist` is a sandbox global (mirrors `blocklist`). Precedence is
+  deliberate: the whitelist overrides AUTOMATED blocks only - a manual `+ban` /
+  `+blocklist` still applies (enforced in `core/blocklist.check_ip`). Put the guard
+  BEFORE any cache / quota / network step so a trusted IP costs nothing. Precedents:
+  the one-line guard in `etc_geoip`, `etc_proxydetect`, `usr_hubs`. Not yet extended
+  to the share / slots / nick-policy plugins (`usr_share` / `usr_slots` /
+  `usr_nick_*`) - a whitelisted IP still faces those unless a follow-up adds the guard.
 - **Audit fire-sites:** state-changing actions emit `audit.build` / `audit.fire`
   with the firstnick-canonical actor. See [`SECURITY.md`](SECURITY.md) and the
   `#84` audit-log conventions.
@@ -291,6 +304,19 @@ Windows-only unit-test failure (`attempt to assign to const variable`) that
 passes on Linux + locally. Don't "fix" the code to satisfy a newer Lua - pin
 the CI back to 5.4.x. (Local dev uses a standalone Lua 5.4.8 = the same
 version.)
+
+**Old-Windows hubowners are a real population (Server 2008 R2 / Windows 7).**
+Two traps when supporting them: (1) the UCRT release build links the Universal
+C Runtime (`api-ms-win-crt-*.dll`), absent there until **KB2999226** is
+installed (symptom: a missing `api-ms-win-crt-*.dll` at startup). (2) Host-info
+shell-outs (`core/sysinfo.lua`) must NOT rely on `Get-CimInstance` - it is
+PowerShell 3.0+, and those OSes ship PowerShell 2.0. Query WMI with a
+`powershell -Command "try { (Get-CimInstance X).P } catch { (Get-WmiObject X).P }"`
+fallback: `Get-WmiObject` exists in every Windows PowerShell (2.0-5.1;
+`powershell.exe`, not the PS-7/Core `pwsh`), so PS-2.0 hosts take the catch
+branch. A nil result from such a probe must degrade to a sentinel
+(`... or msg_unknown`), never reach a concatenation - the pre-refactor 3.1.x
+`cmd_hubinfo` crashed exactly there (`attempt to concatenate a nil value`).
 
 ### Restricted-env load check for a plugin
 

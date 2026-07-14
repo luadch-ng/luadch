@@ -157,6 +157,12 @@ _G.hub.import = function( name )
     return nil
 end
 
+-- #78 allowlist stub: the plugin's whitelist guard. Default: nothing
+-- whitelisted (existing tests unaffected). A test flips an entry on
+-- via `_wl[ip] = true`.
+local _wl = { }
+_G.whitelist = { is_whitelisted = function( ip ) return _wl[ ip ] == true end }
+
 ----------------------------------------------------------------------
 -- Load helper + stub user
 ----------------------------------------------------------------------
@@ -272,6 +278,32 @@ do
     falsy( "allowed user: no PROCESSED", r )
     eq( "allowed user: no kick", #_kicks, 0 )
     eq( "allowed user: no audit", #_audit, 0 )
+end
+
+----------------------------------------------------------------------
+-- #78 allowlist: a whitelisted IP is exempt from the geoip block.
+-- Provably FAILS pre-fix (without the guard the GB IP is kicked).
+----------------------------------------------------------------------
+
+do
+    _cfg.etc_geoip_action = "block"
+    load_plugin( )
+    local check = _listeners.onConnect
+
+    -- baseline: GB blocked when NOT whitelisted
+    _wl = { }
+    local r1 = check( make_user{ level = 20, ip = "81.2.69.160" } )
+    eq( "geoip wl baseline: GB blocked", r1, "PROCESSED" )
+    eq( "geoip wl baseline: kicked", #_kicks, 1 )
+
+    -- whitelist that IP -> exempt (no kick, no audit, allowed)
+    _kicks = { }; _audit = { }
+    _wl = { [ "81.2.69.160" ] = true }
+    local r2 = check( make_user{ level = 20, ip = "81.2.69.160" } )
+    falsy( "geoip whitelisted -> not blocked", r2 )
+    eq( "geoip whitelisted -> no kick", #_kicks, 0 )
+    eq( "geoip whitelisted -> no audit", #_audit, 0 )
+    _wl = { }
 end
 
 ----------------------------------------------------------------------

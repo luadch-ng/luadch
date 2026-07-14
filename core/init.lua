@@ -123,6 +123,13 @@ _core = {    -- luadch core, order is important
     -- + CIDR parse + prefix-match primitives. No deps beyond
     -- stdlib; load order is just before its consumer blocklist.
     "ipmatch",
+    -- core/whitelist.lua (#78 allowlist): global IP/CIDR allowlist
+    -- consulted by blocklist.check_ip and the IP-blocking plugins.
+    -- Loaded AFTER ipmatch (uses its parse/match primitives) and
+    -- BEFORE blocklist, which captures whitelist.is_whitelisted in
+    -- its init() to apply the "whitelist overrides an automated block"
+    -- precedence. Same passive-at-load / init()-reads-cfg contract.
+    "whitelist",
     -- core/blocklist.lua (Phase A of #78 arc): unified pre-handshake
     -- IP/CIDR blocklist (in-memory bucketed cache + scripts/data/etc_blocklist.tbl
     -- persistent store + decision API). Loaded BEFORE ratelimit +

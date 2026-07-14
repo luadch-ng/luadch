@@ -130,7 +130,7 @@ order (its inline comments explain each ordering constraint).
 | Subsystem | Modules | Responsibility |
 |---|---|---|
 | Boot + config | `init`, `const`, `cfg`, `cfg_defaults`, `cfg_users`, `cfg_lang`, `cfg_secret`, `secrets` | Restricted env + module loader; program constants; settings/user.tbl/language handling; AES-256-GCM at-rest crypto; env-var-first secret lookup |
-| Network + ADC | `server`, `iostream`, `adc`, `hub`, `hub_dispatch`, `hub_user_object`, `hub_bot_object`, `hbri`, `ratelimit`, `blocklist`, `ipmatch` | select() loop + SSL; framing pipeline; ADC parse/escape/format; main loop + login; command dispatch; user/bot objects; dual-stack secondary-IP verification; DoS limits; pre-handshake IP/CIDR blocklist; IP/CIDR primitives |
+| Network + ADC | `server`, `iostream`, `adc`, `hub`, `hub_dispatch`, `hub_user_object`, `hub_bot_object`, `hbri`, `ratelimit`, `blocklist`, `whitelist`, `ipmatch` | select() loop + SSL; framing pipeline; ADC parse/escape/format; main loop + login; command dispatch; user/bot objects; dual-stack secondary-IP verification; DoS limits; pre-handshake IP/CIDR blocklist; global allowlist (whitelist beats automated blocks, not manual pins); IP/CIDR primitives |
 | HTTP API | `http`, `http_router`, `http_client`, `http_filter`, `http_events`, `util_http` | Inbound HTTP/JSON API + router + auth; non-blocking OUTBOUND client; filter/sort/paginate helper; deferred-event endpoints; plugin endpoint helper |
 | Crypto + boot trust | `sha256`, `hmac`, `cert_bootstrap`, `cacert_bootstrap` | Pure-Lua SHA-256; HMAC-SHA256 (RFC 2104, sandbox-exposed for signed-webhook auth, #398); first-boot TLS-cert auto-gen (#77); CA-bundle reconciliation |
 | Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `geoip_update`, `bloom`, `ensuredirs`, `doc` (disabled), `hci` (stub) | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader + in-hub GeoLite2 auto-update; bloom filter; boot-time runtime-dir self-heal; dormant |
@@ -261,7 +261,14 @@ ADC parser now discards messages with unknown escape sequences per ADC 3.1
 (#419) + hub-bot INF `EM` escaping (#423), and an `etc_webhook` body-field
 `conditions` filter (#420 - fixed a live double-announce by filtering on a
 JSON body field like a GitHub release `action=released` or a Discourse
-opening post, not just the event header). A
+opening post, not just the event header). On `dev` (PR #432):
+`core/sysinfo.lua` falls back `Get-CimInstance` -> `Get-WmiObject` so
+old-Windows hubowners (Server 2008 R2 / Win7 = PowerShell 2.0, which has
+no `Get-CimInstance`) get real `+hubinfo` OS/CPU/RAM instead of
+`<UNKNOWN>` (Sopor; the pre-refactor 3.1.x plugin also CRASHED on the
+nil-concat - shipped a v0.30 `cmd_hubinfo` drop-in per §8). Many
+hubowners run ancient Windows (the UCRT release build also needs
+KB2999226 there - the Universal C Runtime). A
 recurring pattern this era:
 a **periodic-fetch plugin must persist its next-fetch deadline across
 `+reload`**, or every reload re-hits a rate-limited provider - fixed twice
@@ -271,6 +278,21 @@ a **periodic-fetch plugin must persist its next-fetch deadline across
 from source per §1a.3/4, since many are old-version reports asking "fixed in
 3.x?"). GitFlow A per fix; batch dev->master as a MERGE commit (never squash
 - see §8 branch hygiene).
+
+**On `dev`: the #78 allowlist (global whitelist) - 4-PR arc A-D MERGED
+(PRs #427/#431/#429/#430), pending testhub -> dev->master.** The allowlist deferred from the
+unified-blocklist arc. A `core/whitelist.lua` engine consulted by every
+IP-blocking path so trusted infrastructure (hublist pingers etc.) is exempt
+from the AUTOMATED blockers (GeoIP / proxydetect / feeds / hub-limit) - but
+NOT from a deliberate manual `+ban` / `+blocklist` (Model A: a manual block
+wins). Phase A (engine + `blocklist.check_ip` precedence +
+`whitelist.is_whitelisted` sandbox global), B (`+whitelist` plugin +
+bundled hublist-pinger seed, `etc_whitelist`), C (per-plugin guards in
+etc_geoip / etc_proxydetect / usr_hubs - where the log goes quiet), D (HTTP
+`/v1/whitelist`). NOT extended to the share / slots / nick-policy plugins
+(`usr_share` / `usr_slots` / `usr_nick_*`). Source of truth: the
+whitelist-arc PRs (deferred item of
+[#78](https://github.com/luadch-ng/luadch/issues/78)).
 
 **HTTP-endpoint authoring** (which helper for which endpoint shape, envelope
 contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and

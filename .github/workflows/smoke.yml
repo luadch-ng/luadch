@@ -157,6 +157,9 @@ jobs:
       - name: Run etc_blocklist unit test
         run: lua5.4 tests/unit/etc_blocklist_test.lua
 
+      - name: Run etc_whitelist unit test
+        run: lua5.4 tests/unit/etc_whitelist_test.lua
+
       - name: Run cmd_usercleaner orphan unit test
         run: lua5.4 tests/unit/cmd_usercleaner_orphan_test.lua
 
@@ -216,6 +219,16 @@ jobs:
       # round-trip via stubbed util.savetable/loadtable.
       - name: Run blocklist unit test
         run: lua5.4 tests/unit/blocklist_test.lua
+
+      # #78 allowlist: core/whitelist.lua global IP/CIDR allowlist.
+      # 63 checks: add/remove/list/count, v4+v6+CIDR match, v4-mapped
+      # v6 lookup, expires_at, reload-from-disk, disabled-engine,
+      # empty-store fast path, plus a blocklist integration block
+      # proving Model-A precedence (whitelist overrides an automated
+      # block, a manual pin still wins) - the integration checks
+      # provably fail on a blocklist without the whitelist hook.
+      - name: Run whitelist unit test
+        run: lua5.4 tests/unit/whitelist_test.lua
 
       # #78 Phase D1: core/mmdb.lua pure-Lua MaxMind DB reader. 75
       # checks against MaxMind's canonical test databases (all three
@@ -421,6 +434,10 @@ jobs:
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_blocklist_test.lua
 
+      - name: Run etc_whitelist unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_whitelist_test.lua
+
       - name: Run cmd_usercleaner orphan unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/cmd_usercleaner_orphan_test.lua
@@ -456,6 +473,10 @@ jobs:
       - name: Run blocklist unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/blocklist_test.lua
+
+      - name: Run whitelist unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/whitelist_test.lua
 
       # #78 Phase D1: pure-Lua MaxMind DB reader (see Linux job note).
       - name: Run mmdb unit test

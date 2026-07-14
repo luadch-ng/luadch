@@ -71,6 +71,14 @@ HUB_HOST = "127.0.0.1"
 START_TIMEOUT_SEC = 20
 STOP_TIMEOUT_SEC = 10
 PROTOCOL_TIMEOUT_SEC = 5
+# How long to wait for a rejected second instance to exit. The launcher
+# guard fires before Lua/socket init so it exits near-instantly; the
+# slack is for slow CI. A timeout here means the guard did NOT fire.
+SINGLE_INSTANCE_TIMEOUT_SEC = 15
+# How long to wait for a second hub (ports already held) to log the clear
+# port-in-use message. The bind attempt happens during boot; slack is for
+# a slow runner + cert auto-gen preceding the listener setup.
+PORT_IN_USE_TIMEOUT_SEC = 25
 
 
 class TestFailure(Exception):
@@ -6915,6 +6923,114 @@ def test_blocklist_78_phase_b():
             raise TestFailure(f"+blocklist count (post-del) did not return zero: {reply!r}")
 
 
+def test_whitelist_78_phase_b():
+    """#78 allowlist Phase B etc_whitelist `+whitelist` admin CLI smoke.
+
+    End-to-end via a real ADC login as dummy (level 100 >
+    etc_whitelist_oplevel=80):
+
+      1. The bundled hublist-pinger seed lands on the FIRST boot
+         (store .tbl missing) - `+whitelist count` shows the seeded
+         entries with source=pinger. This is the seed-on-missing
+         validation the unit test can only mock.
+      2. `+whitelist add 198.51.100.0/24 reason="smoke"` -> "added"
+         (TEST-NET-3, never a real host). Capture the new id.
+      3. `+whitelist count` -> seed+1 total, now also "manual".
+      4. `+whitelist show` -> lists BOTH the added CIDR and a seed
+         entry (142.54.190.133), proving seed + operator add coexist.
+      5. `+whitelist del <id>` -> "removed".
+      6. `+whitelist count` -> back to the seed-only total.
+
+    Like the blocklist Phase B test this is registered in the initial
+    TESTS list (NOT the staging-runner block) so it runs in the
+    default-cfg phase, before the strict ratelimit_tiers overlay whose
+    2-BMSG burst would starve this multi-BMSG roundtrip.
+    """
+    def _is_chat_frame(f):
+        return f.startswith("EMSG ") or f.startswith("DMSG ") or f.startswith("BMSG ")
+
+    def _dcontains(f, substr):
+        return substr in f.replace("\\s", " ")
+
+    seed_n = 6    # len(BUNDLED_SEED) in scripts/etc_whitelist.lua
+
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+
+        # 1. count -> the bundled pinger seed is present (source=pinger)
+        sock.sendall(f"BMSG {sid} +whitelist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, f"{seed_n} entries total")
+                and _dcontains(f, "pinger"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist count (seed) did not show the pinger seed: {reply!r}")
+
+        # 2. add a TEST-NET-3 CIDR; capture the new entry id
+        sock.sendall(
+            f'BMSG {sid} +whitelist\\sadd\\s198.51.100.0/24\\sreason="smoke"\n'
+            .encode("utf-8")
+        )
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "added")
+                and _dcontains(f, "whitelist entry"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist add did not confirm: {reply!r}")
+        m = re.search(r"entry #(\d+)", reply.replace("\\s", " "))
+        if not m:
+            raise TestFailure(f"+whitelist add reply had no entry id: {reply!r}")
+        added_id = m.group(1)
+
+        # 3. count -> seed + 1, now also "manual"
+        sock.sendall(f"BMSG {sid} +whitelist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, f"{seed_n + 1} entries total")
+                and _dcontains(f, "manual"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist count (post-add) wrong total: {reply!r}")
+
+        # 4. show -> the added CIDR AND a seed entry both appear
+        sock.sendall(f"BMSG {sid} +whitelist\\sshow\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "198.51.100.0/24")
+                and _dcontains(f, "142.54.190.133"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist show missing add or seed entry: {reply!r}")
+
+        # 5. del the entry we added
+        sock.sendall(f"BMSG {sid} +whitelist\\sdel\\s{added_id}\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f)
+                and _dcontains(f, "removed")
+                and _dcontains(f, "whitelist entry"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist del did not confirm: {reply!r}")
+
+        # 6. count -> back to the seed-only total
+        sock.sendall(f"BMSG {sid} +whitelist\\scount\n".encode("utf-8"))
+        reply = reader.recv_until(
+            lambda f: _is_chat_frame(f) and _dcontains(f, f"{seed_n} entries total"),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+        if not reply:
+            raise TestFailure(f"+whitelist count (post-del) did not return to seed total: {reply!r}")
+
+
 def test_blocklist_feeds_status():
     """#78 Phase E etc_blocklist_feeds `+blfeeds` read-only status smoke.
 
@@ -9086,6 +9202,116 @@ def test_http_reload(staging_dir: Path, proc=None):
             f"catalog missing /v1/reload after reload; "
             f"restartscripts did not re-register? body={b!r}"
         )
+
+
+def test_http_phase_d_whitelist(staging_dir: Path, proc=None):
+    """#78 allowlist Phase D HTTP API for the global whitelist.
+
+    Four endpoints on etc_whitelist.lua v0.02 (GET /v1/whitelist and
+    /counts, POST, DELETE /v1/whitelist/{id}) - the same shape as the
+    blocklist HTTP API. Seed-aware: a fresh hub already holds the bundled
+    pinger entries (source=pinger), so the baseline count is captured
+    rather than assumed.
+
+    Coverage: anonymous POST -> 401; counts baseline carries a pinger
+    source; POST create -> 201 + id; GET reflects it + counts baseline+1;
+    POST host-bits-set cidr -> 400; DELETE created -> 200 removed;
+    DELETE 999 -> 404; counts back to baseline.
+    """
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def post(path: bytes, body: bytes) -> str:
+        return _http_roundtrip(
+            b"POST " + path + b" HTTP/1.1\r\n" + auth +
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"\r\n" + body
+        )
+
+    def get(path: bytes) -> str:
+        return _http_roundtrip(b"GET " + path + b" HTTP/1.1\r\n" + auth + b"\r\n")
+
+    def delete_id(id_str: str) -> str:
+        return _http_roundtrip(
+            b"DELETE /v1/whitelist/" + id_str.encode("ascii") +
+            b" HTTP/1.1\r\n" + auth + b"\r\n"
+        )
+
+    # 1. Anonymous POST -> 401 (admin scope requires a token).
+    anon_body = b'{"cidr":"203.0.113.9"}'
+    r = _http_roundtrip(
+        b"POST /v1/whitelist HTTP/1.1\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: " + str(len(anon_body)).encode("ascii") + b"\r\n"
+        b"\r\n" + anon_body
+    )
+    if "401" not in status(r):
+        raise TestFailure(f"anonymous POST /v1/whitelist should be 401, got {status(r)!r}")
+
+    # 2. Baseline counts: the bundled pinger seed is present. Capture the
+    #    total (robust to any prior whitelist test in the same run).
+    r = get(b"/v1/whitelist/counts")
+    b = body_of(r).replace(" ", "")
+    if "200 OK" not in status(r):
+        raise TestFailure(f"GET counts pre-flight: expected 200, got {status(r)!r}")
+    m0 = re.search(r'"total":(\d+)', b)
+    if not m0:
+        raise TestFailure(f"counts had no total; body={b!r}")
+    base = int(m0.group(1))
+    if '"pinger"' not in b:
+        raise TestFailure(f"seed counts missing pinger source; body={b!r}")
+
+    # 3. POST create -> 201 + id.
+    r = post(b"/v1/whitelist", b'{"cidr":"203.0.113.0/24","reason":"api test"}')
+    if "201" not in status(r):
+        raise TestFailure(f"POST create: expected 201, got {status(r)!r}; body={body_of(r)!r}")
+    m = re.search(r'"id":(\d+)', body_of(r).replace(" ", ""))
+    if not m:
+        raise TestFailure(f"POST create response had no id; body={body_of(r)!r}")
+    new_id = m.group(1)
+
+    # 4. GET reflects the addition; counts == baseline + 1.
+    r = get(b"/v1/whitelist")
+    if '"203.0.113.0/24"' not in body_of(r).replace(" ", ""):
+        raise TestFailure("GET /v1/whitelist did not reflect the created entry")
+    r = get(b"/v1/whitelist/counts")
+    if f'"total":{base + 1}' not in body_of(r).replace(" ", ""):
+        raise TestFailure(f"counts after create: expected {base + 1}; body={body_of(r)!r}")
+
+    # 5. POST host-bits-set cidr -> 400.
+    r = post(b"/v1/whitelist", b'{"cidr":"1.2.3.4/24"}')
+    if "400" not in status(r):
+        raise TestFailure(f"POST host-bits-set should be 400, got {status(r)!r}")
+
+    # 6. DELETE the created entry -> 200 removed.
+    r = delete_id(new_id)
+    if "200" not in status(r) or '"action":"removed"' not in body_of(r).replace(" ", ""):
+        raise TestFailure(f"DELETE id={new_id}: expected 200 removed, got {status(r)!r}; body={body_of(r)!r}")
+
+    # 7. DELETE non-existent -> 404.
+    r = delete_id("999999")
+    if "404" not in status(r):
+        raise TestFailure(f"DELETE 999999 should be 404, got {status(r)!r}")
+
+    # 8. Counts back to the baseline.
+    r = get(b"/v1/whitelist/counts")
+    if f'"total":{base}' not in body_of(r).replace(" ", ""):
+        raise TestFailure(f"counts after delete: expected {base}; body={body_of(r)!r}")
 
 
 def test_http_phase_c_blocklist(staging_dir: Path, proc=None):
@@ -12153,6 +12379,7 @@ TESTS = [
     ("+cmd routing (post-login +help)", test_command_routing),
     ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
     ("blocklist admin CLI (#78 Phase B)", test_blocklist_78_phase_b),
+    ("whitelist admin CLI + pinger seed (#78 allowlist Phase B)", test_whitelist_78_phase_b),
     ("blocklist feeds status (#78 Phase E)", test_blocklist_feeds_status),
     ("proxydetect status (#78 Phase F)", test_proxydetect_status),
     ("S1: fragmented frame reassembled (phase8-io)", test_s1_fragmented_frame_reassembled),
@@ -12331,6 +12558,138 @@ def run_tests(staging_dir: Path):
     return failed
 
 
+def test_port_in_use_message(source_install: Path, proc=None, keep_staging=False):
+    """A second hub started with ports the running first hub already holds
+    must log a clear operator-facing "port ... already in use - change the
+    port in cfg/cfg.tbl" message (core/hub.lua add_server_handler). Uses a
+    SEPARATE install dir staged from the pristine source (so nothing about
+    the same-dir single-instance lock is involved) pointed at the SAME
+    test ports as the live shared hub.
+
+    The assertion is on the NEW guidance phrase, not just "already in use":
+    on Linux the raw luasocket bind error ("...bind: address already in
+    use") is logged pre-fix too, so a naive "already in use" check would
+    false-pass. Provably fails pre-fix: on Windows the second hub's
+    pre-bind SO_REUSEADDR let it silently re-bind the port (no failure, no
+    message); on Linux the bind failed but only the cryptic line was
+    logged, never the actionable guidance this asserts."""
+    if proc is None or proc.poll() is not None:
+        raise TestFailure("precondition failed: the first hub is not running")
+
+    second_staging = stage_install(source_install)
+    second = None
+    second_log = None
+    try:
+        override_test_ports(second_staging)   # same TEST_PORT_* as the shared hub
+        for stale in ("servercert.pem", "serverkey.pem", "cacert.pem", "cakey.pem"):
+            (second_staging / "certs" / stale).unlink(missing_ok=True)
+        second, second_log = start_hub(second_staging)
+
+        # The guidance goes to error.log via out.error (log_errors=true by
+        # default). "change the port in cfg/cfg.tbl" is unique to the new
+        # message - absent from the pre-fix cryptic luasocket line.
+        err_log = second_staging / "log" / "error.log"
+        needle = "change the port in cfg/cfg.tbl"
+        deadline = time.monotonic() + PORT_IN_USE_TIMEOUT_SEC
+        found = False
+        while time.monotonic() < deadline:
+            if err_log.exists():
+                text = err_log.read_text(encoding="utf-8", errors="replace")
+                if needle in text:
+                    found = True
+                    break
+            if second.poll() is not None:
+                break   # process died; one more read below then fail
+            time.sleep(0.2)
+        if not found:
+            tail = ""
+            if err_log.exists():
+                tail = err_log.read_text(encoding="utf-8", errors="replace")[-1000:]
+            raise TestFailure(
+                "second hub did not log the clear port-in-use guidance "
+                f"({needle!r}); error.log tail:\n{tail!r}"
+            )
+    finally:
+        if second is not None:
+            stop_hub(second, second_log)
+        if keep_staging:
+            log(f"second-hub staging kept at {second_staging.parent}")
+        else:
+            shutil.rmtree(second_staging.parent, ignore_errors=True)
+
+
+def _start_second_hub(staging_dir: Path):
+    """Spawn a SECOND hub against the same staging tree, capturing its
+    own stdout/stderr to log/second-instance.log. Deliberately does NOT
+    reuse start_hub(): that opens the shared log/smoke-hub.log in "wb"
+    mode and would truncate the first (running) hub's log."""
+    binary = staging_dir / ("Luadch.exe" if sys.platform == "win32" else "luadch")
+    out_path = staging_dir / "log" / "second-instance.log"
+    out = open(out_path, "wb")
+    proc = subprocess.Popen(
+        [str(binary)],
+        cwd=str(staging_dir.parent),
+        stdout=out,
+        stderr=subprocess.STDOUT,
+    )
+    return proc, out, out_path
+
+
+def test_single_instance_lock(staging_dir: Path, proc=None):
+    """A second hub launched against the same install tree must refuse to
+    start: the single-instance lock in hub.c (flock on unix, exclusive
+    CreateFile on Windows) makes it exit non-zero with an "already
+    running" message, and the first instance keeps running untouched.
+    Guards against two hubs sharing cfg/user.tbl/master.key/logs and
+    corrupting them via interleaved saves.
+
+    Provably fails pre-fix: without the launcher guard the second process
+    either boots a full second hub (on Windows SO_REUSEADDR lets it
+    re-bind the ports -> wait() times out) or dies on a bind error with
+    no single-instance message - neither matches the assertions here."""
+    if proc is None or proc.poll() is not None:
+        raise TestFailure("precondition failed: the first hub is not running")
+
+    second, second_out, second_log_path = _start_second_hub(staging_dir)
+    try:
+        try:
+            rc = second.wait(timeout=SINGLE_INSTANCE_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            raise TestFailure(
+                f"second hub did not exit within {SINGLE_INSTANCE_TIMEOUT_SEC}s; "
+                "the single-instance guard is missing (two instances ran "
+                "concurrently)"
+            )
+    finally:
+        # Never leave a stray second process behind, even on assert paths.
+        # Swallow a second TimeoutExpired on the reap so it cannot mask the
+        # real TestFailure or orphan the process.
+        if second.poll() is None:
+            second.kill()
+            try:
+                second.wait(timeout=STOP_TIMEOUT_SEC)
+            except subprocess.TimeoutExpired:
+                pass
+        second_out.close()
+
+    if rc == 0:
+        raise TestFailure("second hub exited 0; expected a non-zero refusal")
+
+    text = second_log_path.read_text(encoding="utf-8", errors="replace")
+    if "already running" not in text:
+        raise TestFailure(
+            "second hub exited non-zero but its log lacks the single-instance "
+            f"refusal message; log was:\n{text!r}"
+        )
+
+    # The rejected second start must not disturb the running first hub.
+    if proc.poll() is not None:
+        raise TestFailure(
+            f"first hub died (rc={proc.poll()}) after the second start attempt; "
+            "the guard must not disturb the already-running instance"
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -12367,6 +12726,33 @@ def main():
             (staging_dir / "certs" / stale).unlink(missing_ok=True)
         proc, log_file = start_hub(staging_dir)
         failed = run_tests(staging_dir)
+
+        # Port-in-use guidance: with the shared hub still holding the test
+        # ports, a second hub (separate dir, same ports) must log a clear
+        # "change the port in cfg/cfg.tbl" message. Runs BEFORE the
+        # plaintext switch below stops the shared hub.
+        try:
+            test_port_in_use_message(
+                args.install_dir.resolve(), proc=proc,
+                keep_staging=args.keep_staging,
+            )
+        except Exception as e:
+            log(f"FAIL  port-in-use guidance on second hub: {e}")
+            failed.append("port-in-use guidance on second hub")
+        else:
+            log("PASS  port-in-use guidance on second hub")
+
+        # Single-instance lock: with the shared hub still running, a
+        # second launch against the same tree must be refused by the
+        # hub.c guard. Runs BEFORE the plaintext-mode switch below stops
+        # this hub (it needs a live first instance holding the lock).
+        try:
+            test_single_instance_lock(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  single-instance lock refuses second start: {e}")
+            failed.append("single-instance lock refuses second start")
+        else:
+            log("PASS  single-instance lock refuses second start")
 
         # #128 plaintext-mode test runs AFTER the regular battery
         # because cfg_secret.init() reads encrypt_usertbl once at
@@ -12904,6 +13290,14 @@ def main():
             failed.append("HTTP API blocklist (#78 Phase C)")
         else:
             log("PASS  HTTP API blocklist (#78 Phase C)")
+
+        try:
+            test_http_phase_d_whitelist(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  HTTP API whitelist (#78 allowlist Phase D): {e}")
+            failed.append("HTTP API whitelist (#78 allowlist Phase D)")
+        else:
+            log("PASS  HTTP API whitelist (#78 allowlist Phase D)")
 
         # #261 plugin-management endpoints: GET /v1/plugins (read) +
         # PUT /v1/plugins/{name}/enabled (admin). Full toggle cycle on
