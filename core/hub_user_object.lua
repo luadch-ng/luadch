@@ -624,8 +624,6 @@ local function createuser( _client, _sid )
             level = tonumber( level )
             if utf.match( level, _regex.reguser.level ) then
                 profile.level = level
-                cfg_saveusers( _regusers )
-                --return true
                 return cfg_saveusers( _regusers )
             end
             return false, "invalid level"
