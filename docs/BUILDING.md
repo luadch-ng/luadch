@@ -246,6 +246,38 @@ is already running in this directory` (also written to
 
 ---
 
+## Concurrent connections (file-descriptor limit)
+
+On Linux/BSD the hub's event loop uses `poll()`, so there is no fixed
+software cap on how many clients can be connected at once
+([#310](https://github.com/luadch-ng/luadch/issues/310)). The practical
+ceiling is the process **open-file-descriptor limit** (each connection is
+one socket, plus a handful for listeners, HBRI and the HTTP API). The
+launcher raises the soft limit to the hard limit at boot, and the boot
+line in `log/event.log` reports the resulting ceiling:
+
+```
+hub.lua: event loop backend: poll (socket ceiling ~= 1024 open files; raise via ulimit -n / systemd LimitNOFILE / Docker --ulimit)
+```
+
+To go higher than the hard limit (needed only for very large hubs), raise
+it at the OS level - the hub then picks up the higher hard limit on the
+next start:
+
+- **bare metal / shell:** `ulimit -Hn 65535` (as root) before launching,
+  or set `nofile` in `/etc/security/limits.conf`.
+- **systemd:** `LimitNOFILE=65535` in the service unit's `[Service]`
+  section.
+- **Docker:** `--ulimit nofile=65535:65535` (or the `ulimits:` key in a
+  compose file).
+
+Windows uses the `select()` backend, capped at `FD_SETSIZE = 1024`
+sockets (raised from the Winsock default of 64 in
+[#416](https://github.com/luadch-ng/luadch/issues/416)); the boot line
+there reports `select() capacity (FD_SETSIZE): 1024 sockets`.
+
+---
+
 ## File permissions for secrets
 
 `cfg/user.tbl` (registered users with their cleartext passwords - see

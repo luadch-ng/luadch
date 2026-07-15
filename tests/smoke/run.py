@@ -12326,24 +12326,29 @@ def test_no_script_errors(log_path: Path, error_log_path: Path = None):
         )
 
 
-def test_select_capacity_logged(staging_dir: Path):
-    """Regression guard for #416 (Windows FD_SETSIZE=64 hub crash).
+def test_event_loop_backend_logged(staging_dir: Path):
+    """Regression guard for the event-loop backend and its socket ceiling.
 
-    The event loop selects over every connected socket at once; on Windows
-    luasocket's select.c raises "too many sockets" at n >= FD_SETSIZE, and
-    the bundled build inherited the Winsock default of 64 - so the hub
-    crashed once it held ~64 sockets. The luasocket Windows build now defines
-    FD_SETSIZE=1024 (parity with Linux glibc).
+    hub.loop() logs one boot line naming the luasocket event-loop backend and
+    the ceiling on how many sockets the single event loop can watch. The line
+    (and the assertion) differ by platform:
 
-    hub.loop() logs the compile-time capacity (socket._SETSIZE, the exact
-    macro the guard checks) once at boot via out.put; assert it is >= 1024.
-    This proves the compile define reached the shipped socket module. Fails
-    pre-fix on the Windows leg (logs 64); the Linux leg already reports 1024.
-    It goes through the real hub because a standalone `require('socket')`
-    under msys2 lua hits the bundled-liblua ABI clash (see smoke.yml). Read
-    from event.log (out.put's target, persisted open-append-close per line;
-    the harness sets log_events=true) - not smoke-hub.log, whose stdout is
-    block-buffered and lost when the hub is terminated at teardown."""
+      - POSIX poll backend (#310): "event loop backend: poll (socket ceiling
+        ...)". poll() takes a variable-length pollfd array, so there is NO
+        fixed FD_SETSIZE cap; the ceiling is the process fd limit (hub/hub.c
+        raises RLIMIT_NOFILE at boot). This test REQUIRES the poll line on the
+        Linux leg, which fails pre-fix: the old select.c backend logged the
+        "select() capacity (FD_SETSIZE)" line instead and had no _EVENTBACKEND.
+      - Windows select backend (#416): "select() capacity (FD_SETSIZE): N
+        sockets". select.c raises "too many sockets" at n >= FD_SETSIZE; the
+        Winsock default 64 crashed the hub at ~64 sockets, so the Windows build
+        must define FD_SETSIZE=1024. Assert N >= 1024 (unchanged by #310).
+
+    Goes through the real hub because a standalone require('socket') under msys2
+    lua hits the bundled-liblua ABI clash (see smoke.yml). Reads event.log
+    (out.put's target, persisted open-append-close per line; the harness sets
+    log_events=true) - not smoke-hub.log, whose stdout is block-buffered and
+    lost when the hub is terminated at teardown."""
     log_path = staging_dir / "log" / "event.log"
     if not log_path.exists():
         raise TestFailure(
@@ -12351,19 +12356,27 @@ def test_select_capacity_logged(staging_dir: Path):
             f"enable log_events in the cfg.tbl override for this assertion"
         )
     text = log_path.read_text(encoding="utf-8", errors="replace")
-    m = re.search(r"select\(\) capacity \(FD_SETSIZE\): (\d+) sockets", text)
-    if not m:
-        raise TestFailure(
-            "event.log has no 'select() capacity (FD_SETSIZE): N sockets' "
-            "line - hub.loop() should log it once at startup"
-        )
-    cap = int(m.group(1))
-    if cap < 1024:
-        raise TestFailure(
-            f"select() FD_SETSIZE capacity is {cap}, expected >= 1024 - the "
-            f"Windows luasocket build must define FD_SETSIZE=1024; the default "
-            f"64 crashes the event loop at ~64 sockets (#416)"
-        )
+    if sys.platform.startswith("win"):
+        m = re.search(r"select\(\) capacity \(FD_SETSIZE\): (\d+) sockets", text)
+        if not m:
+            raise TestFailure(
+                "event.log has no 'select() capacity (FD_SETSIZE): N sockets' "
+                "line - the Windows select backend should log it once at startup"
+            )
+        cap = int(m.group(1))
+        if cap < 1024:
+            raise TestFailure(
+                f"select() FD_SETSIZE capacity is {cap}, expected >= 1024 - the "
+                f"Windows luasocket build must define FD_SETSIZE=1024; the default "
+                f"64 crashes the event loop at ~64 sockets (#416)"
+            )
+    else:
+        if not re.search(r"event loop backend: poll", text):
+            raise TestFailure(
+                "event.log has no 'event loop backend: poll' line - the POSIX "
+                "luasocket build must use the poll() event-loop backend (#310); "
+                "pre-fix it logged 'select() capacity (FD_SETSIZE)' instead"
+            )
 
 
 # -----------------------------------------------------------------------------
@@ -12548,12 +12561,12 @@ def run_tests(staging_dir: Path):
         log("PASS  no script errors in log")
 
     try:
-        test_select_capacity_logged(staging_dir)
+        test_event_loop_backend_logged(staging_dir)
     except Exception as e:
-        log(f"FAIL  select() FD_SETSIZE capacity >= 1024 (#416): {e}")
-        failed.append("select() FD_SETSIZE capacity >= 1024 (#416)")
+        log(f"FAIL  event loop backend logged (#310/#416): {e}")
+        failed.append("event loop backend logged (#310/#416)")
     else:
-        log("PASS  select() FD_SETSIZE capacity >= 1024 (#416)")
+        log("PASS  event loop backend logged (#310/#416)")
 
     return failed
 
