@@ -635,7 +635,7 @@ formatseconds = function( t, hubstart )
         err = "util.lua: error: number expected, got nil"
         return nil, err
     end
-    if not type( t ) == "number" then
+    if type( t ) ~= "number" then
         err = "util.lua: error: number expected, got " .. type( t )
         return nil, err
     end
@@ -668,7 +668,7 @@ formatbytes = function( bytes )
         err = "util.lua: error: number expected, got nil"
         return nil, err
     end
-    if not type( bytes ) == "number" then
+    if type( bytes ) ~= "number" then
         err = "util.lua: error: number expected, got " .. type( bytes )
         return nil, err
     end
