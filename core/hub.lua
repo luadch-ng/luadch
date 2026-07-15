@@ -1877,15 +1877,32 @@ end
 loop = function()
     signal_set( "external_exit_request", false )
     signal_set( "hub", "run" )
-    -- One-time boot line: the compile-time select() capacity (luasocket
-    -- FD_SETSIZE). server.tick() selects over every connected socket at once,
-    -- so once the hub holds this many sockets socket.select raises "too many
-    -- sockets" and this loop dies. On Windows this is the Winsock default 64
-    -- unless the luasocket build raises it (luasocket/CMakeLists.txt, #416);
-    -- on Linux glibc it is 1024. Logged (event.log) so operators can diagnose
-    -- that class of crash; watching more sockets needs the select->poll port
-    -- (#310).
-    out_put( "hub.lua: select() capacity (FD_SETSIZE): ", ( use "socket" )._SETSIZE, " sockets" )
+    -- One-time boot line: which event-loop backend luasocket was built with
+    -- and its socket ceiling. server.tick() watches every connected socket at
+    -- once. On the POSIX poll backend (#310) there is no fixed ceiling - the
+    -- limit is the process file-descriptor limit (hub/hub.c raises
+    -- RLIMIT_NOFILE at boot; raise further via ulimit -n / systemd LimitNOFILE
+    -- / Docker --ulimit). On the Windows select backend the ceiling is the
+    -- compile-time FD_SETSIZE (Winsock default 64 unless the luasocket build
+    -- raises it - luasocket/CMakeLists.txt, #416); once the hub holds that many
+    -- sockets socket.select raises "too many sockets" and this loop dies.
+    -- Logged (event.log) so operators can diagnose that class of crash.
+    local _sockmod = use "socket"
+    if _sockmod._EVENTBACKEND == "poll" then
+        -- getfdlimit is a C launcher primitive, present in every coherent
+        -- POSIX build (same build that produced the poll socket module), so
+        -- call it directly like any other `use "X"` primitive.
+        local _fdlimit = ( use "getfdlimit" )( )
+        if _fdlimit == -1 then
+            out_put( "hub.lua: event loop backend: poll (socket ceiling: unlimited fds; raise via ulimit -n)" )
+        elseif _fdlimit > 0 then
+            out_put( "hub.lua: event loop backend: poll (socket ceiling ~= ", _fdlimit, " open files; raise via ulimit -n / systemd LimitNOFILE / Docker --ulimit)" )
+        else
+            out_put( "hub.lua: event loop backend: poll (socket ceiling = OS file-descriptor limit; raise via ulimit -n)" )
+        end
+    else
+        out_put( "hub.lua: select() capacity (FD_SETSIZE): ", _sockmod._SETSIZE, " sockets" )
+    end
     while signal_get "hub" == "run" do
         server.tick()
         if not signal_get( "external_exit_request" ) then
