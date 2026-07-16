@@ -6,6 +6,13 @@
         
         Usage: [+!#]cmdlog show
 
+        v1.4:
+            - fix: the language lookups read "lang.failmsg1" / "lang.failmsg2",
+              but the lang files define the keys as "msg_denied" / "msg_nofile"
+              - both lookups returned nil, the "or" fallback to the hardcoded
+                English literal fired every time, and the German translations
+                were unreachable regardless of cfg.language
+
         v1.3:
             - HTTP API: GET /v1/log/cmd?lines=N (admin scope)  #82 Phase 3 PR-4
 
@@ -59,7 +66,7 @@
 --------------
 
 local scriptname = "etc_cmdlog"
-local scriptversion = "1.3"
+local scriptversion = "1.4"
 
 -- HTTP API tail-style cap per docs/HTTP_API.md §6.4. Same value
 -- as cmd_errors.lua for consistency across log endpoints.
@@ -102,8 +109,8 @@ local help_title = lang.help_title or "etc_cmdlog.lua"
 local help_usage = lang.help_usage or "[+!#]cmdlog show"
 local help_desc = lang.help_desc or "Shows the command log"
 
-local msg_denied = lang.failmsg1 or "You are not allowed to use this command."
-local msg_nofile = lang.failmsg2 or "No 'cmd.log' found."
+local msg_denied = lang.msg_denied or "You are not allowed to use this command."
+local msg_nofile = lang.msg_nofile or "No 'cmd.log' found."
 local msg_usage = lang.msg_usage or "Usage: [+!#]cmdlog show"
 
 local msg1 = lang.msg1 or "   |   Command: [+!#]"
