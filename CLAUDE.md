@@ -152,10 +152,12 @@ Two hard ceilings (both enforced by review, not tooling):
 
 - **1500 lines per code module** (Phase 6). If a module needs more, split it.
 - **`core/hub.lua`'s main chunk runs close to Lua's 200-locals-per-chunk cap.**
-  File-scope locals there are scarce - the file has hit the wall twice already
-  (Phase 8 S4b, #301). Prefer a lazy `use "X"` at the call site, or pack related
-  values into one table, before spending a slot. Check the headroom with
-  `luac -p` after adding one; never trust a number written down here.
+  File-scope locals there are scarce - the file has hit the wall before (Phase 8
+  S4b + S5, #301). Prefer a lazy `use "X"` at the call site, or pack related
+  values into one table, before spending a slot. Measure the headroom rather than
+  trusting a number written down here: `luac -p -l core/hub.lua` prints the main
+  chunk's `N locals` in its header (plain `-p` only speaks up once you are
+  already over).
 
 ### Plugin / hook model
 

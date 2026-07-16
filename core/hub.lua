@@ -224,8 +224,9 @@ local scripts = use "scripts"
 local http = use "http"
 -- Phase 1b of #82: http_router is referenced inline at call sites
 -- (createhub() returned table, restartscripts, the http_port
--- handler in init()). Avoiding a top-level local: hub.lua's main
--- chunk runs close to Lua 5.4's 200-locals-per-chunk ceiling.
+-- handler in init()). No top-level local: hub.lua's main chunk
+-- shares a 200-locals budget (Lua 5.4's per-chunk cap), so a slot
+-- is only worth spending on a hot path.
 
 -- User / bot factories and the ADC command dispatcher each live in
 -- their own module since Phase 6d. All three use the bind_late()
@@ -1206,9 +1207,9 @@ createhub = function( )
         -- Signature: ( method, path, scope, handler, meta? )
         -- See docs/HTTP_API.md s5 for the full contract.
         --
-        -- Wrapped (not directly assigned) because hub.lua doesn't
-        -- carry a top-level `local http_router` due to the 200-
-        -- locals ceiling; the lookup resolves lazily on first call.
+        -- Wrapped (not directly assigned) because hub.lua carries no
+        -- top-level `local http_router` - see the note at its
+        -- declaration site. The lookup resolves lazily on first call.
         http_register = function( method, path, scope, handler, meta )
             return ( use "http_router" ).register( method, path, scope, handler, meta )
         end,
