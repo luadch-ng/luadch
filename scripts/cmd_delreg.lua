@@ -6,6 +6,13 @@
         - usage: [+!#]delreg nick <NICK>  |  [+!#]delreg nick <NICK> <DESCRIPTION>
 
 
+        v0.33:
+            - removed the unused "msg_reason" local: it read
+              "lang.msg_reason", a key no cmd_delreg lang file defines
+              (copy-pasted from cmd_ban, where the key exists and the
+              local IS used). Nothing degraded because the local was
+              never referenced, but the lookup was dead either way
+
         v0.32:
             - #243 family-wide consistency sweep: ADC `+delreg nick`
               path now uses the `activate and prefix_table` guard +
@@ -138,7 +145,7 @@
 --------------
 
 local scriptname = "cmd_delreg"
-local scriptversion = "0.32"
+local scriptversion = "0.33"
 
 local cmd = "delreg"
 
@@ -161,7 +168,6 @@ local block = hub.import( "etc_trafficmanager" )
 local lang, err = cfg.loadlanguage( scriptlang, scriptname ); lang = lang or {}; err = err and hub.debug( err )
 
 local msg_denied = lang.msg_denied or "[ DELREG ]--> You are not allowed to use this command or to delreg targets with this level."
-local msg_reason = lang.msg_reason or "No reason."
 local msg_usage = lang.msg_usage or "Usage: [+!#]delreg nick <NICK>  /  or del with blacklist entry:  [+!#]delreg nick <NICK> <DESCRIPTION>"
 local msg_error = lang.msg_error or "[ DELREG ]--> An error occurred: "
 local msg_del = lang.msg_del or "[ DELREG ]--> You were delregged."
