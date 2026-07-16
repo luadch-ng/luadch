@@ -164,7 +164,6 @@
 
 local clean = use "cleantable"
 local doexit = use "doexit"
-local tablesize = use "tablesize"
 local requestexit = use "requestexit"
 
 --// lua functions //--
@@ -174,13 +173,11 @@ local pcall = use "pcall"
 local pairs = use "pairs"
 local error = use "error"
 local ipairs = use "ipairs"
-local loadfile = use "loadfile"
 local tostring = use "tostring"
 local tonumber = use "tonumber"
 
 --// lua libs //--
 
-local io = use "io"
 local os = use "os"
 local table = use "table"
 local string = use "string"
@@ -191,7 +188,6 @@ local coroutine = use "coroutine"
 local os_date = os.date
 local os_time = os.time
 local os_difftime = os.difftime
-local table_concat = table.concat
 local table_remove = table.remove
 
 --// extern libs //--
@@ -208,14 +204,10 @@ local utf_gsub = utf.gsub
 local utf_find = utf.find
 local utf_match = utf.match
 local utf_format = utf.format
-local adclib_hash = adclib.hash
 local adclib_escape = adclib.escape
 local adclib_isutf8 = adclib.isutf8
-local adclib_hashpas = adclib.hashpas
 local adclib_unescape = adclib.unescape
 local adclib_createsid = adclib.createsid
-local adclib_createsalt = adclib.createsalt
-local adclib_hasholdpas = adclib.hasholdpas
 
 --// core scripts //--
 
@@ -232,8 +224,8 @@ local scripts = use "scripts"
 local http = use "http"
 -- Phase 1b of #82: http_router is referenced inline at call sites
 -- (createhub() returned table, restartscripts, the http_port
--- handler in init()). Avoiding a top-level local because hub.lua
--- already sits at Lua 5.4's 200-locals-per-chunk ceiling.
+-- handler in init()). Avoiding a top-level local: hub.lua's main
+-- chunk runs close to Lua 5.4's 200-locals-per-chunk ceiling.
 
 -- User / bot factories and the ADC command dispatcher each live in
 -- their own module since Phase 6d. All three use the bind_late()
@@ -262,14 +254,12 @@ local scripts_firelistener = scripts.firelistener
 local mem_free = mem.free
 local adc_parse = adc.parse
 -- Phase 8 S4b: ZLIF stage constructors are looked up via `use` at
--- ZON dispatch time rather than aliased into a local. hub.lua sits
--- at Lua 5.4's 200-locals-per-chunk ceiling; adding a `local
--- iostream = use "iostream"` here puts us over and the file fails
--- to compile. Per-connect lookup cost is negligible.
-local types_check = types.check
+-- ZON dispatch time rather than aliased into a local. When S4b
+-- landed, hub.lua's main chunk was at Lua 5.4's 200-locals-per-chunk
+-- ceiling and a `local iostream = use "iostream"` here would not
+-- compile. Per-connect lookup cost is negligible.
 local util_formatseconds = util.formatseconds
 local util_date = util.date
-local util_difftime = util.difftime
 
 --// functions //--
 
@@ -302,12 +292,10 @@ local reguser
 local getuser
 local shutdown
 local getusers
-local killuser
 local escapeto
 local reghubbot
 local sendtoall
 local broadcast
-local usercount
 local reloadcfg
 local loadusers
 local escapefrom
@@ -319,7 +307,6 @@ local iscidonline
 local issidonline
 local getregusers
 local isnickonline
-local isuseronline
 local isuserregged
 local loadregusers
 local insertreguser
@@ -333,13 +320,8 @@ local add_server_handler
 --// tables //--
 
 local _luadch
-local _verify
-local _normal
-local _protocol
-local _identify
 local _servers = { }
 
-local _G
 local _regex
 local _regusers
 local _usersids
@@ -391,13 +373,12 @@ local _cfg_reg_level
 local _cfg_max_users
 local _cfg_reg_only
 --local _cfg_hub_pass
-local _cfg_nick_change
 local _cfg_hub_hostaddress
 local _cfg_hub_website
 local _cfg_hub_network
 local _cfg_hub_owner
--- Phase 8 cfg cache, packed into ONE local because hub.lua sits at
--- Lua 5.4's 200-locals-per-chunk compile-time ceiling. Two distinct
+-- Phase 8 cfg cache, packed into ONE local to conserve hub.lua's
+-- main-chunk locals budget (Lua 5.4 caps a chunk at 200). Two distinct
 -- features (S4b ZLIF + S5 BLOM) share this table:
 --
 --   _cfg_p8.zlif = { enabled, over_tls }
@@ -522,7 +503,6 @@ _pingsup = "" ..
     "UC%s SS%s SF%s MS%s XS%s ML%s XL%s MU%s MR%s MO%s XU%s XR%s XO%s MC%s UP%s HU1 HI1 CT32\n"
 
 
-_G = _G
 _usersids = { }    -- keys: SIDs
 _usernicks = { }    -- keys: nicks
 _userclients = { }    -- keys: clients, users
@@ -1022,26 +1002,6 @@ delreguser = function( nick, cid, hash )
     end
 end    -- public
 
-isuseronline = function( nick, sid, cid, hash )
-    hash = hash or "TIGR"
-    local user
-    if nick then
-        local nick = tostring( nick )
-        if utf_find( nick, " " ) then
-            nick = escapeto( nick )
-        end
-        user = _usernicks[ nick ]
-    elseif cid and _usercids[ hash ] then
-        user = _usercids[ hash ][ cid ]
-    elseif sid then
-        return _normalstatesids[ sid ]
-    end
-    if user and user:state( ) == "normal" then
-        return user
-    end
-    return nil
-end    -- public
-
 iscidonline = function( cid, hash )
     local user
     hash = hash or "TIGR"
@@ -1116,46 +1076,6 @@ escapefrom = adclib_unescape    -- public
 getuser = function( sid )
     return _nobot_normalstatesids[ sid ], _normalstatesids[ sid ], _usersids[ sid ]
 end    -- public
-
---[[killuser = function( user, client, adcstring, quitstring1, quitstring2 )    -- ugly
-    user = user or ( client and _userclients[ client ] )
-    client = client or ( user and _userclients[ user ] )
-    _ = client and ( adcstring and client.write( adcstring ) )
-    if user then
-        local usersid = user:sid( )
-        local usernick = user:nick( ) or { }    -- dangerous?! ugly?
-        local usercid = user:cid( ) or { }
-        local userhash = user:hash( ) or "TIGR"
-        local userstate = user:state( )
-        local ip, port = user:peer( )
-
-        _usersids[ usersid ] = nil
-        _usernicks[ usernick ] = nil
-        _usercids[ userhash ][ usercid ] = nil
-        _userclients[ user ] = nil
-        _normalstatesids[ usersid ] = nil
-        _nobot_normalstatesids[ usersid ] = nil
-
-        local qui = "IQUI " .. usersid .. "\n"
-
-        quitstring1 = quitstring1 or qui
-        user.write( quitstring1 )
-        if userstate == "normal" then
-            quitstring2 = quitstring2 or qui
-            sendtoall( quitstring2 )
-            scripts_firelistener( "onLogout", user )
-        end
-        user.destroy( )
-        out_put( "hub.lua: remove user ", usersid, " ", ip, ":", port )
-    end
-    if not client then
-        return nil, "no client to close"-----!
-    end
-    client.dispatchdata( )
-    client.close( )
-    _userclients[ client ] = nil
-    return true
-end    -- private]]
 
 sendtoall = function( adcstring )
     types_utf8( adcstring )    -- raises on non-utf8 input
@@ -1255,12 +1175,10 @@ createhub = function( )
         reguser = reguser,
         getuser = getuser,
         getusers = getusers,
-        --killuser = killuser,    -- private
         escapeto = escapeto,
         --reghubbot = reghubbot,    -- private
         sendtoall = sendtoall,
         broadcast = broadcast,
-        usercount = usercount,
         reloadcfg = reloadcfg,
         escapefrom = escapefrom,
         --insertuser = insertuser,    -- private
@@ -1273,7 +1191,6 @@ createhub = function( )
         getregusers = getregusers,
         isnickonline = isnickonline,
         isiponline = isiponline,
-        --isuseronline = isuseronline,    -- private
         --isuserregged = isuserregged,    -- private
         --loadregusers = loadregusers,    -- private
         --insertreguser = insertreguser,    -- private

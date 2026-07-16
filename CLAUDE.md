@@ -151,9 +151,11 @@ file - a misplaced one.
 Two hard ceilings (both enforced by review, not tooling):
 
 - **1500 lines per code module** (Phase 6). If a module needs more, split it.
-- **`core/hub.lua` main chunk is AT Lua's 200-locals cap.** Any new top-level
-  `local` fails the build. Use lazy `use "X"` at call sites instead; treat
-  hub.lua file-scope locals as frozen.
+- **`core/hub.lua`'s main chunk runs close to Lua's 200-locals-per-chunk cap.**
+  File-scope locals there are scarce - the file has hit the wall twice already
+  (Phase 8 S4b, #301). Prefer a lazy `use "X"` at the call site, or pack related
+  values into one table, before spending a slot. Check the headroom with
+  `luac -p` after adding one; never trust a number written down here.
 
 ### Plugin / hook model
 

@@ -93,10 +93,12 @@ from another module (e.g. `cfg_secret`, whose `init()` needs `cfg` to be up).
   body - put that in an optional `init()` that init.lua calls after all modules
   are loaded (cfg + out are available by then).
 - **1500-line ceiling** per module (Phase 6). Over that, split it.
-- **`core/hub.lua` main chunk is AT Lua's 200-local cap.** A new file-scope
-  `local` in hub.lua fails the build. Use lazy `use "X"` at the call site, or
-  reuse an existing function with a flag parameter. Treat hub.lua's file-scope
-  locals as frozen.
+- **`core/hub.lua`'s main chunk runs close to Lua's 200-local cap.** File-scope
+  locals there are scarce - the file has hit the wall twice already (Phase 8
+  S4b, #301). Use a lazy `use "X"` at the call site, or reuse an existing
+  function with a flag parameter, before spending a slot. Check the headroom
+  with `luac -p core/hub.lua` after adding one; never trust a number written
+  down here.
 - **Security-sensitive surfaces** (network I/O, auth, ADC parsing, config, any
   untrusted-byte parser) get the §5 treatment and are flagged for extra review
   per `CLAUDE.md` §1a.1.
