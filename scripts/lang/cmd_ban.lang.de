@@ -2,10 +2,11 @@
 
     help_title = "cmd_ban.lua - Ban",
     help_usage = "[+!#]ban nick|cid|ip <NICK>|<CID>|<IP> [<ZEIT> <GRUND>] / [+!#]ban show|showhis [<NICK>]|clear|clearhis",
-    help_desc = "Bannt einen User; <ZEIT> entspricht Minuten; negative Werte bedeuten Bann für immer",
+    help_desc = "Bannt einen User; <ZEIT> entspricht Minuten und muss mindestens 1 sein",
 
     msg_denied = "Du bist nicht befugt diesen Befehl zu nutzen.",
     msg_notint = "Das benutzen von Dezimalzahlen für die Banzeit ist nicht erlaubt",
+    msg_badtime = "Die Banzeit muss mindestens 1 Minute betragen.",
     msg_import = "Fehler beim Importieren eines Moduls.",
     msg_reason = "Kein Grund.",
     msg_usage = "Gebrauch: [+!#]ban nick|cid|ip <NICK>|<CID>|<IP> [<ZEIT> <GRUND>] / [+!#]ban show|showhis [<NICK>]|clear|clearhis",
