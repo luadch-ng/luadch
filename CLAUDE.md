@@ -261,7 +261,14 @@ ADC parser now discards messages with unknown escape sequences per ADC 3.1
 (#419) + hub-bot INF `EM` escaping (#423), and an `etc_webhook` body-field
 `conditions` filter (#420 - fixed a live double-announce by filtering on a
 JSON body field like a GitHub release `action=released` or a Discourse
-opening post, not just the event header). A
+opening post, not just the event header). On `dev` (PR #432):
+`core/sysinfo.lua` falls back `Get-CimInstance` -> `Get-WmiObject` so
+old-Windows hubowners (Server 2008 R2 / Win7 = PowerShell 2.0, which has
+no `Get-CimInstance`) get real `+hubinfo` OS/CPU/RAM instead of
+`<UNKNOWN>` (Sopor; the pre-refactor 3.1.x plugin also CRASHED on the
+nil-concat - shipped a v0.30 `cmd_hubinfo` drop-in per §8). Many
+hubowners run ancient Windows (the UCRT release build also needs
+KB2999226 there - the Universal C Runtime). A
 recurring pattern this era:
 a **periodic-fetch plugin must persist its next-fetch deadline across
 `+reload`**, or every reload re-hits a rate-limited provider - fixed twice
@@ -272,8 +279,8 @@ from source per §1a.3/4, since many are old-version reports asking "fixed in
 3.x?"). GitFlow A per fix; batch dev->master as a MERGE commit (never squash
 - see §8 branch hygiene).
 
-**In flight: the #78 allowlist (global whitelist) - 4-PR arc A-D complete on
-stacked branches, pending dev merge.** The allowlist deferred from the
+**On `dev`: the #78 allowlist (global whitelist) - 4-PR arc A-D MERGED
+(PRs #427/#431/#429/#430), pending testhub -> dev->master.** The allowlist deferred from the
 unified-blocklist arc. A `core/whitelist.lua` engine consulted by every
 IP-blocking path so trusted infrastructure (hublist pingers etc.) is exempt
 from the AUTOMATED blockers (GeoIP / proxydetect / feeds / hub-limit) - but

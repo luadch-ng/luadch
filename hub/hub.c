@@ -11,6 +11,8 @@
 #ifdef __unix__
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/file.h>   /* flock */
+#include <sys/resource.h>   /* getrlimit / setrlimit RLIMIT_NOFILE */
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
@@ -228,6 +230,71 @@ static int makedir(lua_State *L)
   return 1;
 }
 
+/* Resulting soft RLIMIT_NOFILE after raise_fd_limit(): the practical
+ * concurrent-socket ceiling on the POSIX poll backend. 0 = unknown (Windows,
+ * or getrlimit failed), -1 = unlimited (RLIM_INFINITY), else the fd count.
+ * Exposed to Lua via getfdlimit() for the hub boot log. */
+static long g_fd_limit = 0;
+
+/* Raise the open-file-descriptor soft limit to the hard limit at boot.
+ *
+ * The POSIX poll() event-loop backend (luasocket/src/select.c, #310) can watch
+ * as many sockets as the process may open, so the concurrent-connection
+ * ceiling is RLIMIT_NOFILE, not FD_SETSIZE. Distros default the SOFT limit to
+ * 1024 while the HARD limit is far higher; raising soft->hard needs no
+ * privilege and lifts the ceiling with zero operator action, right where the
+ * poll port removed the old 1024 select cap - otherwise `ulimit -n = 1024`
+ * would silently become the new cap. Going beyond the hard limit still needs
+ * the OS (ulimit -Hn as root / systemd LimitNOFILE / Docker --ulimit nofile).
+ * No-op on Windows: the select backend is FD_SETSIZE-bound (1024, #416), not
+ * fd-limit-bound. Best-effort: a probe/set failure warns and leaves the limit
+ * at the OS default rather than aborting the hub. */
+static void raise_fd_limit(void)
+{
+#ifdef __unix__
+  struct rlimit rl;
+  if (getrlimit(RLIMIT_NOFILE, &rl) != 0)
+  {
+    fprintf(stderr, "warning: getrlimit(RLIMIT_NOFILE) failed (%s); "
+                    "file-descriptor limit left at the OS default\n",
+                    strerror(errno));
+    fflush(stderr);
+    return;
+  }
+  if (rl.rlim_cur < rl.rlim_max)
+  {
+    rl.rlim_cur = rl.rlim_max;
+    if (setrlimit(RLIMIT_NOFILE, &rl) != 0)
+    {
+      fprintf(stderr, "warning: setrlimit(RLIMIT_NOFILE) failed (%s); "
+                      "concurrent-socket ceiling stays at the soft limit\n",
+                      strerror(errno));
+      fflush(stderr);
+    }
+  }
+  /* Re-read ground truth: the soft limit may or may not have moved. */
+  if (getrlimit(RLIMIT_NOFILE, &rl) == 0)
+  {
+    g_fd_limit = (rl.rlim_cur == RLIM_INFINITY) ? -1 : (long)rl.rlim_cur;
+  }
+#endif
+}
+
+/*
+ * getfdlimit() -> integer
+ *
+ * The concurrent-socket ceiling established by raise_fd_limit(): the soft
+ * RLIMIT_NOFILE on POSIX (-1 = unlimited), or 0 when unknown (Windows, or the
+ * probe failed). Read once by the hub boot log so operators see the real
+ * limit the poll backend gives them. Set before the first run_lua and static,
+ * so it survives +reload (run_lua re-entry) unchanged.
+ */
+static int getfdlimit(lua_State *L)
+{
+  lua_pushinteger(L, (lua_Integer)g_fd_limit);
+  return 1;
+}
+
 static void run_lua(void);
 
 static int restart(lua_State *L)
@@ -271,6 +338,7 @@ static void run_lua(void)
   lua_register(L, "doexit", doexit);
   lua_register(L, "requestexit", requestexit);
   lua_register(L, "makedir", makedir);
+  lua_register(L, "getfdlimit", getfdlimit);
   int err = luaL_loadfile(L, "core/init.lua") || lua_pcall(L, 0, 0, 0);
   if (err)
   {
@@ -342,6 +410,147 @@ static void handle_args(int argc, char **argv)
   }
 }
 
+/* ---- single-instance lock -------------------------------------------
+ *
+ * Refuse to start a second hub against the same install tree. Two hubs
+ * sharing one cfg/ race on user.tbl, master.key, the plugin .tbl stores
+ * and the logs; interleaved saveusers()/savetable() writes can corrupt
+ * them (data loss). The guard is a lock FILE in the install directory -
+ * chdir_to_binary_dir() anchored the CWD there, so a relative name
+ * resolves per-install automatically: a second hub in a DIFFERENT
+ * directory has its own lock and starts fine (a test hub + a prod hub on
+ * one box is a supported setup). The lock is held open for the whole
+ * process lifetime:
+ *   - unix:    flock(LOCK_EX | LOCK_NB). The kernel releases it when the
+ *              process dies, so a crash never leaves a blocking stale
+ *              lock. fork() shares the open file description, so the
+ *              daemon child keeps the lock after the parent exits.
+ *   - windows: CreateFile with dwShareMode = 0 (deny sharing) - a second
+ *              open fails with ERROR_SHARING_VIOLATION. FILE_FLAG_DELETE_
+ *              ON_CLOSE removes the file on exit/crash.
+ *
+ * Fail-open: if the lock file cannot even be created (read-only fs and
+ * the like) we warn and continue rather than brick the hub over a
+ * missing convenience guard - only a definitive "already held" refuses
+ * startup. Survives +reload: restart() re-enters run_lua via atexit
+ * without closing this fd/handle, so the lock persists with no gap. */
+#define LOCKFILE_NAME "luadch.lock"
+
+#ifdef _WIN32
+static HANDLE g_lock_handle = INVALID_HANDLE_VALUE;
+#elif defined(__unix__)
+static int g_lock_fd = -1;
+#endif
+
+/* 0 = we hold the lock (or the guard degraded to a no-op; continue).
+ * 1 = another instance already holds it (caller must abort startup). */
+static int acquire_single_instance_lock(void)
+{
+#ifdef _WIN32
+  HANDLE h = CreateFileA(
+    LOCKFILE_NAME,
+    GENERIC_READ | GENERIC_WRITE,
+    0,                                  /* dwShareMode = 0 -> exclusive */
+    NULL,
+    OPEN_ALWAYS,
+    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
+    NULL);
+  if (h == INVALID_HANDLE_VALUE)
+  {
+    DWORD e = GetLastError();
+    /* A concurrent instance holding the file with dwShareMode = 0 ALWAYS
+     * surfaces as ERROR_SHARING_VIOLATION - that is the only definitive
+     * "already running" signal. ERROR_ACCESS_DENIED means something else
+     * (a read-only or ACL-denied stale lock file, a directory of that
+     * name) with no instance necessarily running, so it must fail-open
+     * rather than wrongly refuse startup. */
+    if (e == ERROR_SHARING_VIOLATION)
+    {
+      return 1;   /* another instance holds the exclusive handle */
+    }
+    fprintf(stderr, "warning: cannot create lock file '%s' (error %lu); "
+                    "single-instance guard disabled\n",
+                    LOCKFILE_NAME, (unsigned long)e);
+    fflush(stderr);
+    return 0;     /* fail-open */
+  }
+  g_lock_handle = h;
+  return 0;
+#elif defined(__unix__)
+  /* O_CLOEXEC so a fork+exec child (io.popen / os.execute) does NOT
+   * inherit this fd: an inherited fd that outlives the hub would keep the
+   * flock held and wrongly refuse the next restart. daemonize() forks
+   * WITHOUT exec, so the daemon child still shares the open file
+   * description and correctly retains the lock. */
+  int fd = open(LOCKFILE_NAME, O_CREAT | O_RDWR | O_CLOEXEC, 0640);
+  if (fd < 0)
+  {
+    fprintf(stderr, "warning: cannot create lock file '%s' (%s); "
+                    "single-instance guard disabled\n",
+                    LOCKFILE_NAME, strerror(errno));
+    fflush(stderr);
+    return 0;     /* fail-open */
+  }
+  if (flock(fd, LOCK_EX | LOCK_NB) != 0)
+  {
+    if (errno == EWOULDBLOCK)
+    {
+      close(fd);
+      return 1;   /* another instance holds the lock */
+    }
+    fprintf(stderr, "warning: cannot lock '%s' (%s); "
+                    "single-instance guard disabled\n",
+                    LOCKFILE_NAME, strerror(errno));
+    fflush(stderr);
+    close(fd);
+    return 0;     /* fail-open */
+  }
+  g_lock_fd = fd;
+  return 0;
+#else
+  return 0;       /* unknown platform: no guard */
+#endif
+}
+
+/* Record the running process's PID in the (already-held) lock file for
+ * operator diagnostics. Called AFTER daemonize() so the value is the
+ * surviving process, not the pre-fork parent. Best-effort: a write
+ * failure is not fatal - the lock is the open handle, not the content. */
+static void write_lock_pid(void)
+{
+  char buf[32];
+  int n;
+#ifdef _WIN32
+  if (g_lock_handle == INVALID_HANDLE_VALUE) return;
+  n = snprintf(buf, sizeof(buf), "%lu\n",
+               (unsigned long)GetCurrentProcessId());
+  if (n > 0)
+  {
+    DWORD written = 0;
+    if (n >= (int)sizeof(buf)) n = (int)sizeof(buf) - 1;   /* clamp */
+    SetFilePointer(g_lock_handle, 0, NULL, FILE_BEGIN);
+    WriteFile(g_lock_handle, buf, (DWORD)n, &written, NULL);
+    SetEndOfFile(g_lock_handle);   /* truncate: OPEN_ALWAYS may reopen a
+                                    * survived-hard-crash file with a
+                                    * longer stale PID */
+  }
+#elif defined(__unix__)
+  if (g_lock_fd < 0) return;
+  n = snprintf(buf, sizeof(buf), "%ld\n", (long)getpid());
+  if (n > 0 && lseek(g_lock_fd, 0, SEEK_SET) == 0)
+  {
+    ssize_t w;
+    if (n >= (int)sizeof(buf)) n = (int)sizeof(buf) - 1;   /* clamp */
+    w = write(g_lock_fd, buf, (size_t)n);
+    if (w > 0)
+    {
+      int t = ftruncate(g_lock_fd, w);
+      (void)t;
+    }
+  }
+#endif
+}
+
 int main(int argc, char **argv)
 {
   handle_signals();
@@ -354,7 +563,22 @@ int main(int argc, char **argv)
     fprintf(stderr, "warning: could not anchor cwd to binary directory; "
                     "falling back to inherited cwd\n");
   }
+  // Acquire BEFORE daemonize() so a foreground start reports the refusal
+  // straight to the invoking shell (non-zero exit), and a second `-d`
+  // start is rejected before it forks.
+  if (acquire_single_instance_lock() != 0)
+  {
+    log_error("luadch: another instance is already running in this "
+              "directory; refusing to start.");
+    return EXIT_FAILURE;
+  }
+  // Lift the fd soft limit to the hard limit so the POSIX poll() event loop
+  // (#310) is not silently re-capped at the default ulimit -n. Inherited
+  // across the daemonize() fork, so raising it here (once, in the parent) is
+  // enough. No-op on Windows.
+  raise_fd_limit();
   daemonize();
+  write_lock_pid();
   run_lua();
   return EXIT_SUCCESS;
 }

@@ -171,9 +171,6 @@ _regex = {
         return string_match( str, _sid )
     end,
     bool = function( str )
-        return string_match( str, _sid )
-    end,
-    bool = function( str )
         return string_match( str, _bool )
     end,
     -- Accept empty (NP key with no value), or any signed decimal

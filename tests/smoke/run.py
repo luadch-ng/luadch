@@ -71,6 +71,14 @@ HUB_HOST = "127.0.0.1"
 START_TIMEOUT_SEC = 20
 STOP_TIMEOUT_SEC = 10
 PROTOCOL_TIMEOUT_SEC = 5
+# How long to wait for a rejected second instance to exit. The launcher
+# guard fires before Lua/socket init so it exits near-instantly; the
+# slack is for slow CI. A timeout here means the guard did NOT fire.
+SINGLE_INSTANCE_TIMEOUT_SEC = 15
+# How long to wait for a second hub (ports already held) to log the clear
+# port-in-use message. The bind attempt happens during boot; slack is for
+# a slow runner + cert auto-gen preceding the listener setup.
+PORT_IN_USE_TIMEOUT_SEC = 25
 
 
 class TestFailure(Exception):
@@ -12318,24 +12326,29 @@ def test_no_script_errors(log_path: Path, error_log_path: Path = None):
         )
 
 
-def test_select_capacity_logged(staging_dir: Path):
-    """Regression guard for #416 (Windows FD_SETSIZE=64 hub crash).
+def test_event_loop_backend_logged(staging_dir: Path):
+    """Regression guard for the event-loop backend and its socket ceiling.
 
-    The event loop selects over every connected socket at once; on Windows
-    luasocket's select.c raises "too many sockets" at n >= FD_SETSIZE, and
-    the bundled build inherited the Winsock default of 64 - so the hub
-    crashed once it held ~64 sockets. The luasocket Windows build now defines
-    FD_SETSIZE=1024 (parity with Linux glibc).
+    hub.loop() logs one boot line naming the luasocket event-loop backend and
+    the ceiling on how many sockets the single event loop can watch. The line
+    (and the assertion) differ by platform:
 
-    hub.loop() logs the compile-time capacity (socket._SETSIZE, the exact
-    macro the guard checks) once at boot via out.put; assert it is >= 1024.
-    This proves the compile define reached the shipped socket module. Fails
-    pre-fix on the Windows leg (logs 64); the Linux leg already reports 1024.
-    It goes through the real hub because a standalone `require('socket')`
-    under msys2 lua hits the bundled-liblua ABI clash (see smoke.yml). Read
-    from event.log (out.put's target, persisted open-append-close per line;
-    the harness sets log_events=true) - not smoke-hub.log, whose stdout is
-    block-buffered and lost when the hub is terminated at teardown."""
+      - POSIX poll backend (#310): "event loop backend: poll (socket ceiling
+        ...)". poll() takes a variable-length pollfd array, so there is NO
+        fixed FD_SETSIZE cap; the ceiling is the process fd limit (hub/hub.c
+        raises RLIMIT_NOFILE at boot). This test REQUIRES the poll line on the
+        Linux leg, which fails pre-fix: the old select.c backend logged the
+        "select() capacity (FD_SETSIZE)" line instead and had no _EVENTBACKEND.
+      - Windows select backend (#416): "select() capacity (FD_SETSIZE): N
+        sockets". select.c raises "too many sockets" at n >= FD_SETSIZE; the
+        Winsock default 64 crashed the hub at ~64 sockets, so the Windows build
+        must define FD_SETSIZE=1024. Assert N >= 1024 (unchanged by #310).
+
+    Goes through the real hub because a standalone require('socket') under msys2
+    lua hits the bundled-liblua ABI clash (see smoke.yml). Reads event.log
+    (out.put's target, persisted open-append-close per line; the harness sets
+    log_events=true) - not smoke-hub.log, whose stdout is block-buffered and
+    lost when the hub is terminated at teardown."""
     log_path = staging_dir / "log" / "event.log"
     if not log_path.exists():
         raise TestFailure(
@@ -12343,19 +12356,27 @@ def test_select_capacity_logged(staging_dir: Path):
             f"enable log_events in the cfg.tbl override for this assertion"
         )
     text = log_path.read_text(encoding="utf-8", errors="replace")
-    m = re.search(r"select\(\) capacity \(FD_SETSIZE\): (\d+) sockets", text)
-    if not m:
-        raise TestFailure(
-            "event.log has no 'select() capacity (FD_SETSIZE): N sockets' "
-            "line - hub.loop() should log it once at startup"
-        )
-    cap = int(m.group(1))
-    if cap < 1024:
-        raise TestFailure(
-            f"select() FD_SETSIZE capacity is {cap}, expected >= 1024 - the "
-            f"Windows luasocket build must define FD_SETSIZE=1024; the default "
-            f"64 crashes the event loop at ~64 sockets (#416)"
-        )
+    if sys.platform.startswith("win"):
+        m = re.search(r"select\(\) capacity \(FD_SETSIZE\): (\d+) sockets", text)
+        if not m:
+            raise TestFailure(
+                "event.log has no 'select() capacity (FD_SETSIZE): N sockets' "
+                "line - the Windows select backend should log it once at startup"
+            )
+        cap = int(m.group(1))
+        if cap < 1024:
+            raise TestFailure(
+                f"select() FD_SETSIZE capacity is {cap}, expected >= 1024 - the "
+                f"Windows luasocket build must define FD_SETSIZE=1024; the default "
+                f"64 crashes the event loop at ~64 sockets (#416)"
+            )
+    else:
+        if not re.search(r"event loop backend: poll", text):
+            raise TestFailure(
+                "event.log has no 'event loop backend: poll' line - the POSIX "
+                "luasocket build must use the poll() event-loop backend (#310); "
+                "pre-fix it logged 'select() capacity (FD_SETSIZE)' instead"
+            )
 
 
 # -----------------------------------------------------------------------------
@@ -12540,14 +12561,146 @@ def run_tests(staging_dir: Path):
         log("PASS  no script errors in log")
 
     try:
-        test_select_capacity_logged(staging_dir)
+        test_event_loop_backend_logged(staging_dir)
     except Exception as e:
-        log(f"FAIL  select() FD_SETSIZE capacity >= 1024 (#416): {e}")
-        failed.append("select() FD_SETSIZE capacity >= 1024 (#416)")
+        log(f"FAIL  event loop backend logged (#310/#416): {e}")
+        failed.append("event loop backend logged (#310/#416)")
     else:
-        log("PASS  select() FD_SETSIZE capacity >= 1024 (#416)")
+        log("PASS  event loop backend logged (#310/#416)")
 
     return failed
+
+
+def test_port_in_use_message(source_install: Path, proc=None, keep_staging=False):
+    """A second hub started with ports the running first hub already holds
+    must log a clear operator-facing "port ... already in use - change the
+    port in cfg/cfg.tbl" message (core/hub.lua add_server_handler). Uses a
+    SEPARATE install dir staged from the pristine source (so nothing about
+    the same-dir single-instance lock is involved) pointed at the SAME
+    test ports as the live shared hub.
+
+    The assertion is on the NEW guidance phrase, not just "already in use":
+    on Linux the raw luasocket bind error ("...bind: address already in
+    use") is logged pre-fix too, so a naive "already in use" check would
+    false-pass. Provably fails pre-fix: on Windows the second hub's
+    pre-bind SO_REUSEADDR let it silently re-bind the port (no failure, no
+    message); on Linux the bind failed but only the cryptic line was
+    logged, never the actionable guidance this asserts."""
+    if proc is None or proc.poll() is not None:
+        raise TestFailure("precondition failed: the first hub is not running")
+
+    second_staging = stage_install(source_install)
+    second = None
+    second_log = None
+    try:
+        override_test_ports(second_staging)   # same TEST_PORT_* as the shared hub
+        for stale in ("servercert.pem", "serverkey.pem", "cacert.pem", "cakey.pem"):
+            (second_staging / "certs" / stale).unlink(missing_ok=True)
+        second, second_log = start_hub(second_staging)
+
+        # The guidance goes to error.log via out.error (log_errors=true by
+        # default). "change the port in cfg/cfg.tbl" is unique to the new
+        # message - absent from the pre-fix cryptic luasocket line.
+        err_log = second_staging / "log" / "error.log"
+        needle = "change the port in cfg/cfg.tbl"
+        deadline = time.monotonic() + PORT_IN_USE_TIMEOUT_SEC
+        found = False
+        while time.monotonic() < deadline:
+            if err_log.exists():
+                text = err_log.read_text(encoding="utf-8", errors="replace")
+                if needle in text:
+                    found = True
+                    break
+            if second.poll() is not None:
+                break   # process died; one more read below then fail
+            time.sleep(0.2)
+        if not found:
+            tail = ""
+            if err_log.exists():
+                tail = err_log.read_text(encoding="utf-8", errors="replace")[-1000:]
+            raise TestFailure(
+                "second hub did not log the clear port-in-use guidance "
+                f"({needle!r}); error.log tail:\n{tail!r}"
+            )
+    finally:
+        if second is not None:
+            stop_hub(second, second_log)
+        if keep_staging:
+            log(f"second-hub staging kept at {second_staging.parent}")
+        else:
+            shutil.rmtree(second_staging.parent, ignore_errors=True)
+
+
+def _start_second_hub(staging_dir: Path):
+    """Spawn a SECOND hub against the same staging tree, capturing its
+    own stdout/stderr to log/second-instance.log. Deliberately does NOT
+    reuse start_hub(): that opens the shared log/smoke-hub.log in "wb"
+    mode and would truncate the first (running) hub's log."""
+    binary = staging_dir / ("Luadch.exe" if sys.platform == "win32" else "luadch")
+    out_path = staging_dir / "log" / "second-instance.log"
+    out = open(out_path, "wb")
+    proc = subprocess.Popen(
+        [str(binary)],
+        cwd=str(staging_dir.parent),
+        stdout=out,
+        stderr=subprocess.STDOUT,
+    )
+    return proc, out, out_path
+
+
+def test_single_instance_lock(staging_dir: Path, proc=None):
+    """A second hub launched against the same install tree must refuse to
+    start: the single-instance lock in hub.c (flock on unix, exclusive
+    CreateFile on Windows) makes it exit non-zero with an "already
+    running" message, and the first instance keeps running untouched.
+    Guards against two hubs sharing cfg/user.tbl/master.key/logs and
+    corrupting them via interleaved saves.
+
+    Provably fails pre-fix: without the launcher guard the second process
+    either boots a full second hub (on Windows SO_REUSEADDR lets it
+    re-bind the ports -> wait() times out) or dies on a bind error with
+    no single-instance message - neither matches the assertions here."""
+    if proc is None or proc.poll() is not None:
+        raise TestFailure("precondition failed: the first hub is not running")
+
+    second, second_out, second_log_path = _start_second_hub(staging_dir)
+    try:
+        try:
+            rc = second.wait(timeout=SINGLE_INSTANCE_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            raise TestFailure(
+                f"second hub did not exit within {SINGLE_INSTANCE_TIMEOUT_SEC}s; "
+                "the single-instance guard is missing (two instances ran "
+                "concurrently)"
+            )
+    finally:
+        # Never leave a stray second process behind, even on assert paths.
+        # Swallow a second TimeoutExpired on the reap so it cannot mask the
+        # real TestFailure or orphan the process.
+        if second.poll() is None:
+            second.kill()
+            try:
+                second.wait(timeout=STOP_TIMEOUT_SEC)
+            except subprocess.TimeoutExpired:
+                pass
+        second_out.close()
+
+    if rc == 0:
+        raise TestFailure("second hub exited 0; expected a non-zero refusal")
+
+    text = second_log_path.read_text(encoding="utf-8", errors="replace")
+    if "already running" not in text:
+        raise TestFailure(
+            "second hub exited non-zero but its log lacks the single-instance "
+            f"refusal message; log was:\n{text!r}"
+        )
+
+    # The rejected second start must not disturb the running first hub.
+    if proc.poll() is not None:
+        raise TestFailure(
+            f"first hub died (rc={proc.poll()}) after the second start attempt; "
+            "the guard must not disturb the already-running instance"
+        )
 
 
 def main():
@@ -12586,6 +12739,33 @@ def main():
             (staging_dir / "certs" / stale).unlink(missing_ok=True)
         proc, log_file = start_hub(staging_dir)
         failed = run_tests(staging_dir)
+
+        # Port-in-use guidance: with the shared hub still holding the test
+        # ports, a second hub (separate dir, same ports) must log a clear
+        # "change the port in cfg/cfg.tbl" message. Runs BEFORE the
+        # plaintext switch below stops the shared hub.
+        try:
+            test_port_in_use_message(
+                args.install_dir.resolve(), proc=proc,
+                keep_staging=args.keep_staging,
+            )
+        except Exception as e:
+            log(f"FAIL  port-in-use guidance on second hub: {e}")
+            failed.append("port-in-use guidance on second hub")
+        else:
+            log("PASS  port-in-use guidance on second hub")
+
+        # Single-instance lock: with the shared hub still running, a
+        # second launch against the same tree must be refused by the
+        # hub.c guard. Runs BEFORE the plaintext-mode switch below stops
+        # this hub (it needs a live first instance holding the lock).
+        try:
+            test_single_instance_lock(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  single-instance lock refuses second start: {e}")
+            failed.append("single-instance lock refuses second start")
+        else:
+            log("PASS  single-instance lock refuses second start")
 
         # #128 plaintext-mode test runs AFTER the regular battery
         # because cfg_secret.init() reads encrypt_usertbl once at
