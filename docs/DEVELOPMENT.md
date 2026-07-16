@@ -15,6 +15,7 @@ it.
 
 | You want to... | Read |
 |---|---|
+| Open your first PR (which branch to target, PR scope) | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | Know the rules / architecture / roadmap | `CLAUDE.md` |
 | Build from source (Linux / Windows / ARM) | [`BUILDING.md`](BUILDING.md) |
 | Deploy / operate a built hub | [`INSTALLING.md`](INSTALLING.md), [`CONFIGURATION.md`](CONFIGURATION.md), [`DOCKER.md`](DOCKER.md) |
