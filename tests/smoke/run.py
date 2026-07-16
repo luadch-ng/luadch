@@ -6816,6 +6816,104 @@ def test_aliases_adc_dispatch():
             raise TestFailure(f"+delalias did not confirm removal: {reply!r}")
 
 
+def test_cmd_ban_rejects_bad_time():
+    """cmd_ban v0.43: `+ban nick X <time>` must reject a time below 1.
+
+    Pre-fix, the only time validation was `is_integer( time )`, which
+    accepts negatives (-5 == math.floor(-5)). So `+ban nick X -5 reason`
+    stored bantime = -300; at the target's next login the expiry check
+    computed an always-negative remaining, PRUNED the entry and let them
+    straight back in - the target was kicked once while the operator
+    believed X was banned. Meanwhile help_desc and both lang files
+    promised "negative values means ban forever", a feature removed in
+    v0.15. The HTTP path has enforced min = 1 since #82; this closes the
+    divergence between the two entry points.
+
+    The new guard sits next to the is_integer check, which runs BEFORE
+    the target is resolved - so a nonexistent target exercises it and no
+    second client is needed:
+
+      pre-fix : falls through to the lookup -> "User not found."
+      post-fix: -> "Bantime must be 1 minute or greater."
+
+    Asserting on the msg_badtime phrase therefore provably fails pre-fix
+    (CLAUDE.md §1a.7). Step 3 is a positive control: a VALID time on the
+    same nonexistent target must still reach the lookup and answer "User
+    not found." - proving the guard rejects only bad input rather than
+    swallowing every +ban.
+
+    dummy is level 100 (hubowner); cmd_ban_permission gives minlevel 60,
+    so the command is reachable.
+    """
+    # Collect frames until the hub goes quiet, then assert over the whole
+    # batch. A single recv_until(predicate) is not usable here: dummy's
+    # login triggers a very long ICMD storm (~300 right-click
+    # registrations across the bundled plugins), and a 5s predicate scan
+    # can expire while still wading through it - which looks exactly like
+    # "the hub never replied". Collecting also yields a far better failure
+    # message, since we can show what did arrive.
+    def _collect(reader, seconds=4.0):
+        frames = []
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            try:
+                frames.append(reader.recv_until(lambda x: True, timeout=0.5))
+            except TestFailure:
+                break
+        return frames
+
+    def _chat_text(frames):
+        return " || ".join(
+            f for f in frames
+            if f.startswith(("EMSG ", "DMSG ", "BMSG "))
+        )
+
+    # A nick that is neither online nor registered, so the target lookup
+    # cannot succeed and nothing is ever actually banned by this test.
+    target = "smoke_no_such_user_9f2a"
+
+    with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+        _collect(reader, 5.0)  # let the post-login ICMD storm drain
+
+        # Multi-word BMSG bodies must ADC-escape spaces as `\s`; raw
+        # spaces would terminate the body and the rest would be parsed
+        # as ADC flags. Replies come back escaped the same way, so assert
+        # on single words rather than whole sentences.
+        for bad_time in ("-5", "0"):
+            sock.sendall(f"BMSG {sid} +ban\\snick\\s{target}\\s{bad_time}\\sspam\n".encode("utf-8"))
+            got = _chat_text(_collect(reader))
+            if "Bantime" not in got:
+                raise TestFailure(
+                    f"+ban with time={bad_time} was not rejected with the bantime "
+                    f"message. Pre-fix, is_integer() accepts negatives so this fell "
+                    f"through to the target lookup and answered 'User not found.' "
+                    f"Chat frames seen: {got[:400]!r}"
+                )
+            if "not\\sfound" in got:
+                raise TestFailure(
+                    f"+ban with time={bad_time} reached the target lookup - the "
+                    f"guard must reject before resolving a target: {got[:400]!r}"
+                )
+
+        # Positive control: a valid time must NOT be caught by the guard.
+        # It has to reach the target lookup and report the unknown nick -
+        # otherwise the guard would be silently rejecting every +ban and
+        # the assertions above would pass for the wrong reason.
+        sock.sendall(f"BMSG {sid} +ban\\snick\\s{target}\\s5\\sspam\n".encode("utf-8"))
+        got = _chat_text(_collect(reader))
+        if "not\\sfound" not in got:
+            raise TestFailure(
+                f"+ban with a valid time=5 did not reach the target lookup - the "
+                f"bantime guard is over-rejecting: {got[:400]!r}"
+            )
+        if "Bantime" in got:
+            raise TestFailure(
+                f"+ban with a valid time=5 was rejected by the bantime guard: "
+                f"{got[:400]!r}"
+            )
+
+
 def test_blocklist_78_phase_b():
     """#78 Phase B etc_blocklist `+blocklist` admin CLI smoke.
 
@@ -12391,6 +12489,7 @@ TESTS = [
     ("TLS ADC full login (dummy/test)", test_full_login_tls),
     ("+cmd routing (post-login +help)", test_command_routing),
     ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
+    ("cmd_ban rejects bantime < 1", test_cmd_ban_rejects_bad_time),
     ("blocklist admin CLI (#78 Phase B)", test_blocklist_78_phase_b),
     ("whitelist admin CLI + pinger seed (#78 allowlist Phase B)", test_whitelist_78_phase_b),
     ("blocklist feeds status (#78 Phase E)", test_blocklist_feeds_status),
