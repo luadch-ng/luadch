@@ -914,9 +914,9 @@ operators can disable via cfg + reload. One line per non-GET request:
 
 - Token field shows first + last 4 chars (full token never in logs).
 - `comment` field from cfg appears in parens.
-- Body is JSON-serialised, max 512 bytes (truncated with `…` if
-  longer), control-bytes replaced with `?` (consistent with
-  `core/http.lua:logsafe`). **The 512-byte truncation is a log-
+- Body is JSON-serialised, max 512 bytes (truncated to 509 plus `...`
+  if longer), control-bytes replaced with `?` (see
+  `core/http_router.lua:logsafe_body`). **The 512-byte truncation is a log-
   injection defence, NOT a secret-redaction primitive.** A 256-byte
   token or a 30-byte password both fit well under the cap and land
   on disk verbatim unless the route opts into the redact mechanism
