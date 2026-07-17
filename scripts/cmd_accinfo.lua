@@ -5,6 +5,16 @@
         - this script adds a command "accinfo" get infos about a reguser
         - usage: [+!#]accinfo sid|nick <SID>|<NICK> / [+!#]accinfoop sid|nick <SID>|<NICK>
 
+        v0.36:
+            - permanent-ban awareness on the HTTP surface (#444): the
+              GET /v1/registered/{nick} `ban` object now carries
+              `permanent` and, for a permanent ban, omits
+              `remaining_seconds` / `expires_at` (time_seconds 0) - the
+              same shape cmd_ban's GET /v1/bans emits, so both endpoints
+              describe the same ban identically. The ADC `+accinfo`
+              display already rendered a permanent ban as msg_forever
+              ("forever" / "dauerhaft") and is unchanged.
+
         v0.35:
             - route the msgmanager block-mode labels "Main" / "PM" /
               "Main + PM" through lang (msg_mode_main/pm/both).
@@ -162,7 +172,7 @@
 --------------
 
 local scriptname = "cmd_accinfo"
-local scriptversion = "0.35"
+local scriptversion = "0.36"
 
 local cmd = "accinfo"
 local cmd2 = "accinfoop"
@@ -598,16 +608,24 @@ local http_format_ban = function( target_nick )
     if not target_nick or target_nick == "" then return nil end
     for _, b in pairs( bans_tbl ) do
         if b.nick == target_nick then
-            local remaining = ( b.time or 0 ) - os.difftime( os.time(), b.start or 0 )
             local entry = {
                 by_nick           = b.by_nick or "",
                 reason            = b.reason or "",
                 start             = b.start or 0,
-                time_seconds      = b.time or 0,
-                remaining_seconds = remaining,
+                time_seconds      = b.permanent and 0 or ( b.time or 0 ),
+                permanent         = b.permanent or false,
             }
-            if remaining > 0 then
-                entry.expires_at = os.date( "!%Y-%m-%dT%H:%M:%SZ", b.start + b.time )
+            -- Mirror cmd_ban's GET /v1/bans shape (#444): a permanent
+            -- ban carries no remaining_seconds and no expires_at - both
+            -- surfaces must describe the same ban the same way, or a
+            -- consumer of /v1/registered cannot tell a permanent ban
+            -- from an expired-not-yet-pruned one.
+            if not b.permanent then
+                local remaining = ( b.time or 0 ) - os.difftime( os.time(), b.start or 0 )
+                entry.remaining_seconds = remaining
+                if remaining > 0 then
+                    entry.expires_at = os.date( "!%Y-%m-%dT%H:%M:%SZ", b.start + b.time )
+                end
             end
             return entry
         end

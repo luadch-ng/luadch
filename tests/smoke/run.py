@@ -4643,6 +4643,98 @@ def test_http_phase2_cmd_ban(staging_dir: Path, proc=None):
             raise TestFailure(f"catalog missing {needed!r}; body={b!r}")
 
 
+def test_cmd_ban_permanent_http(staging_dir: Path, proc=None):
+    """cmd_ban v0.44: POST /v1/bans {permanent:true} bans forever (#444).
+
+    HTTP mirror of the ADC `+ban ... permanent` keyword. Uses an ip
+    blind-add (no online user needed), so this is self-contained. The
+    entry stores a real `permanent = true` marker (time 0), never a
+    magic negative, and carries NO expires_at.
+
+    Provable pre-fix (CLAUDE.md §1a.7): pre-v0.44 the handler does not
+    read body.permanent and the request_schema does not declare it. The
+    validator ignores unknown body fields (it iterates the schema, not
+    the body), so pre-fix the POST creates a NORMAL timed ban - the
+    response has expires_at set and no `permanent` field. Asserting the
+    response and the GET entry carry `"permanent": true` and NO
+    expires_at therefore fails pre-fix.
+
+    Shares the staging hub with the other /v1/bans tests; cleans up with
+    DELETE so the ban list is empty again for anything downstream.
+    """
+    token_path = staging_dir / "cfg" / "api_token.first"
+    bootstrap_token = None
+    for line in token_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            bootstrap_token = line
+            break
+    if not bootstrap_token:
+        raise TestFailure(f"could not parse token from {token_path}")
+    auth = b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+
+    def status(resp):
+        return resp.split("\r\n", 1)[0]
+
+    def body_of(resp):
+        return resp.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in resp else ""
+
+    def nospace(s):
+        return s.replace(" ", "")
+
+    # 1. POST a permanent ip ban.
+    body = b'{"target_type":"ip","target":"198.51.100.44","permanent":true,"reason":"permhttp"}'
+    req = (
+        b"POST /v1/bans HTTP/1.1\r\n" + auth +
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n\r\n" + body
+    )
+    r = _http_roundtrip(req)
+    if "200 OK" not in status(r):
+        raise TestFailure(f"POST permanent ban: expected 200, got {status(r)!r} body={body_of(r)!r}")
+    rb = nospace(body_of(r))
+    if '"permanent":true' not in rb:
+        raise TestFailure(
+            f"POST permanent ban response missing '\"permanent\":true'. Pre-fix the "
+            f"handler ignores body.permanent and creates a normal timed ban: {body_of(r)!r}"
+        )
+    if '"expires_at"' in rb:
+        raise TestFailure(
+            f"POST permanent ban response must not carry expires_at (a permanent ban "
+            f"never expires): {body_of(r)!r}"
+        )
+
+    # 2. GET /v1/bans - the stored entry is permanent, no expires_at.
+    r = _http_roundtrip(b"GET /v1/bans HTTP/1.1\r\n" + auth + b"\r\n")
+    gb = nospace(body_of(r))
+    if '"permanent":true' not in gb:
+        raise TestFailure(f"GET /v1/bans: permanent entry not flagged permanent: {body_of(r)!r}")
+    if '"ip":"198.51.100.44"' not in gb:
+        raise TestFailure(f"GET /v1/bans: permanent ip entry missing: {body_of(r)!r}")
+
+    # 3. Persisted table carries the marker across a hypothetical reload.
+    bans_tbl = staging_dir / "scripts" / "data" / "cmd_ban_bans.tbl"
+    persisted = bans_tbl.read_text(encoding="utf-8", errors="replace")
+    if "permanent" not in persisted or "true" not in persisted:
+        raise TestFailure(
+            f"cmd_ban_bans.tbl did not persist the permanent marker: {persisted[:600]!r}"
+        )
+
+    # 4. Clean up: find the id and DELETE it, leaving an empty list.
+    import re as _re
+    m = _re.search(r'"id"\s*:\s*(\d+)[^}]*198\.51\.100\.44', body_of(r)) \
+        or _re.search(r'198\.51\.100\.44[^}]*"id"\s*:\s*(\d+)', body_of(r))
+    ban_id = m.group(1) if m else "1"
+    r = _http_roundtrip(
+        b"DELETE /v1/bans/" + ban_id.encode("ascii") + b" HTTP/1.1\r\n" + auth + b"\r\n"
+    )
+    if "200 OK" not in status(r):
+        raise TestFailure(f"DELETE permanent ban id={ban_id}: expected 200, got {status(r)!r}")
+    r = _http_roundtrip(b"GET /v1/bans HTTP/1.1\r\n" + auth + b"\r\n")
+    if '"bans":[]' not in nospace(body_of(r)):
+        raise TestFailure(f"ban list not empty after cleanup DELETE: {body_of(r)!r}")
+
+
 def test_http_phase3_cmd_restart(staging_dir: Path, proc=None):
     """Phase 3 PR-1 of #82 / #225: cmd_restart plugin migrates to HTTP.
 
@@ -6912,6 +7004,83 @@ def test_cmd_ban_rejects_bad_time():
                 f"+ban with a valid time=5 was rejected by the bantime guard: "
                 f"{got[:400]!r}"
             )
+
+
+def test_cmd_ban_permanent_adc():
+    """cmd_ban v0.44: `+ban ... permanent` keyword bans forever (#444).
+
+    Before v0.44 the keyword did not exist: `tonumber("permanent")` is
+    nil, so `time` fell back to cmd_ban_default_time (20) and the word
+    "permanent" was swallowed into the reason - a silent 20-minute ban
+    with reason "permanent <rest>". v0.44 recognises `permanent` in the
+    <time> slot, stores a real permanent marker (time 0), and renders
+    the ban time as the msg_permanent label instead of a countdown.
+
+    Provable pre-fix (CLAUDE.md §1a.7): the immediate `+ban` reply
+    (msg_ok) carries the bantime label in its `bantime:` field.
+
+      post-fix: bantime label = "permanent"  -> reply has no countdown
+      pre-fix : bantime label = get_bantime(1200) = "0 years, 0 days,
+                0 hours, 20 minutes, ..." -> reply CONTAINS "years"
+
+    So asserting the reply contains "permanent" AND does not contain
+    "years" flips: pre-fix the countdown's "years" is present and the
+    assertion fails.
+
+    Uses an ip target (blind-add, no online user needed) and unbans it
+    afterwards so no state leaks to downstream tests on the shared hub.
+    """
+    def _collect(reader, seconds=4.0):
+        frames = []
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            try:
+                frames.append(reader.recv_until(lambda x: True, timeout=0.5))
+            except TestFailure:
+                break
+        return frames
+
+    def _chat_text(frames):
+        return " || ".join(
+            f for f in frames
+            if f.startswith(("EMSG ", "DMSG ", "BMSG "))
+        )
+
+    # TEST-NET-3 (RFC 5737) address - never a real client.
+    target_ip = "203.0.113.44"
+    # A reason word that does not itself contain "years"/"minutes", so the
+    # countdown-word assertion cannot be tripped by the reason text.
+    reason = "permsmoke9f2a"
+
+    with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+        _collect(reader, 5.0)  # let the post-login ICMD storm drain
+
+        try:
+            sock.sendall(f"BMSG {sid} +ban\\sip\\s{target_ip}\\spermanent\\s{reason}\n".encode("utf-8"))
+            got = _chat_text(_collect(reader))
+            if "permanent" not in got:
+                raise TestFailure(
+                    f"+ban ip {target_ip} permanent did not render the permanent "
+                    f"label. Pre-fix, `permanent` was swallowed into the reason and "
+                    f"the ban became a 20-minute countdown. Chat frames: {got[:500]!r}"
+                )
+            if "years" in got:
+                raise TestFailure(
+                    f"+ban ... permanent reply still carries a time countdown "
+                    f"('years'), so the keyword was not recognised as permanent - "
+                    f"it fell through to the default-time path: {got[:500]!r}"
+                )
+            if reason not in got:
+                raise TestFailure(
+                    f"+ban ... permanent reply lost the reason {reason!r}; the "
+                    f"keyword parse must not eat the trailing reason: {got[:500]!r}"
+                )
+        finally:
+            # Clean up the ip ban so the shared hub's ban list stays empty
+            # for downstream tests.
+            sock.sendall(f"BMSG {sid} +unban\\sip\\s{target_ip}\n".encode("utf-8"))
+            _collect(reader, 2.0)
 
 
 def test_blocklist_78_phase_b():
@@ -12490,6 +12659,7 @@ TESTS = [
     ("+cmd routing (post-login +help)", test_command_routing),
     ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
     ("cmd_ban rejects bantime < 1", test_cmd_ban_rejects_bad_time),
+    ("cmd_ban permanent keyword (#444)", test_cmd_ban_permanent_adc),
     ("blocklist admin CLI (#78 Phase B)", test_blocklist_78_phase_b),
     ("whitelist admin CLI + pinger seed (#78 allowlist Phase B)", test_whitelist_78_phase_b),
     ("blocklist feeds status (#78 Phase E)", test_blocklist_feeds_status),
@@ -13051,6 +13221,15 @@ def main():
             failed.append("HTTP API Phase 2 cmd_ban (#82 / #198)")
         else:
             log("PASS  HTTP API Phase 2 cmd_ban (#82 / #198)")
+
+        # #444: POST /v1/bans {permanent:true} - permanent-ban HTTP mirror.
+        try:
+            test_cmd_ban_permanent_http(staging_dir, proc=proc)
+        except Exception as e:
+            log(f"FAIL  cmd_ban permanent HTTP (#444): {e}")
+            failed.append("cmd_ban permanent HTTP (#444)")
+        else:
+            log("PASS  cmd_ban permanent HTTP (#444)")
 
         # Phase 3 PR-1 of #82 / #225: cmd_restart plugin migrated to
         # POST /v1/restart (X-Confirm required). Rejection-only
