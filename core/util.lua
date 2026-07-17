@@ -780,12 +780,7 @@ end
 
 --// trim whitespaces from both ends of a string
 trimstring = function( str )
-    local err
     local str = tostring( str )
-    if type( str ) ~= "string" then
-        err = "util.lua: error: string expected, got " .. type( str )
-        return nil, err
-    end
     return string_find( str, "^%s*$" ) and "" or string_match( str, "^%s*(.*%S)" )
 end
 
