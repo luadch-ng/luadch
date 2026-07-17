@@ -31,7 +31,6 @@
 local use = use
 
 local io = use "io"
-local tostring = use "tostring"
 local tonumber = use "tonumber"
 local string = use "string"
 

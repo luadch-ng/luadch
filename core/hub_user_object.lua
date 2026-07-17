@@ -49,8 +49,6 @@ local type = use "type"
 
 local table = use "table"
 local table_concat = table.concat
-local table_insert = table.insert
-local table_remove = table.remove
 
 local adclib = use "adclib"
 local cfg = use "cfg"

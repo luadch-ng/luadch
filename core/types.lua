@@ -11,8 +11,6 @@
 --// lua functions //--
 
 local type = use "type"
-local next = use "next"
-local pairs = use "pairs"
 local error = use "error"
 
 --// extern libs //--
@@ -36,8 +34,6 @@ local check
 --// tables //--
 
 local _types
-local _users
-local _adccmds
 
 local _
 

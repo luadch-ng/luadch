@@ -32,7 +32,6 @@
 --// lua functions //--
 
 local pairs = use "pairs"
-local ipairs = use "ipairs"
 local tostring = use "tostring"
 local type = use "type"
 

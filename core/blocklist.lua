@@ -97,7 +97,6 @@ local socket    = use "socket"
 
 local string_byte    = string.byte
 local string_format  = string.format
-local string_lower   = string.lower
 local string_sub     = string.sub
 local table_insert   = table.insert
 local table_remove   = table.remove
@@ -188,7 +187,6 @@ local FEED_MIN_PREFIX_V6 = 16
 ----------------------------------------------------------------------
 
 local _rollup = { }        -- key (ip..\0..source) -> { ip, source, count, last_seen, stealth }
-local _rollup_lru_head = 0
 local _rollup_size = 0
 local _last_flush_time = 0
 

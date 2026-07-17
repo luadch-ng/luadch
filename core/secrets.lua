@@ -49,7 +49,6 @@ local use = use
 -- be pulled in via `use`. Same pattern as core/util.lua + core/audit.lua.
 local type        = use "type"
 local pairs       = use "pairs"
-local tostring    = use "tostring"
 local string      = use "string"
 local table       = use "table"
 local os          = use "os"

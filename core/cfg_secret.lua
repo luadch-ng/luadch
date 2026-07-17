@@ -63,11 +63,8 @@ local type = use "type"
 local error = use "error"
 local pcall = use "pcall"
 local string = use "string"
-local tonumber = use "tonumber"
 local tostring = use "tostring"
 
-local string_byte = string.byte
-local string_char = string.char
 local string_sub = string.sub
 local string_match = string.match
 
@@ -77,7 +74,6 @@ local io_popen = io.popen
 
 local os = use "os"
 local os_getenv = os.getenv
-local os_remove = os.remove
 
 --// extern libs //--
 
@@ -97,7 +93,6 @@ local CONFIG_PATH = const.CONFIG_PATH
 local cfg_get
 
 -- out is late-bound to avoid the cfg <-> out load cycle.
-local out_error
 local out_put
 
 ----------------------------------// CONSTANTS //--
@@ -176,7 +171,6 @@ local function init( )
     -- can't import out at our own load time; cfg.init() calls our
     -- init after out is up.
     local out = use "out"
-    out_error = out.error
     out_put = out.put
 
     -- cfg late-bind: cfg.init() guarantees _settings is loaded by

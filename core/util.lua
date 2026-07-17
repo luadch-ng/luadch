@@ -87,7 +87,6 @@ local ipairs = use "ipairs"
 local tostring = use "tostring"
 local tonumber = use "tonumber"
 local loadfile = use "loadfile"
-local setmetatable = use "setmetatable"
 
 --// lua libs //--
 
@@ -101,7 +100,6 @@ local package = use "package"
 
 local io_open = io.open
 local os_time = os.time
-local os_date = os.date
 local os_difftime = os.difftime
 local os_rename = os.rename
 local os_remove = os.remove
@@ -127,17 +125,14 @@ local isutf8 = adclib.isutf8
 local adclib_random_bytes = adclib.random_bytes
 local ascii_sub = unicode.ascii.sub
 local utf_format = unicode.utf8.format
-local ascii_gsub = unicode.ascii.gsub
 
 --// core scripts //--
 
 local out
 
-local mem = use "mem"
 
 --// core methods //--
 
-local out_put
 local out_error
 
 --// constants //--
@@ -201,7 +196,6 @@ end
 
 init = function( )
     out = use "out"
-    out_put = out.put
     out_error = out.error
 end
 

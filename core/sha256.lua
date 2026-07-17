@@ -47,7 +47,6 @@ local error     = use "error"
 local tostring  = use "tostring"
 
 local string_byte   = string.byte
-local string_char   = string.char
 local string_format = string.format
 local string_pack   = string.pack
 local string_len    = string.len
