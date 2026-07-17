@@ -104,7 +104,6 @@ local permission = cfg.get( "cmd_userinfo_permission" )
 --// msgs
 local lang, err = cfg.loadlanguage( scriptlang, scriptname ); lang = lang or {}; err = err and hub.debug( err )
 
-local msg_denied = lang.msg_denied or "You are not allowed to use this command."
 local msg_usage = lang.msg_usage or  "Usage: [+!#]userinfo sid|nick <sid>|<nick>"
 local msg_off = lang.msg_off or "User not found."
 local msg_god = lang.msg_god or "You are not allowed to check the userinfo from this user"

@@ -18,7 +18,6 @@ return {
     ucmd_popup_pat    = "Lua pattern (e.g. AirDC%+%+%s2):",
     ucmd_popup_reason = "Kick reason (optional):",
 
-    msg_client_not_allowed = "Your client is not allowed",
     msg_denied             = "You are not allowed to use this command.",
     msg_usage_add          = "Usage: [+!#]addblocker <pattern> [reason]",
     msg_usage_del          = "Usage: [+!#]delblocker <pattern|N>",
@@ -30,7 +29,6 @@ return {
     msg_list_header        = "\n=== CLIENT BLOCKER ===",
     msg_list_footer        = "=== END ===\n",
     msg_list_empty         = "(no patterns configured)",
-    msg_err                = "etc_clientblocker.lua: error: database file (scripts/data/etc_clientblocker.tbl) corrupt or missing, a new one was created.",
     msg_report             = "[ CLIENT BLOCKER ]--> The user %s with IP %s is running %s and is not allowed in this hub. Matching pattern: %s",
 
 }

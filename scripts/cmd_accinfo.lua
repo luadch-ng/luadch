@@ -279,8 +279,6 @@ local msg_accinfo2 = lang.msg_accinfo2 or [[
 local ucmd_nick = lang.ucmd_nick or "Nick:"
 
 local ucmd_menu_ct0 = lang.ucmd_menu_ct0 or { "About You", "show Accinfo" }
-local ucmd_menu_ct1 = lang.ucmd_menu_ct1 or { "User", "Accinfo", "default", "by Nick" }
-local ucmd_menu_ct3 = lang.ucmd_menu_ct3 or { "Show", "Accinfo", "default" }
 local ucmd_menu_ct4 = lang.ucmd_menu_ct4 or "User"
 local ucmd_menu_ct5 = lang.ucmd_menu_ct5 or "Accinfo"
 local ucmd_menu_ct6 = lang.ucmd_menu_ct6 or "by Nick from List"

@@ -8,7 +8,6 @@
     ucmd_menu_ct2 = { "Anzeigen", "Client INF" },
 
     msg_denied = "Du bist nicht befugt diesen Befehl zu nutzen.",
-    msg_unknown = "unbekannt",
     msg_inf = [[
 
 

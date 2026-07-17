@@ -23,7 +23,6 @@ return {
     msg_bad_cidr      = "Ungueltige CIDR / IP: %s",
     msg_bad_expires   = "Ungueltiges expires-Datum '%s'. Erwartet YYYY-MM-DD.",
     msg_added         = "%s hat Whitelist-Eintrag #%d hinzugefuegt (%s, source=%s).",
-    msg_add_failed    = "whitelist.add fehlgeschlagen: %s",
     msg_save_failed   = "Whitelist konnte nicht gespeichert werden: %s",
     msg_removed       = "%s hat Whitelist-Eintrag #%d entfernt (%s, source=%s).",
     msg_remove_failed = "whitelist.del fehlgeschlagen: %s",
@@ -37,9 +36,7 @@ return {
     msg_count         = "whitelist: %d Eintraege gesamt",
     msg_no_dkjson     = "JSONL-Export/Import benoetigt dkjson, das nicht verfuegbar ist.",
     msg_export_ok     = "%s hat %d Whitelist-Eintraege nach %s exportiert.",
-    msg_export_fail   = "whitelist.export fehlgeschlagen: %s",
     msg_import_ok     = "%s hat %d Eintraege aus %s importiert (%d uebersprungen, %d Fehler).",
-    msg_import_fail   = "whitelist.import fehlgeschlagen: %s",
     msg_unsafe_path   = "Pfad '%s' ist unsicher: %s",
     msg_import_level  = "Import benoetigt Level %d oder hoeher (du bist %d).",
 

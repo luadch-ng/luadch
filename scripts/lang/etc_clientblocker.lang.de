@@ -18,7 +18,6 @@ return {
     ucmd_popup_pat    = "Lua-Pattern (z.B. AirDC%+%+%s2):",
     ucmd_popup_reason = "Kick-Grund (optional):",
 
-    msg_client_not_allowed = "Dein Client ist nicht erlaubt",
     msg_denied             = "Du darfst dieses Kommando nicht benutzen.",
     msg_usage_add          = "Benutzung: [+!#]addblocker <Pattern> [Grund]",
     msg_usage_del          = "Benutzung: [+!#]delblocker <Pattern|N>",
@@ -30,7 +29,6 @@ return {
     msg_list_header        = "\n=== CLIENT BLOCKER ===",
     msg_list_footer        = "=== ENDE ===\n",
     msg_list_empty         = "(keine Pattern konfiguriert)",
-    msg_err                = "etc_clientblocker.lua: Fehler: Datenbank-Datei (scripts/data/etc_clientblocker.tbl) defekt oder fehlt, neue Datei wurde angelegt.",
     msg_report             = "[ CLIENT BLOCKER ]--> Benutzer %s mit IP %s nutzt %s und ist hier nicht erlaubt. Matching Pattern: %s",
 
 }

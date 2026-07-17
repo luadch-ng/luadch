@@ -13,7 +13,6 @@
     help_desc = "ändert Level eines Users",
 
     ucmd_menu = "Upgrade",
-    ucmd_level = "Level:",
     ucmd_popup = "Nickname:",
     
     ucmd_menu_ct1_1 = "User",

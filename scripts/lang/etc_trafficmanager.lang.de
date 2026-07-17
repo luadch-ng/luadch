@@ -10,7 +10,6 @@
 
     msg_denied = "[ TRAFFICMANAGER ]--> Du bist nicht befugt diesen Befehl zu nutzen.",
     msg_god = "[ TRAFFICMANAGER ]--> Du bist nicht befugt diesen User zu blocken/unblocken.",
-    msg_notregged = "[ TRAFFICMANAGER ]--> User ist nicht registriert.",
     msg_notfound = "[ TRAFFICMANAGER ]--> Dieser User wird nicht geblockt.",
     msg_stillblocked = "[ TRAFFICMANAGER ]--> User:  %s  |  wurde bereits geblockt von:  %s  |  Grund:  %s",
     msg_isbot = "[ TRAFFICMANAGER ]--> User ist ein Bot.",

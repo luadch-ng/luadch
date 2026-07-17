@@ -76,7 +76,6 @@ local help_usage = lang.help_usage or "[+!#]hubstats"
 local help_desc = lang.help_desc or "shows statistics about the hub"
 
 local msg_denied = lang.msg_denied or "You are not allowed to use this command!"
-local msg_empty_tbl = lang.msg_empty_tbl or "\n\n\tThe first stats will shown at the begin of the next month.\n"
 local msg_label = lang.msg_label or "\tYEAR\t\tMONTH\t\tØ USERS\tØ SHARE\tREG's\t\tDELREG's\tBAN's\t\tUNBAN's"
 local ucmd_menu_ct1 = lang.ucmd_menu_ct1 or { "Hub", "etc", "Hubstats" }
 local msg_stats = lang.msg_stats or [[
