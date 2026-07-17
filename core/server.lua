@@ -63,7 +63,6 @@ local io_open = io.open
 local os_time = os.time
 local os_difftime = os.difftime
 local table_concat = table.concat
-local table_remove = table.remove
 local string_len = string.len
 local string_sub = string.sub
 local coroutine_wrap = coroutine.wrap
@@ -78,7 +77,6 @@ local luasocket = use "socket"
 
 local ssl_wrap = ( luasec and luasec.wrap )
 local socket_tcp = luasocket.tcp
-local socket_bind = luasocket.bind
 local socket_sleep = luasocket.sleep
 local socket_select = luasocket.select
 local ssl_newcontext = ( luasec and luasec.newcontext )
@@ -89,7 +87,6 @@ local cfg = use "cfg"
 local out = use "out"
 local util = use "util"
 local mem = use "mem"
-local signal = use "signal"
 local ratelimit = use "ratelimit"
 local blocklist = use "blocklist"
 local iostream = use "iostream"
@@ -100,8 +97,6 @@ local cfg_get = cfg.get
 local out_put = out.put
 local mem_free = mem.free
 local out_error = out.error
-local signal_set = signal.set
-local signal_get = signal.get
 local ratelimit_accept_ip = ratelimit.accept_ip
 -- Platform gate for SO_REUSEADDR (see addserver): Linux needs it for the
 -- TIME_WAIT fast-restart (#128); on Windows SO_REUSEADDR instead lets a
@@ -122,9 +117,7 @@ local ratelimit_tick = ratelimit.tick
 
 --// functions //--
 
-local stop
 local tick
-local stats
 
 local killall
 local addtimer
@@ -132,12 +125,10 @@ local addclient
 local addserver
 local wrapclient
 local wrapserver
-local getsettings
 local closesocket
 local removesocket
 local changetimeout
 local wrapconnection
-local changesettings
 
 local return_false
 local do_nothing
@@ -159,9 +150,6 @@ local _
 local _readlistlen
 local _sendlistlen
 local _timerlistlen
-
-local _sendtraffic
-local _readtraffic
 
 local _selecttimeout
 local _sleeptime
@@ -198,9 +186,6 @@ _closelist = { }    -- handlers to close
 _readlistlen = 0    -- length of readlist
 _sendlistlen = 0    -- length of sendlist
 _timerlistlen = 0    -- lenght of timerlist
-
-_sendtraffic = 0    -- some stats
-_readtraffic = 0
 
 _selecttimeout = 1    -- timeout of socket.select
 _sleeptime = 0.01    -- time to wait at the end of every tick
@@ -246,7 +231,7 @@ end
 
 wrapclient = function( client, listeners, pattern, sslctx, startssl, id )
 
-    local dispatch, disconnect = listeners.incoming or listeners.listener, listeners.disconnect
+    local dispatch = listeners.incoming or listeners.listener
 
     local failure = listeners.failure
 
@@ -297,7 +282,7 @@ wrapserver = function( listeners, socket, serverip, serverport, serverfamily, pa
 
     local connections = 0
 
-    local dispatch, disconnect = listeners.incoming or listeners.listener, listeners.disconnect
+    local dispatch = listeners.incoming or listeners.listener
 
     local err
 
@@ -705,7 +690,6 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
         if got > 0 then
             local count = got * STAT_UNIT
             readtraffic = readtraffic + count
-            _readtraffic = _readtraffic + count
 
             try_reading_on_write = do_nothing
             try_reading_on_read = _readbuffer
@@ -785,7 +769,6 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
         local succ, err, byte = send( socket, buffer, 1, bufferlen )
         local count = ( succ or byte or 0 ) * STAT_UNIT
         sendtraffic = sendtraffic + count
-        _sendtraffic = _sendtraffic + count
         _ = _cleanqueue and clean( bufferqueue )
         out_put( "server.lua: function 'wrapconnection': sent '", buffer, "', bytes: ", succ, ", error: ", err, ", part: ", byte, ", to: ", clientip, ":", clientport )
         if succ then    -- sending succesful
@@ -1182,26 +1165,6 @@ killall = function( )
     mem_free( )
 end
 
-getsettings = function( )
-    return _selecttimeout, _sleeptime, _maxsendlen, _maxreadlen, _checkinterval, _sendtimeout, _max_idle_time, _cleanqueue, _maxclientsperserver
-end
-
-changesettings = function( new )
-    if type( new ) ~= "table" then
-        return nil, "invalid settings table"
-    end
-    _selecttimeout = tonumber( new.timeout ) or _selecttimeout
-    _sleeptime = tonumber( new.sleeptime ) or _sleeptime
-    _maxsendlen = tonumber( new.maxsendlen ) or _maxsendlen
-    _maxreadlen = tonumber( new.maxreadlen ) or _maxreadlen
-    _checkinterval = tonumber( new.checkinterval ) or _checkinterval
-    _sendtimeout = tonumber( new.sendtimeout ) or _sendtimeout
-    _max_idle_time = tonumber( new.readtimeout ) or _max_idle_time
-    _cleanqueue = new.cleanqueue
-    _maxclientsperserver = new._maxclientsperserver or _maxclientsperserver
-    return true
-end
-
 addtimer = function( listener )
     if ( type( listener ) ~= "function" ) and ( type( listener ) ~= "thread" ) then
         return nil, "invalid listener type '" .. type( listener ) .. "'"
@@ -1209,10 +1172,6 @@ addtimer = function( listener )
     _timerlistlen = _timerlistlen + 1
     _timerlist[ _timerlistlen ] = listener
     return true
-end
-
-stats = function( )
-    return _readtraffic, _sendtraffic, _readlistlen, _sendlistlen, _timerlistlen
 end
 
 tick = function( )
@@ -1320,12 +1279,9 @@ addtimer( function( )
 return {
 
     tick = tick,
-    stats = stats,
     killall = killall,
     addtimer = addtimer,
     addclient = addclient,
     addserver = addserver,
-    getsettings = getsettings,
-    changesettings = changesettings,
 
 }
