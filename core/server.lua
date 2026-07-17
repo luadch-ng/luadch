@@ -124,7 +124,6 @@ local addserver
 local wrapserver
 local closesocket
 local removesocket
-local changetimeout
 local wrapconnection
 
 local return_false
