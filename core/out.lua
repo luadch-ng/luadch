@@ -13,7 +13,6 @@
 --// lua functions //--
 
 local select = use "select"
-local ipairs = use "ipairs"
 local tostring = use "tostring"
 
 --// lua libs //--
@@ -32,7 +31,6 @@ local table_concat = table.concat
 --// core scripts //--
 
 local cfg = use "cfg"
-local mem = use "mem"
 
 --// core methods //--
 

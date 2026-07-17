@@ -67,9 +67,7 @@ local tostring = use "tostring"
 local ipairs   = use "ipairs"
 local os       = use "os"
 local adclib   = use "adclib"
-local cfg      = use "cfg"
 
-local cfg_get           = cfg.get
 local adclib_createsalt = adclib.createsalt
 local os_time           = os.time
 

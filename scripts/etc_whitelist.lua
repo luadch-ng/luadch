@@ -151,7 +151,6 @@ local msg_unknown_verb  = lang.msg_unknown_verb  or "Unknown verb '%s'. Try: sho
 local msg_bad_cidr      = lang.msg_bad_cidr      or "Invalid CIDR / IP: %s"
 local msg_bad_expires   = lang.msg_bad_expires   or "Invalid expires date '%s'. Expected YYYY-MM-DD."
 local msg_added         = lang.msg_added         or "%s added whitelist entry #%d (%s, source=%s)."
-local msg_add_failed    = lang.msg_add_failed    or "whitelist.add failed: %s"
 local msg_save_failed   = lang.msg_save_failed   or "Failed to persist whitelist: %s"
 local msg_removed       = lang.msg_removed       or "%s removed whitelist entry #%d (%s, source=%s)."
 local msg_remove_failed = lang.msg_remove_failed or "whitelist.del failed: %s"
@@ -165,9 +164,7 @@ local msg_show_capped   = lang.msg_show_capped   or "(showing %d of %d entries; 
 local msg_count         = lang.msg_count         or "whitelist: %d entries total"
 local msg_no_dkjson     = lang.msg_no_dkjson     or "JSONL export/import requires dkjson, which is not available."
 local msg_export_ok     = lang.msg_export_ok     or "%s exported %d whitelist entries to %s."
-local msg_export_fail   = lang.msg_export_fail   or "whitelist.export failed: %s"
 local msg_import_ok     = lang.msg_import_ok     or "%s imported %d entries from %s (%d skipped, %d errors)."
-local msg_import_fail   = lang.msg_import_fail   or "whitelist.import failed: %s"
 local msg_unsafe_path   = lang.msg_unsafe_path   or "Path '%s' is unsafe: %s"
 local msg_import_level  = lang.msg_import_level  or "Import requires level %d or higher (you are %d)."
 

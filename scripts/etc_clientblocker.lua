@@ -128,7 +128,6 @@ local ucmd_menu_list  = lang.ucmd_menu_list  or { "Hub", "Client Blocker", "list
 local ucmd_popup_pat    = lang.ucmd_popup_pat    or "Lua pattern (e.g. AirDC%+%+%s2):"
 local ucmd_popup_reason = lang.ucmd_popup_reason or "Kick reason (optional):"
 
-local msg_client_not_allowed = lang.msg_client_not_allowed or default_reason or "Your client is not allowed"
 local msg_denied             = lang.msg_denied             or "You are not allowed to use this command."
 local msg_usage_add          = lang.msg_usage_add          or "Usage: [+!#]addblocker <pattern> [reason]"
 local msg_usage_del          = lang.msg_usage_del          or "Usage: [+!#]delblocker <pattern|N>"
@@ -140,7 +139,6 @@ local msg_deleted            = lang.msg_deleted            or "%s removed client
 local msg_list_header        = lang.msg_list_header        or "\n=== CLIENT BLOCKER ==="
 local msg_list_footer        = lang.msg_list_footer        or "=== END ===\n"
 local msg_list_empty         = lang.msg_list_empty         or "(no patterns configured)"
-local msg_err                = lang.msg_err                or "etc_clientblocker.lua: error: database file (scripts/data/etc_clientblocker.tbl) corrupt or missing, a new one was created."
 local msg_report             = lang.msg_report             or "[ CLIENT BLOCKER ]--> The user %s with IP %s is running %s and is not allowed in this hub. Matching pattern: %s"
 
 

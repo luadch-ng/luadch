@@ -54,7 +54,6 @@ local ucmd_menu_ct1 = lang.ucmd_menu_ct1 or { "About You", "show Client INF" }
 local ucmd_menu_ct2 = lang.ucmd_menu_ct2 or { "Show", "Client INF" }
 
 local msg_denied = lang.msg_denied or "You are not allowed to use this command."
-local msg_unknown = lang.msg_unknown or "unknown"
 local msg_inf = lang.msg_inf or [[
 
 

@@ -116,7 +116,8 @@ dependency updates are manual.
 hub/hub.c           ── luaL_newstate(), register C functions, load core/init.lua
   └─ core/init.lua  ── restricted env, load libs + _core modules in order
        └─ core/hub.lua          ── hub.loop() — main event loop
-            ├─ core/server.lua  ── select() loop over sockets, SSL wrap
+            ├─ core/server.lua  ── event loop over sockets (poll on POSIX,
+            │                      select on Windows - #310), SSL wrap
             └─ core/hub_dispatch.lua ── per-command ADC dispatch (most
                                         listener events fire from here)
 ```
@@ -130,17 +131,33 @@ order (its inline comments explain each ordering constraint).
 | Subsystem | Modules | Responsibility |
 |---|---|---|
 | Boot + config | `init`, `const`, `cfg`, `cfg_defaults`, `cfg_users`, `cfg_lang`, `cfg_secret`, `secrets` | Restricted env + module loader; program constants; settings/user.tbl/language handling; AES-256-GCM at-rest crypto; env-var-first secret lookup |
-| Network + ADC | `server`, `iostream`, `adc`, `hub`, `hub_dispatch`, `hub_user_object`, `hub_bot_object`, `hbri`, `ratelimit`, `blocklist`, `whitelist`, `ipmatch` | select() loop + SSL; framing pipeline; ADC parse/escape/format; main loop + login; command dispatch; user/bot objects; dual-stack secondary-IP verification; DoS limits; pre-handshake IP/CIDR blocklist; global allowlist (whitelist beats automated blocks, not manual pins); IP/CIDR primitives |
+| Network + ADC | `server`, `iostream`, `adc`, `hub`, `hub_dispatch`, `hub_user_object`, `hub_bot_object`, `hbri`, `ratelimit`, `blocklist`, `whitelist`, `ipmatch` | event loop + SSL (poll on POSIX / select on Windows, #310); framing pipeline; ADC parse/escape/format; main loop + login; command dispatch; user/bot objects; dual-stack secondary-IP verification; DoS limits; pre-handshake IP/CIDR blocklist; global allowlist (whitelist beats automated blocks, not manual pins); IP/CIDR primitives |
 | HTTP API | `http`, `http_router`, `http_client`, `http_filter`, `http_events`, `util_http` | Inbound HTTP/JSON API + router + auth; non-blocking OUTBOUND client; filter/sort/paginate helper; deferred-event endpoints; plugin endpoint helper |
 | Crypto + boot trust | `sha256`, `hmac`, `cert_bootstrap`, `cacert_bootstrap` | Pure-Lua SHA-256; HMAC-SHA256 (RFC 2104, sandbox-exposed for signed-webhook auth, #398); first-boot TLS-cert auto-gen (#77); CA-bundle reconciliation |
-| Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `geoip_update`, `bloom`, `ensuredirs`, `doc` (disabled), `hci` (stub) | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader + in-hub GeoLite2 auto-update; bloom filter; boot-time runtime-dir self-heal; dormant |
+| Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `geoip_update`, `bloom`, `ensuredirs` | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader + in-hub GeoLite2 auto-update; bloom filter; boot-time runtime-dir self-heal |
+
+**`core/hci.lua` is not a module** - it is a persisted data file (a plain
+`hubruntime` / `hubruntime_last_check` table) read and rewritten via
+`util.loadtable` / `util.savetable` by `hub_runtime` (60s `onTimer`),
+`cmd_uptime` and `cmd_hubinfo`, and it backs `/v1/runtime`. Its absence from
+`_core` is correct - do not "fix" it by adding it. It is however the one piece
+of mutable plugin state living under `core/` instead of `scripts/data/`,
+contra §7 - and because `core/` is shipped wholesale (`install(DIRECTORY
+core/)`, and Docker bakes it into the image rather than mounting it), every
+upgrade overwrites the operator's accumulated runtime with the pristine
+zeros: [#445](https://github.com/luadch-ng/luadch/issues/445). Not a dead
+file - a misplaced one.
 
 Two hard ceilings (both enforced by review, not tooling):
 
 - **1500 lines per code module** (Phase 6). If a module needs more, split it.
-- **`core/hub.lua` main chunk is AT Lua's 200-locals cap.** Any new top-level
-  `local` fails the build. Use lazy `use "X"` at call sites instead; treat
-  hub.lua file-scope locals as frozen.
+- **`core/hub.lua`'s main chunk runs close to Lua's 200-locals-per-chunk cap.**
+  File-scope locals there are scarce - the file has hit the wall before (Phase 8
+  S4b + S5, #301). Prefer a lazy `use "X"` at the call site, or pack related
+  values into one table, before spending a slot. Measure the headroom rather than
+  trusting a number written down here: `luac -p -l core/hub.lua` prints the main
+  chunk's `N locals` in its header (plain `-p` only speaks up once you are
+  already over).
 
 ### Plugin / hook model
 
@@ -255,20 +272,31 @@ cross-host to a signed CDN URL), boot-time runtime-dir self-heal
 plus Sopor-reported fixes (v3.1.13 ratelimit hub-crash #401, `usr_uptime`
 undercount #405, BLOM smoke de-flake #408; **v3.1.14** Windows `FD_SETSIZE`
 64->1024 hub-crash #416, Sopor - the Windows luasocket build inherited the
-Winsock-default 64-socket `select()` cap, `>1024` needs the `select`->`poll`
-port #310). Shipped to master 2026-07-13 (#419/#420/#423 all closed): the
+Winsock-default 64-socket `select()` cap; the Linux `>1024` sibling of that
+crash was the `select`->`poll` port, done in #310/#436). Shipped to master
+2026-07-13 (#419/#420/#423 all closed): the
 ADC parser now discards messages with unknown escape sequences per ADC 3.1
 (#419) + hub-bot INF `EM` escaping (#423), and an `etc_webhook` body-field
 `conditions` filter (#420 - fixed a live double-announce by filtering on a
 JSON body field like a GitHub release `action=released` or a Discourse
-opening post, not just the event header). On `dev` (PR #432):
-`core/sysinfo.lua` falls back `Get-CimInstance` -> `Get-WmiObject` so
-old-Windows hubowners (Server 2008 R2 / Win7 = PowerShell 2.0, which has
-no `Get-CimInstance`) get real `+hubinfo` OS/CPU/RAM instead of
+opening post, not just the event header).
+
+**On `dev`, pending testhub validation then a dev->master MERGE** (exact
+delta: `git log --oneline origin/master..origin/dev` - do not trust a list
+written here): the `select`->`poll` event-loop port (#310 / PR #436) which
+removes the ~1024 concurrent-socket ceiling on POSIX and leaves Windows on
+`select`; `core/sysinfo.lua`'s `Get-CimInstance` -> `Get-WmiObject` fallback
+(#432) so old-Windows hubowners (Server 2008 R2 / Win7 = PowerShell 2.0,
+which has no `Get-CimInstance`) get real `+hubinfo` OS/CPU/RAM instead of
 `<UNKNOWN>` (Sopor; the pre-refactor 3.1.x plugin also CRASHED on the
-nil-concat - shipped a v0.30 `cmd_hubinfo` drop-in per §8). Many
-hubowners run ancient Windows (the UCRT release build also needs
-KB2999226 there - the Universal C Runtime). A
+nil-concat - shipped a v0.30 `cmd_hubinfo` drop-in per §8); a `release.yml`
+zlib-dev fix (#441 - `find_package(ZLIB REQUIRED)` is unconditional but no
+release leg installed the dev package, so the first `v3.2.0` tag would have
+failed the aarch64 build at configure); a repo-wide plugin lang-key guard
+(#442); `CONTRIBUTING.md` documenting the dev-branch policy (#440); and
+three external cleanups from @Kcchouette (#437/#438/#439). Many hubowners
+run ancient Windows (the UCRT release build also needs KB2999226 there -
+the Universal C Runtime). A
 recurring pattern this era:
 a **periodic-fetch plugin must persist its next-fetch deadline across
 `+reload`**, or every reload re-hits a rate-limited provider - fixed twice

@@ -62,9 +62,24 @@ message(STATUS "luadch: OpenSSL ${OPENSSL_VERSION} at ${OPENSSL_INCLUDE_DIR}")
 # -----------------------------------------------------------------------------
 # zlib: Phase 8 S4b (ADC-EXT ZLIF stream compression). Used by the
 # zlib_stream C module that wraps deflate / inflate streams with the
-# Z_SYNC_FLUSH semantic ADC mandates. System zlib on Linux + MinGW
-# (Ubuntu CI installs zlib1g-dev). aarch64 Bullseye container has zlib
-# as a base-system package - no change needed.
+# Z_SYNC_FLUSH semantic ADC mandates. This is the one dependency that is
+# NOT bundled - it must come from the build environment.
+#
+# EVERY build path must install the zlib DEVELOPMENT package explicitly;
+# there is no environment where it can be assumed present. The runtime
+# library (libz.so.1) is on virtually every Linux box because half of
+# userspace links it, but the headers and the libz.so link ship only in
+# zlib1g-dev, and build-essential does NOT depend on it - so this
+# find_package fails on an otherwise complete toolchain. An earlier
+# version of this comment claimed the aarch64 Bullseye container had zlib
+# "as a base-system package - no change needed"; that was wrong and left
+# all three release.yml legs without it (never noticed, because the
+# release workflow only fires on v* tags and the 3.1.x line predates
+# zlib_stream). Install sites, keep in sync:
+#   .github/workflows/release.yml  - zlib1g-dev (x2), mingw-w64-ucrt-x86_64-zlib
+#   .github/workflows/smoke.yml    - zlib1g-dev, mingw-w64-ucrt-x86_64-zlib
+#   docker/Dockerfile              - zlib-dev (alpine)
+# Building from source? See docs/BUILDING.md.
 # -----------------------------------------------------------------------------
 find_package(ZLIB REQUIRED)
 message(STATUS "luadch: ZLIB ${ZLIB_VERSION_STRING} at ${ZLIB_INCLUDE_DIRS}")

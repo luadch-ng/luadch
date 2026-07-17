@@ -1,6 +1,5 @@
 ﻿return {
 
-    msg_denied = "Du bist nicht befugt diesen Befehl zu nutzen.",
     msg_usage = "Gebrauch: [+!#]userinfo sid|nick <SID>|<NICK>",
     msg_off = "User nicht gefunden.",
     msg_god = "Du bist nicht befugt die Userinfo dieses Users abzufragen",

@@ -23,7 +23,6 @@ return {
     msg_bad_cidr      = "Invalid CIDR / IP: %s",
     msg_bad_expires   = "Invalid expires date '%s'. Expected YYYY-MM-DD.",
     msg_added         = "%s added whitelist entry #%d (%s, source=%s).",
-    msg_add_failed    = "whitelist.add failed: %s",
     msg_save_failed   = "Failed to persist whitelist: %s",
     msg_removed       = "%s removed whitelist entry #%d (%s, source=%s).",
     msg_remove_failed = "whitelist.del failed: %s",
@@ -37,9 +36,7 @@ return {
     msg_count         = "whitelist: %d entries total",
     msg_no_dkjson     = "JSONL export/import requires dkjson, which is not available.",
     msg_export_ok     = "%s exported %d whitelist entries to %s.",
-    msg_export_fail   = "whitelist.export failed: %s",
     msg_import_ok     = "%s imported %d entries from %s (%d skipped, %d errors).",
-    msg_import_fail   = "whitelist.import failed: %s",
     msg_unsafe_path   = "Path '%s' is unsafe: %s",
     msg_import_level  = "Import requires level %d or higher (you are %d).",
 

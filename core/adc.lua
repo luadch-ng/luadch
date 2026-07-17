@@ -42,9 +42,7 @@ local tostring = use "tostring"
 --// lua libs //--
 
 local os = use "os"
-local math = use "math"
 local table = use "table"
-local debug = use "debug"
 local string = use "string"
 
 --// lua lib methods //--
@@ -56,10 +54,8 @@ local string_sub = string.sub
 local string_gsub = string.gsub
 local string_find = string.find
 local string_match = string.match
-local table_insert = table.insert
 local table_concat = table.concat
 local table_remove = table.remove
-local debug_traceback = debug.traceback
 
 --// extern libs //--
 
@@ -79,7 +75,6 @@ local string_byte = string.byte
 --// core scripts //--
 
 local out = use "out"
-local mem = use "mem"
 local types = use "types"
 
 --// core methods //--
@@ -140,7 +135,6 @@ local _sup
 local _sta
 local _bool
 local _onetwo
-local _integer
 local _feature
 
 local _contextsend
@@ -159,7 +153,6 @@ _sid = "^" .. string.rep( "[A-Z2-7]", 4 ) .. "$"
 _sup = "^" .. string.rep( "[A-Z]", 3 ) .. "[A-Z0-9]$"
 _bool = "^[1]?$"
 _onetwo = "^[12]?$"
-_integer = "^%d*$"
 _feature = "[%+%-][A-Z]" .. string.rep( "[A-Z0-9]", 3 )
 
 _regex = {
@@ -168,9 +161,6 @@ _regex = {
         return string_match( str, _th )
     end,
     sid = function( str )
-        return string_match( str, _sid )
-    end,
-    bool = function( str )
         return string_match( str, _sid )
     end,
     bool = function( str )
@@ -353,8 +343,9 @@ _protocol = {
                 FM = _regex.default,
                 FB = _regex.default,
                 --// ASCH - Extended searching capability //--  http://adc.sourceforge.net/ADC-EXT.html#_asch_extended_searching_capability
-                FC = _regex.default,
-                TO = _regex.default,
+                -- ASCH also uses FC and TO; both are already declared
+                -- above in this same STA np table, so they are not
+                -- repeated here.
                 RC = _regex.default,
 
 

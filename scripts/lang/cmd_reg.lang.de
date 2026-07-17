@@ -1,7 +1,6 @@
 return {
 
     msg_denied = "Du bist nicht befugt diesen Befehl zu nutzen.",
-    msg_import = "Fehler beim Importieren eines Moduls",
     msg_report = "[ REG ]--> User: %s  |  hat folgenden User registriert: %s  |  Level: %d [ %s ]  |  Kommentar: %s",
     msg_nocomment = "kein Kommentar angegeben",
     msg_level = "Du bist nicht befugt einen User dieses Levels zu registrieren.",
@@ -36,7 +35,6 @@ return {
     ucmd_menu_ct1_2 = "Control",
     ucmd_menu_ct1_3 = "Reggen",
     ucmd_menu_ct2 = { "Reggen", "OK" },
-    ucmd_passwort = "Passwort:",
     ucmd_level = "Level:",
     ucmd_nick = "Nick:",
     ucmd_desc = "Beschreibung (optional):",

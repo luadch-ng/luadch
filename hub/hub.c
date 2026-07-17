@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/file.h>   /* flock */
+#include <sys/resource.h>   /* getrlimit / setrlimit RLIMIT_NOFILE */
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
@@ -229,6 +230,71 @@ static int makedir(lua_State *L)
   return 1;
 }
 
+/* Resulting soft RLIMIT_NOFILE after raise_fd_limit(): the practical
+ * concurrent-socket ceiling on the POSIX poll backend. 0 = unknown (Windows,
+ * or getrlimit failed), -1 = unlimited (RLIM_INFINITY), else the fd count.
+ * Exposed to Lua via getfdlimit() for the hub boot log. */
+static long g_fd_limit = 0;
+
+/* Raise the open-file-descriptor soft limit to the hard limit at boot.
+ *
+ * The POSIX poll() event-loop backend (luasocket/src/select.c, #310) can watch
+ * as many sockets as the process may open, so the concurrent-connection
+ * ceiling is RLIMIT_NOFILE, not FD_SETSIZE. Distros default the SOFT limit to
+ * 1024 while the HARD limit is far higher; raising soft->hard needs no
+ * privilege and lifts the ceiling with zero operator action, right where the
+ * poll port removed the old 1024 select cap - otherwise `ulimit -n = 1024`
+ * would silently become the new cap. Going beyond the hard limit still needs
+ * the OS (ulimit -Hn as root / systemd LimitNOFILE / Docker --ulimit nofile).
+ * No-op on Windows: the select backend is FD_SETSIZE-bound (1024, #416), not
+ * fd-limit-bound. Best-effort: a probe/set failure warns and leaves the limit
+ * at the OS default rather than aborting the hub. */
+static void raise_fd_limit(void)
+{
+#ifdef __unix__
+  struct rlimit rl;
+  if (getrlimit(RLIMIT_NOFILE, &rl) != 0)
+  {
+    fprintf(stderr, "warning: getrlimit(RLIMIT_NOFILE) failed (%s); "
+                    "file-descriptor limit left at the OS default\n",
+                    strerror(errno));
+    fflush(stderr);
+    return;
+  }
+  if (rl.rlim_cur < rl.rlim_max)
+  {
+    rl.rlim_cur = rl.rlim_max;
+    if (setrlimit(RLIMIT_NOFILE, &rl) != 0)
+    {
+      fprintf(stderr, "warning: setrlimit(RLIMIT_NOFILE) failed (%s); "
+                      "concurrent-socket ceiling stays at the soft limit\n",
+                      strerror(errno));
+      fflush(stderr);
+    }
+  }
+  /* Re-read ground truth: the soft limit may or may not have moved. */
+  if (getrlimit(RLIMIT_NOFILE, &rl) == 0)
+  {
+    g_fd_limit = (rl.rlim_cur == RLIM_INFINITY) ? -1 : (long)rl.rlim_cur;
+  }
+#endif
+}
+
+/*
+ * getfdlimit() -> integer
+ *
+ * The concurrent-socket ceiling established by raise_fd_limit(): the soft
+ * RLIMIT_NOFILE on POSIX (-1 = unlimited), or 0 when unknown (Windows, or the
+ * probe failed). Read once by the hub boot log so operators see the real
+ * limit the poll backend gives them. Set before the first run_lua and static,
+ * so it survives +reload (run_lua re-entry) unchanged.
+ */
+static int getfdlimit(lua_State *L)
+{
+  lua_pushinteger(L, (lua_Integer)g_fd_limit);
+  return 1;
+}
+
 static void run_lua(void);
 
 static int restart(lua_State *L)
@@ -272,6 +338,7 @@ static void run_lua(void)
   lua_register(L, "doexit", doexit);
   lua_register(L, "requestexit", requestexit);
   lua_register(L, "makedir", makedir);
+  lua_register(L, "getfdlimit", getfdlimit);
   int err = luaL_loadfile(L, "core/init.lua") || lua_pcall(L, 0, 0, 0);
   if (err)
   {
@@ -505,6 +572,11 @@ int main(int argc, char **argv)
               "directory; refusing to start.");
     return EXIT_FAILURE;
   }
+  // Lift the fd soft limit to the hard limit so the POSIX poll() event loop
+  // (#310) is not silently re-capped at the default ulimit -n. Inherited
+  // across the daemonize() fork, so raising it here (once, in the parent) is
+  // enough. No-op on Windows.
+  raise_fd_limit();
   daemonize();
   write_lock_pid();
   run_lua();

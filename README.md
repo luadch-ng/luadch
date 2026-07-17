@@ -24,6 +24,10 @@ The 3.1.x line concludes the modernisation programme (Phases 1-7 +
 ADC-coverage closure). The active 3.2.x line picks up the Phase 8
 feature work.
 
+**Contributing?** New work is staged on the `dev` branch before it is
+promoted to `master`, so pull requests go against **`dev`** - see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Original Features
 
 - TLS 1.3 with AES-128 / AES-256 cipher suites
@@ -65,6 +69,11 @@ and operator guidance.
   TLS-only deployments, troubleshooting
 - **[docs/PLUGIN_API.md](docs/PLUGIN_API.md)** - plugin scripting API
   reference (listeners, modules, objects, conventions, pitfalls)
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - which branch to target, what a
+  PR needs, how to report a bug
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - engineering how-to:
+  authoring core modules, plugin conventions, testing, security
+  checklists, Definition of Done
 
 ## Quick start
 

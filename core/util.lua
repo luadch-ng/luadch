@@ -87,7 +87,6 @@ local ipairs = use "ipairs"
 local tostring = use "tostring"
 local tonumber = use "tonumber"
 local loadfile = use "loadfile"
-local setmetatable = use "setmetatable"
 
 --// lua libs //--
 
@@ -101,7 +100,6 @@ local package = use "package"
 
 local io_open = io.open
 local os_time = os.time
-local os_date = os.date
 local os_difftime = os.difftime
 local os_rename = os.rename
 local os_remove = os.remove
@@ -127,17 +125,14 @@ local isutf8 = adclib.isutf8
 local adclib_random_bytes = adclib.random_bytes
 local ascii_sub = unicode.ascii.sub
 local utf_format = unicode.utf8.format
-local ascii_gsub = unicode.ascii.gsub
 
 --// core scripts //--
 
 local out
 
-local mem = use "mem"
 
 --// core methods //--
 
-local out_put
 local out_error
 
 --// constants //--
@@ -201,7 +196,6 @@ end
 
 init = function( )
     out = use "out"
-    out_put = out.put
     out_error = out.error
 end
 
@@ -635,10 +629,6 @@ formatseconds = function( t, hubstart )
         err = "util.lua: error: number expected, got nil"
         return nil, err
     end
-    if not type( t ) == "number" then
-        err = "util.lua: error: number expected, got " .. type( t )
-        return nil, err
-    end
     if ( t < 0 ) or ( t == 1 / 0 ) then
         err = "util.lua: error: parameter not valid"
         return nil, err
@@ -663,13 +653,8 @@ end
 formatbytes = function( bytes )
     local err
     local bytes = tonumber( bytes )
-    --if ( not bytes ) or ( not type( bytes ) == "number" ) or ( bytes < 0 ) or ( bytes == 1 / 0 ) then
     if not bytes then
         err = "util.lua: error: number expected, got nil"
-        return nil, err
-    end
-    if not type( bytes ) == "number" then
-        err = "util.lua: error: number expected, got " .. type( bytes )
         return nil, err
     end
     if ( bytes < 0 ) or ( bytes == 1 / 0 ) then
@@ -740,14 +725,6 @@ difftime = function( t1, t2 )
         err = "util.lua: error in param #2: got nil"
         return nil, err
     end
-    if type( t1 ) ~= "number" then
-        err = "util.lua: error in param #1: number expected, got " .. type( t1 )
-        return nil, err
-    end
-    if type( t2 ) ~= "number" then
-        err = "util.lua: error in param #2: number expected, got " .. type( t2 )
-        return nil, err
-    end
     local t1, t2 = tostring( t1 ), tostring( t2 )
     local y1, m1, d1, h1, M1, s1
     local y2, m2, d2, h2, M2, s2
@@ -797,12 +774,7 @@ end
 
 --// trim whitespaces from both ends of a string
 trimstring = function( str )
-    local err
     local str = tostring( str )
-    if type( str ) ~= "string" then
-        err = "util.lua: error: string expected, got " .. type( str )
-        return nil, err
-    end
     return string_find( str, "^%s*$" ) and "" or string_match( str, "^%s*(.*%S)" )
 end
 
@@ -898,57 +870,47 @@ end
 do
     local Key53 = 1529434767825498 -- 67bit
     local Key14 = 4887
-    local inv256, err
+    local inv256
     --// encode
     encode = function( str )
         local str = tostring( str )
-        if str then
-            if not inv256 then
-                inv256 = {}
-                for M = 0, 127 do
-                    local inv = -1
-                    repeat inv = inv + 2
-                    until inv * ( 2*M + 1 ) % 256 == 1
-                    inv256[ M ] = inv
-                end
+        if not inv256 then
+            inv256 = {}
+            for M = 0, 127 do
+                local inv = -1
+                repeat inv = inv + 2
+                until inv * ( 2*M + 1 ) % 256 == 1
+                inv256[ M ] = inv
             end
-            local K, F = Key53, 16384 + Key14
-            return ( str:gsub( '.',
-                function( m )
-                    local L = K % 274877906944  -- 2^38
-                    local H = ( K - L ) / 274877906944
-                    local M = H % 128
-                    m = m:byte()
-                    local c = ( m * inv256[ M ] - ( H - M ) / 128 ) % 256
-                    K = L * F + H + c + m
-                    return ( '%02x' ):format( c )
-                end
-            ) )
-        else
-            err = "util.lua: error in encode function: string expected, got " .. type( tbl )
-            return nil, err
         end
+        local K, F = Key53, 16384 + Key14
+        return ( str:gsub( '.',
+            function( m )
+                local L = K % 274877906944  -- 2^38
+                local H = ( K - L ) / 274877906944
+                local M = H % 128
+                m = m:byte()
+                local c = ( m * inv256[ M ] - ( H - M ) / 128 ) % 256
+                K = L * F + H + c + m
+                return ( '%02x' ):format( c )
+            end
+        ) )
     end
     --// decode
     decode = function( str )
         local str = tostring( str )
-        if str then
-            local K, F = Key53, 16384 + Key14
-            return ( str:gsub( '%x%x',
-                function( c )
-                    local L = K % 274877906944
-                    local H = ( K - L ) / 274877906944
-                    local M = H % 128
-                    c = tonumber( c, 16 )
-                    local m = ( c + ( H - M ) / 128 ) * ( 2*M + 1 ) % 256
-                    K = L * F + H + c + m
-                    return string.char( m )
-                end
-            ))
-        else
-            err = "util.lua: error in decode function: string expected, got " .. type( tbl )
-            return nil, err
-        end
+        local K, F = Key53, 16384 + Key14
+        return ( str:gsub( '%x%x',
+            function( c )
+                local L = K % 274877906944
+                local H = ( K - L ) / 274877906944
+                local M = H % 128
+                c = tonumber( c, 16 )
+                local m = ( c + ( H - M ) / 128 ) * ( 2*M + 1 ) % 256
+                K = L * F + H + c + m
+                return string.char( m )
+            end
+        ))
     end
 end
 

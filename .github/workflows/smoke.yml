@@ -46,6 +46,9 @@ jobs:
       - name: Run bloom unit test
         run: lua5.4 tests/unit/bloom_test.lua
 
+      - name: Run sysinfo unit test
+        run: lua5.4 tests/unit/sysinfo_test.lua
+
       # Phase 1b of #82 HTTP API: router unit tests cover the pure-Lua
       # bits (constant_time_eq, schema validator, envelope helpers,
       # token resolution, request-id shape, register guards).
@@ -112,13 +115,18 @@ jobs:
       - name: Run lang unit test
         run: lua5.4 tests/unit/lang_test.lua
 
-      # #301 PR-2: usr_share lang-key consistency. Scans the plugin
-      # source for every lang.X reference and asserts X is defined in
-      # both .lang.de and .lang.en. Catches typos like the pre-fix
-      # lang.msg_minmax / msg_sharelimits drift that silently dropped
-      # the German translation.
-      - name: Run usr_share lang unit test
-        run: lua5.4 tests/unit/usr_share_lang_test.lua
+      # Repo-wide plugin lang-key consistency. For every bundled plugin
+      # that ships lang files, scans the source for each lang.X reference
+      # and asserts X is defined in both .lang.de and .lang.en. Catches
+      # the drift class that silently kills a translation: the lookup
+      # returns nil, the `or "<english>"` fallback fires, and no error is
+      # ever raised. Supersedes the former usr_share-only test (#301 PR-2,
+      # lang.msg_minmax vs msg_sharelimits) - usr_share is one of the ~68
+      # plugins swept here, so coverage is a strict superset. Generalised
+      # after the same bug reappeared in etc_cmdlog (lang.failmsg1/2 vs
+      # msg_denied/msg_nofile), which the one-plugin test could not see.
+      - name: Run plugin lang unit test
+        run: lua5.4 tests/unit/plugin_lang_test.lua
 
       # #327 etc_aliases: HTTP API surface + reload-safety. Exercises
       # all four +addalias reject branches (bad_alias / conflict_command
@@ -366,6 +374,10 @@ jobs:
         shell: msys2 {0}
         run: lua5.4 tests/unit/bloom_test.lua
 
+      - name: Run sysinfo unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/sysinfo_test.lua
+
       - name: Run http_router unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/http_router_test.lua
@@ -406,9 +418,9 @@ jobs:
         shell: msys2 {0}
         run: lua5.4 tests/unit/lang_test.lua
 
-      - name: Run usr_share lang unit test
+      - name: Run plugin lang unit test
         shell: msys2 {0}
-        run: lua5.4 tests/unit/usr_share_lang_test.lua
+        run: lua5.4 tests/unit/plugin_lang_test.lua
 
       - name: Run etc_aliases unit test
         shell: msys2 {0}

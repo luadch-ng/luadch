@@ -65,7 +65,6 @@ local adclib_createsalt = adclib.createsalt
 local adclib_escape = adclib.escape
 local adclib_hash = adclib.hash
 local adclib_hashpas = adclib.hashpas
-local iostream_newinflatestage = iostream.newinflatestage
 local iostream_newdeflatestage = iostream.newdeflatestage
 local iostream_newcountedstage = iostream.newcountedstage
 local adclib_hasholdpas = adclib.hasholdpas

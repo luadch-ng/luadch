@@ -177,7 +177,7 @@ Tracked separately:
 
 - [#12](https://github.com/Aybook/luadch/issues/12) **closed** by 6b path anchoring
 - [#48](https://github.com/Aybook/luadch/issues/48) **open** - Phase 8+ candidate list (multi-hash schema, getbot enumeration, removeListener counterpart, usr_nick_length codepoint fix, usr_nick_prefix onInf, i18n gaps, plus the §4.3 pre-existing 100-line functions)
-- `core/doc.lua` (308 lines) is "currently disabled" per CLAUDE.md §3 but still imported by `server.lua` and `util.lua` (unused dead imports). Cleanup is mechanical but out of Phase 6 scope; could roll into a future tidy. **Fixed 2026-05-23**: dead `local doc = use "doc"` lines removed from both modules in housekeeping PR; `core/doc.lua` retained on disk for potential future re-enable but no longer loaded.
+- `core/doc.lua` (308 lines) is "currently disabled" per CLAUDE.md §3 but still imported by `server.lua` and `util.lua` (unused dead imports). Cleanup is mechanical but out of Phase 6 scope; could roll into a future tidy. **Fixed 2026-05-23**: dead `local doc = use "doc"` lines removed from both modules in housekeeping PR; `core/doc.lua` retained on disk for potential future re-enable but no longer loaded. **Superseded 2026-07-16** (#447 PR 2): `core/doc.lua` removed entirely. The re-enable premise did not survive reading the file - its whole 19-entry payload is itself inside a `--[[ ]]` block (so a re-enable would emit an empty document), and it describes an API that no longer exists (`util.save`/`util.load`, `server.wrapsslclient`/`wraptcpclient`, `server.loop`). `docs/PLUGIN_API.md` supersedes it.
 
 ---
 

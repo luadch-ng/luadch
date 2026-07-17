@@ -6816,6 +6816,104 @@ def test_aliases_adc_dispatch():
             raise TestFailure(f"+delalias did not confirm removal: {reply!r}")
 
 
+def test_cmd_ban_rejects_bad_time():
+    """cmd_ban v0.43: `+ban nick X <time>` must reject a time below 1.
+
+    Pre-fix, the only time validation was `is_integer( time )`, which
+    accepts negatives (-5 == math.floor(-5)). So `+ban nick X -5 reason`
+    stored bantime = -300; at the target's next login the expiry check
+    computed an always-negative remaining, PRUNED the entry and let them
+    straight back in - the target was kicked once while the operator
+    believed X was banned. Meanwhile help_desc and both lang files
+    promised "negative values means ban forever", a feature removed in
+    v0.15. The HTTP path has enforced min = 1 since #82; this closes the
+    divergence between the two entry points.
+
+    The new guard sits next to the is_integer check, which runs BEFORE
+    the target is resolved - so a nonexistent target exercises it and no
+    second client is needed:
+
+      pre-fix : falls through to the lookup -> "User not found."
+      post-fix: -> "Bantime must be 1 minute or greater."
+
+    Asserting on the msg_badtime phrase therefore provably fails pre-fix
+    (CLAUDE.md §1a.7). Step 3 is a positive control: a VALID time on the
+    same nonexistent target must still reach the lookup and answer "User
+    not found." - proving the guard rejects only bad input rather than
+    swallowing every +ban.
+
+    dummy is level 100 (hubowner); cmd_ban_permission gives minlevel 60,
+    so the command is reachable.
+    """
+    # Collect frames until the hub goes quiet, then assert over the whole
+    # batch. A single recv_until(predicate) is not usable here: dummy's
+    # login triggers a very long ICMD storm (~300 right-click
+    # registrations across the bundled plugins), and a 5s predicate scan
+    # can expire while still wading through it - which looks exactly like
+    # "the hub never replied". Collecting also yields a far better failure
+    # message, since we can show what did arrive.
+    def _collect(reader, seconds=4.0):
+        frames = []
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            try:
+                frames.append(reader.recv_until(lambda x: True, timeout=0.5))
+            except TestFailure:
+                break
+        return frames
+
+    def _chat_text(frames):
+        return " || ".join(
+            f for f in frames
+            if f.startswith(("EMSG ", "DMSG ", "BMSG "))
+        )
+
+    # A nick that is neither online nor registered, so the target lookup
+    # cannot succeed and nothing is ever actually banned by this test.
+    target = "smoke_no_such_user_9f2a"
+
+    with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+        _collect(reader, 5.0)  # let the post-login ICMD storm drain
+
+        # Multi-word BMSG bodies must ADC-escape spaces as `\s`; raw
+        # spaces would terminate the body and the rest would be parsed
+        # as ADC flags. Replies come back escaped the same way, so assert
+        # on single words rather than whole sentences.
+        for bad_time in ("-5", "0"):
+            sock.sendall(f"BMSG {sid} +ban\\snick\\s{target}\\s{bad_time}\\sspam\n".encode("utf-8"))
+            got = _chat_text(_collect(reader))
+            if "Bantime" not in got:
+                raise TestFailure(
+                    f"+ban with time={bad_time} was not rejected with the bantime "
+                    f"message. Pre-fix, is_integer() accepts negatives so this fell "
+                    f"through to the target lookup and answered 'User not found.' "
+                    f"Chat frames seen: {got[:400]!r}"
+                )
+            if "not\\sfound" in got:
+                raise TestFailure(
+                    f"+ban with time={bad_time} reached the target lookup - the "
+                    f"guard must reject before resolving a target: {got[:400]!r}"
+                )
+
+        # Positive control: a valid time must NOT be caught by the guard.
+        # It has to reach the target lookup and report the unknown nick -
+        # otherwise the guard would be silently rejecting every +ban and
+        # the assertions above would pass for the wrong reason.
+        sock.sendall(f"BMSG {sid} +ban\\snick\\s{target}\\s5\\sspam\n".encode("utf-8"))
+        got = _chat_text(_collect(reader))
+        if "not\\sfound" not in got:
+            raise TestFailure(
+                f"+ban with a valid time=5 did not reach the target lookup - the "
+                f"bantime guard is over-rejecting: {got[:400]!r}"
+            )
+        if "Bantime" in got:
+            raise TestFailure(
+                f"+ban with a valid time=5 was rejected by the bantime guard: "
+                f"{got[:400]!r}"
+            )
+
+
 def test_blocklist_78_phase_b():
     """#78 Phase B etc_blocklist `+blocklist` admin CLI smoke.
 
@@ -12326,24 +12424,29 @@ def test_no_script_errors(log_path: Path, error_log_path: Path = None):
         )
 
 
-def test_select_capacity_logged(staging_dir: Path):
-    """Regression guard for #416 (Windows FD_SETSIZE=64 hub crash).
+def test_event_loop_backend_logged(staging_dir: Path):
+    """Regression guard for the event-loop backend and its socket ceiling.
 
-    The event loop selects over every connected socket at once; on Windows
-    luasocket's select.c raises "too many sockets" at n >= FD_SETSIZE, and
-    the bundled build inherited the Winsock default of 64 - so the hub
-    crashed once it held ~64 sockets. The luasocket Windows build now defines
-    FD_SETSIZE=1024 (parity with Linux glibc).
+    hub.loop() logs one boot line naming the luasocket event-loop backend and
+    the ceiling on how many sockets the single event loop can watch. The line
+    (and the assertion) differ by platform:
 
-    hub.loop() logs the compile-time capacity (socket._SETSIZE, the exact
-    macro the guard checks) once at boot via out.put; assert it is >= 1024.
-    This proves the compile define reached the shipped socket module. Fails
-    pre-fix on the Windows leg (logs 64); the Linux leg already reports 1024.
-    It goes through the real hub because a standalone `require('socket')`
-    under msys2 lua hits the bundled-liblua ABI clash (see smoke.yml). Read
-    from event.log (out.put's target, persisted open-append-close per line;
-    the harness sets log_events=true) - not smoke-hub.log, whose stdout is
-    block-buffered and lost when the hub is terminated at teardown."""
+      - POSIX poll backend (#310): "event loop backend: poll (socket ceiling
+        ...)". poll() takes a variable-length pollfd array, so there is NO
+        fixed FD_SETSIZE cap; the ceiling is the process fd limit (hub/hub.c
+        raises RLIMIT_NOFILE at boot). This test REQUIRES the poll line on the
+        Linux leg, which fails pre-fix: the old select.c backend logged the
+        "select() capacity (FD_SETSIZE)" line instead and had no _EVENTBACKEND.
+      - Windows select backend (#416): "select() capacity (FD_SETSIZE): N
+        sockets". select.c raises "too many sockets" at n >= FD_SETSIZE; the
+        Winsock default 64 crashed the hub at ~64 sockets, so the Windows build
+        must define FD_SETSIZE=1024. Assert N >= 1024 (unchanged by #310).
+
+    Goes through the real hub because a standalone require('socket') under msys2
+    lua hits the bundled-liblua ABI clash (see smoke.yml). Reads event.log
+    (out.put's target, persisted open-append-close per line; the harness sets
+    log_events=true) - not smoke-hub.log, whose stdout is block-buffered and
+    lost when the hub is terminated at teardown."""
     log_path = staging_dir / "log" / "event.log"
     if not log_path.exists():
         raise TestFailure(
@@ -12351,19 +12454,27 @@ def test_select_capacity_logged(staging_dir: Path):
             f"enable log_events in the cfg.tbl override for this assertion"
         )
     text = log_path.read_text(encoding="utf-8", errors="replace")
-    m = re.search(r"select\(\) capacity \(FD_SETSIZE\): (\d+) sockets", text)
-    if not m:
-        raise TestFailure(
-            "event.log has no 'select() capacity (FD_SETSIZE): N sockets' "
-            "line - hub.loop() should log it once at startup"
-        )
-    cap = int(m.group(1))
-    if cap < 1024:
-        raise TestFailure(
-            f"select() FD_SETSIZE capacity is {cap}, expected >= 1024 - the "
-            f"Windows luasocket build must define FD_SETSIZE=1024; the default "
-            f"64 crashes the event loop at ~64 sockets (#416)"
-        )
+    if sys.platform.startswith("win"):
+        m = re.search(r"select\(\) capacity \(FD_SETSIZE\): (\d+) sockets", text)
+        if not m:
+            raise TestFailure(
+                "event.log has no 'select() capacity (FD_SETSIZE): N sockets' "
+                "line - the Windows select backend should log it once at startup"
+            )
+        cap = int(m.group(1))
+        if cap < 1024:
+            raise TestFailure(
+                f"select() FD_SETSIZE capacity is {cap}, expected >= 1024 - the "
+                f"Windows luasocket build must define FD_SETSIZE=1024; the default "
+                f"64 crashes the event loop at ~64 sockets (#416)"
+            )
+    else:
+        if not re.search(r"event loop backend: poll", text):
+            raise TestFailure(
+                "event.log has no 'event loop backend: poll' line - the POSIX "
+                "luasocket build must use the poll() event-loop backend (#310); "
+                "pre-fix it logged 'select() capacity (FD_SETSIZE)' instead"
+            )
 
 
 # -----------------------------------------------------------------------------
@@ -12378,6 +12489,7 @@ TESTS = [
     ("TLS ADC full login (dummy/test)", test_full_login_tls),
     ("+cmd routing (post-login +help)", test_command_routing),
     ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
+    ("cmd_ban rejects bantime < 1", test_cmd_ban_rejects_bad_time),
     ("blocklist admin CLI (#78 Phase B)", test_blocklist_78_phase_b),
     ("whitelist admin CLI + pinger seed (#78 allowlist Phase B)", test_whitelist_78_phase_b),
     ("blocklist feeds status (#78 Phase E)", test_blocklist_feeds_status),
@@ -12548,12 +12660,12 @@ def run_tests(staging_dir: Path):
         log("PASS  no script errors in log")
 
     try:
-        test_select_capacity_logged(staging_dir)
+        test_event_loop_backend_logged(staging_dir)
     except Exception as e:
-        log(f"FAIL  select() FD_SETSIZE capacity >= 1024 (#416): {e}")
-        failed.append("select() FD_SETSIZE capacity >= 1024 (#416)")
+        log(f"FAIL  event loop backend logged (#310/#416): {e}")
+        failed.append("event loop backend logged (#310/#416)")
     else:
-        log("PASS  select() FD_SETSIZE capacity >= 1024 (#416)")
+        log("PASS  event loop backend logged (#310/#416)")
 
     return failed
 

@@ -11,6 +11,21 @@
             - <time> and <reason> are optional
 
 
+        v0.43:
+            - fix: reject a <time> below 1 instead of silently losing the ban.
+              is_integer() accepts negatives (-5 == math.floor( -5 )), so
+              "+ban nick X -5 reason" stored bantime = -300; the login expiry
+              check then computed an always-negative remaining and PRUNED the
+              entry - the target was kicked once and walked straight back in
+              while the operator believed X was banned. help_desc + both lang
+              files promised "negative values means ban forever", a feature
+              removed back in v0.15 ("removed the ban forever crap"); the
+              promise is now gone and the parser rejects it (new "msg_badtime").
+              Matches the HTTP path, which has enforced min = 1 since #82.
+            - removed the commented-out ban-forever block: it referenced
+              "msg_forever", which no lang file defines, so it could not have
+              been re-enabled by uncommenting anyway
+
         v0.42:
             - fix #320: enforce hierarchy check on the offline-by-nick
               ban path. Pre-fix, the `permission[level] < target:level()`
@@ -222,7 +237,7 @@
 --------------
 
 local scriptname = "cmd_ban"
-local scriptversion = "0.42"
+local scriptversion = "0.43"
 
 local cmd = "ban"
 local cmd2 = "unban"
@@ -249,11 +264,11 @@ local permission2 = cfg.get( "cmd_unban_permission" )
 --// msgs - ban
 local help_title = lang.help_title or "cmd_ban.lua - Ban"
 local help_usage = lang.help_usage or "[+!#]ban nick|cid|ip <NICK>|<CID>|<IP> [<TIME> <REASON>] / [+!#]ban show|showhis [<NICK>]|clear|clearhis"
-local help_desc = lang.help_desc or "bans user; <time> are ban minutes; negative values means ban forever"
+local help_desc = lang.help_desc or "bans user; <time> are ban minutes and must be 1 or greater"
 
 local msg_denied = lang.msg_denied or "You are not allowed to use this command."
 local msg_notint = lang.msg_notint or "It's not allowed to use decimal numbers for bantime."
-local msg_import = lang.msg_import or "Error while importing additional module."
+local msg_badtime = lang.msg_badtime or "Bantime must be 1 minute or greater."
 local msg_reason = lang.msg_reason or "No reason."
 local msg_usage = lang.msg_usage or "Usage: [+!#]ban nick|cid|ip <NICK>|<CID>|<IP> [<TIME> <REASON>] / [+!#]ban show|showhis [<NICK>]|clear|clearhis"
 local msg_off = lang.msg_off or "User not found."
@@ -261,7 +276,6 @@ local msg_god = lang.msg_god or "You cannot ban user with higher level than you.
 local msg_bot = lang.msg_bot or "User is a bot."
 local msg_ban = lang.msg_ban or "[ BAN ]--> You were banned by: %s  |  reason: %s  |  remaining ban time: "  -- do not delete '%s'!
 local msg_ok = lang.msg_ok or "[ BAN ]--> User:  %s  was banned by:  %s  |  bantime: %s  |  reason: %s"
-local msg_ban_added = lang.msg_ban_added or "[ BAN ]--> %s:  %s  was banned by  %s"
 local msg_ban_attempt = lang.msg_ban_attempt or "[ BAN ]--> User:  %s  with lower level than you has tried to ban you! because: %s"
 local msg_clean_bans = lang.msg_clean_bans or "[ BAN ]--> Ban table was cleared by: "
 local msg_clean_banhistory = lang.msg_clean_banhistory or "[ BAN ]--> Ban history was cleared by: "
@@ -958,6 +972,22 @@ local onbmsg = function( user, command, parameters )
         user:reply( msg_notint, hub.getbot() )
         return PROCESSED
     end
+    -- Reject <time> below 1. `is_integer` above accepts negatives
+    -- (-5 == math.floor(-5)), so without this a `+ban nick X -5 r`
+    -- stored bantime = -300; the expiry check at login computes a
+    -- remaining that is always negative and PRUNES the ban - the
+    -- target was kicked once and then walked straight back in, while
+    -- the operator believed they had banned them. Zero is rejected
+    -- for the same reason (a 0-minute ban expires instantly).
+    -- Matches the HTTP path, which has enforced `min = 1` since #82
+    -- (request_schema + the duration_minutes < 1 guard) - this closes
+    -- the divergence between the two entry points. A real permanent
+    -- ban is a separate feature (ADC STA 231 + TL-1, keyword rather
+    -- than a magic negative).
+    if time < 1 then
+        user:reply( msg_badtime, hub.getbot() )
+        return PROCESSED
+    end
     if not ( ( by == "sid" or by == "nick" or by == "cid" or by == "ip" ) and id ) then
         user:reply( msg_usage, hub.getbot() )
         return PROCESSED
@@ -1112,29 +1142,6 @@ hub.setlistener( "onConnect", {},
                 user:reply( utf.format( msg_ban_attempt, ban.by_nick, ban.reason ), hub.getbot(), hub.getbot() )  -- and send info
                 return nil  -- user can login without problems
             end
-            --[[
-            local remaining, bantime, banstart = nil, tonumber( ban.time ), tonumber( ban.start )
-            if bantime < 0 then
-                remaining = 1  -- ban 1 sec forever ^^
-            else
-                remaining = bantime - os.difftime( os.time(), banstart )
-            end
-            if remaining > 0 then
-                local message
-                if remaining == 1 then
-                    message = utf.format( msg_ban, ban.by_nick, ban.reason ) .. msg_forever
-                    user:kill( "ISTA 231 " .. hub.escapeto( message ) .. "\n", "TL-1" )
-                    return PROCESSED
-                else
-                    message = utf.format( msg_ban, ban.by_nick, ban.reason ) .. get_bantime( remaining )
-                    user:kill( "ISTA 231 " .. hub.escapeto( message ) .. "\n", "TL" .. remaining )
-                    return PROCESSED
-                end
-            else
-                table.remove( bans, key )
-                util.savearray( bans, bans_path )
-            end
-            ]]
             local remaining = ban.time - os.difftime( os.time(), ban.start )
             if string.find( remaining, "-" ) then
                 table.remove( bans, key )

@@ -49,7 +49,6 @@ local string = use "string"
 local math = use "math"
 
 local table_sort   = table.sort
-local table_insert = table.insert
 local table_concat = table.concat
 local string_find  = string.find
 local string_sub   = string.sub

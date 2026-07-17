@@ -32,10 +32,9 @@
 local _real = {
     pairs = pairs, tostring = tostring, ipairs = ipairs,
     os = { time = function( ) return 0 end },
-    -- only initiate() touches adclib/cfg; the predicates under test do
-    -- not, but the module resolves these at load time.
+    -- only initiate() touches adclib; the predicates under test do not,
+    -- but the module resolves it at load time.
     adclib = { createsalt = function( ) return "TESTTOKEN0000000" end },
-    cfg = { get = function( ) return nil end },
 }
 _G.use = function( name )
     local v = _real[ name ]

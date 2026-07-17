@@ -5,9 +5,6 @@
     client_ssl_n = "no ( please activate it! )",
     client_ssl_y = "yes",
 
-    msg_ccpm_1 = "yes ( enabled for your level )",
-    msg_ccpm_2 = "yes ( disabled for your level )",
-    msg_ccpm_3 = "no",
 
     msg_years = " years, ",
     msg_days = " days, ",

@@ -49,8 +49,6 @@ local type = use "type"
 
 local table = use "table"
 local table_concat = table.concat
-local table_insert = table.insert
-local table_remove = table.remove
 
 local adclib = use "adclib"
 local cfg = use "cfg"
@@ -624,8 +622,6 @@ local function createuser( _client, _sid )
             level = tonumber( level )
             if utf.match( level, _regex.reguser.level ) then
                 profile.level = level
-                cfg_saveusers( _regusers )
-                --return true
                 return cfg_saveusers( _regusers )
             end
             return false, "invalid level"

@@ -174,7 +174,6 @@ local report_opchat = cfg.get( "cmd_reg_report_opchat" )
 
 --// msgs
 local msg_denied = lang.msg_denied or "You are not allowed to use this command."
-local msg_import = lang.msg_import or "Error while importing additional module."
 local msg_report = lang.msg_report or "[ REG ]--> User: %s  |  registered new User: %s  |  Level: %d [ %s ]  |  Comment: %s"
 local msg_nocomment = lang.msg_nocomment or "no comment defined"
 local msg_level = lang.msg_level or "You are not allowed to reg this level."

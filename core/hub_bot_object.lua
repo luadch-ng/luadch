@@ -31,7 +31,6 @@ local use = use
 
 local error = use "error"
 local ipairs = use "ipairs"
-local pairs = use "pairs"
 local pcall = use "pcall"
 local tostring = use "tostring"
 local type = use "type"

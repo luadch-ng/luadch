@@ -75,9 +75,7 @@
     --ucmd_cid = "CID:",
 
     ucmd_menu_ct0 = { "About You", "show Accinfo" },
-    ucmd_menu_ct1 = { "User", "Accinfo", "default", "by NICK" },
     --ucmd_menu_ct2 = { "User", "Accinfo", "default", "by CID" },
-    ucmd_menu_ct3 = { "Show", "Accinfo", "default" },
     ucmd_menu_ct4 = "User",
     ucmd_menu_ct5 = "Accinfo",
     ucmd_menu_ct6 = "by NICK from list",

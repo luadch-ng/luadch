@@ -166,7 +166,6 @@ local help_usage = lang.help_usage or "[+!#]upgrade sid|nick <sid>|<nick> <level
 local help_desc = lang.help_desc or "sets level of user"
 
 local ucmd_menu = lang.ucmd_menu or "Upgrade"
-local ucmd_level = lang.ucmd_level or "Level:"
 local ucmd_popup = lang.ucmd_popup or "Nickname:"
 
 local ucmd_menu_ct1_1 = lang.ucmd_menu_ct1_1 or "User"
