@@ -16,7 +16,6 @@
 
 --// lua functions //--
 
-local type = type
 local error = error
 local pcall = pcall
 local ipairs = ipairs
@@ -25,7 +24,6 @@ local require = require
 local loadfile = loadfile
 local tostring = tostring
 local setmetatable = setmetatable
-local collectgarbage = collectgarbage
 
 --// lua libs //--
 

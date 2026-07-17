@@ -467,7 +467,6 @@ local tostring = use "tostring"
 
 --// lua lib methods //--
 
-local os_date = use "os".date
 
 --// core scripts //--
 
@@ -477,7 +476,6 @@ local util = use "util"
 local const = use "const"
 local secret = use "cfg_secret"
 
-local types = use "types"
 
 --// core methods //--
 
@@ -485,15 +483,8 @@ local out_error
 
 local util_savetable = util.savetable
 local util_loadtable = util.loadtable
-local util_savearray = util.savearray
-local util_maketable = util.maketable
 
-local types_utf8 = types.utf8
-local types_table = types.get "table"
-local types_number = types.get "number"
-local types_boolean = types.get "boolean"
 
-local types_adcstr
 
 local CONFIG_PATH = const.CONFIG_PATH
 
@@ -525,9 +516,6 @@ local _
 local _cfgfile
 --local _cfgfile_basic
 --local _cfgfile_expert
-local _cfgbackup
---local _cfgbackup_basic
---local _cfgbackup_expert
 
 ----------------------------------// DEFINITION //--
 
@@ -537,9 +525,6 @@ _event = { reload = { } }
 _cfgfile = CONFIG_PATH .. "cfg.tbl"
 --_cfgfile_basic = CONFIG_PATH .. "cfg_basic.tbl"
 --_cfgfile_expert = CONFIG_PATH .. "cfg_expert.tbl"
-_cfgbackup = CONFIG_PATH .. "cfg.tbl.backup"
---_cfgbackup_basic = CONFIG_PATH .. "cfg_basic.tbl.backup"
---_cfgbackup_expert = CONFIG_PATH .. "cfg_expert.tbl.backup"
 
 local _defaultsettings_module = use "cfg_defaults"
 _defaultsettings = _defaultsettings_module.settings
@@ -667,7 +652,6 @@ end
 
 init = function( )
 
-    types_adcstr = types.get "adcstr"
     _defaultsettings_module.bind_late()
 
     out = use "out"

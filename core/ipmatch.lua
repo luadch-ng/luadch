@@ -66,10 +66,7 @@ local string_match   = string.match
 local string_gmatch  = string.gmatch
 local string_find    = string.find
 local string_sub     = string.sub
-local string_lower   = string.lower
-local string_rep     = string.rep
 local table_concat   = table.concat
-local table_insert   = table.insert
 
 ----------------------------------------------------------------------
 -- IPv4 parse

@@ -63,14 +63,12 @@ local table_concat = table.concat
 local table_insert = table.insert
 local table_remove = table.remove
 local table_sort = table.sort
-local math_min = math.min
 local math_floor = math.floor
 
 local cfg = use "cfg"
 local out = use "out"
 
 local cfg_get = cfg.get
-local out_put = out.put
 local out_error = out.error
 local out_api_audit = out.api_audit
 

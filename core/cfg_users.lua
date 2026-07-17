@@ -56,7 +56,6 @@ local util_atomic_write = util.atomic_write
 local secret_seal = secret.seal
 local secret_open = secret.open
 local secret_is_blob = secret.is_blob
-local secret_is_active = secret.is_active
 local secret_should_encrypt_writes = secret.should_encrypt_writes
 
 local _
@@ -66,12 +65,10 @@ local _
 -- is loaded; closures pick up the new value via Lua's by-reference
 -- upvalue capture.
 local out_error
-local out_put
 
 local function bind_late()
     local out = use "out"
     out_error = out.error
-    out_put = out.put
 end
 
 -- Read the raw file bytes; nil if missing.

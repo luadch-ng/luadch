@@ -28,7 +28,6 @@ local _G = use "_G"
 
 --// lua lib methods //--
 
-local io_open = io.open
 
 --// extern libs //--
 
@@ -40,7 +39,6 @@ local unicode = use "unicode"
 local utf = unicode.utf8
 
 local utf_sub = utf.sub
-local adclib_isUtf8 = adclib.isutf8
 
 --// core scripts //--
 
@@ -53,10 +51,8 @@ local util = use "util"
 --// core methods //--
 
 local cfg_get = cfg.get
-local out_put = out.put
 local mem_free = mem.free
 local out_error = out.error
-local handlebom = util.handlebom
 local checkfile = util.checkfile
 
 --// functions //--
