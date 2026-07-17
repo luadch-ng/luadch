@@ -76,7 +76,6 @@ local luasocket = use "socket"
 --// extern lib methods //--
 
 local ssl_wrap = ( luasec and luasec.wrap )
-local socket_tcp = luasocket.tcp
 local socket_sleep = luasocket.sleep
 local socket_select = luasocket.select
 local ssl_newcontext = ( luasec and luasec.newcontext )
@@ -121,9 +120,7 @@ local tick
 
 local killall
 local addtimer
-local addclient
 local addserver
-local wrapclient
 local wrapserver
 local closesocket
 local removesocket
@@ -229,51 +226,6 @@ end
 
 ----------------------------------// PRIVATE //--
 
-wrapclient = function( client, listeners, pattern, sslctx, startssl, id )
-
-    local dispatch = listeners.incoming or listeners.listener
-
-    local failure = listeners.failure
-
-    local handler = { }    -- tmp handler
-
-    handler.sendbuffer = function( )
-        local serverip, serverport = client:getpeername( )
-        local clientip, clientport = client:getsockname( )
-        local wrappedhandler, socket, err = wrapconnection( nil, listeners, client, serverip, clientip, serverport, clientport, pattern, sslctx, startssl, id )
-        if not wrappedhandler then
-            failure( id, err or "wrapping handler failed" )
-        else
-            dispatch( wrappedhandler )
-        end
-        _writetimes[ handler ] = nil    -- remove tmp handler
-        _socketlist[ client ] = nil
-        _sendlistlen = removesocket( _sendlist, client, _sendlistlen )
-        handler = nil
-        return true
-    end
-    handler.close = function( )
-        handler.sendbuffer = return_false
-        _closelist[ handler ] = "connection timeout"
-        _writetimes[ handler ] = nil
-        _socketlist[ client ] = nil
-        _sendlistlen = removesocket( _sendlist, client, _sendlistlen )
-    end
-    handler.kill = function( )
-        _closelist[ handler ] = nil
-        failure( id, "connection timeout" )
-        handler = nil
-    end
-
-    _writetimes[ handler ] = _currenttime
-    _socketlist[ client ] = handler
-    _sendlistlen = _sendlistlen + 1
-    _sendlist[ _sendlistlen ] = client
-    _sendlist[ client ] = _sendlistlen
-
-    return handler
-end
-
 wrapserver = function( listeners, socket, serverip, serverport, serverfamily, pattern, sslctx, maxconnections, startssl )    -- this function wraps a server
 
     local id = { }    -- connection id
@@ -351,9 +303,6 @@ wrapserver = function( listeners, socket, serverip, serverport, serverfamily, pa
     handler.ssl = function( )
         return ssl
     end
-    handler.id = function( )
-        return id
-    end
     handler.remove = function( )
         connections = connections - 1
     end
@@ -382,9 +331,6 @@ wrapserver = function( listeners, socket, serverip, serverport, serverfamily, pa
     handler.serverip = handler.ip
     handler.serverport = function( )
         return serverport
-    end
-    handler.socket = function( )
-        return socket
     end
     handler.readbuffer = function( )
         if connections > maxconnections then
@@ -462,7 +408,6 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
 
     local send
     local receive
-    local shutdown
 
     --// private closures of the object //--
 
@@ -497,7 +442,6 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
 
     local toclose
     local fatalerror
-    local needtls
 
     local bufferlen = 0
 
@@ -895,47 +839,6 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
             handler.sendbuffer = handshake
             handshake( socket )    -- do handshake
         else
-            handler.starttls = function( now )
-                if not now then
-                    out_put "server.lua: function 'wrapconnection': we need to do tls, but delaying until later"
-                    needtls = true
-                    return
-                end
-                out_put( "server.lua: function 'wrapconnection': attempting to start tls on " .. tostring( socket ) )
-                local oldsocket, err = socket
-                socket, err = ssl_wrap( socket, sslctx )    -- wrap socket
-                out_put( "server.lua: function 'wrapconnection': sslwrapped socket is " .. tostring( socket ) )
-                if err then
-                    out_put( "server.lua: function 'wrapconnection': error while starting tls on client: ", err )
-                    return nil, err    -- fatal error
-                end
-
-                socket:settimeout( 0 )
-
-                -- add the new socket to our system
-
-                send = socket.send
-                receive = socket.receive
-                shutdown = do_nothing
-
-                _socketlist[ socket ] = handler
-                _readlistlen = _readlistlen + 1
-                _readlist[ _readlistlen ] = socket
-                _readlist[ socket ] = _readlistlen
-
-                -- remove traces of the old socket
-
-                _readlistlen = removesocket( _readlist, oldsocket, _readlistlen )
-                _sendlistlen = removesocket( _sendlist, oldsocket, _sendlistlen )
-                _socketlist[ oldsocket ] = nil
-
-                handler.starttls = nil
-                needtls = nil
-
-                handler.receivedata = handler.handshake
-                handler.dispatchdata = handler.handshake
-                handshake( socket )    -- do handshake
-            end
             handler.readbuffer = handle_read_event
             handler.sendbuffer = handle_write_event
         end
@@ -947,7 +850,6 @@ wrapconnection = function( server, listeners, socket, serverip, clientip, server
 
     send = socket.send
     receive = socket.receive
-    shutdown = ( ssl and do_nothing ) or socket.shutdown
 
     _socketlist[ socket ] = handler
     _readlistlen = _readlistlen + 1
@@ -998,45 +900,6 @@ closesocket = function( socket )
 end
 
 ----------------------------------// PUBLIC //--
-
-addclient = function( address, port, listeners, pattern, sslctx, startssl )
-    local err
-    out_put( "server.lua: function 'addclient': autossl on ", port, " is ", startssl )
-    if type( listeners ) ~= "table" then
-        err = "invalid listener table"
-    end
-    -- #186: same dead-guard parse bug as addserver (see comment
-    -- there). Fixed here too per CLAUDE.md s1a.1 (fix the pattern
-    -- everywhere) even though addclient currently has no in-tree
-    -- caller - a divergent broken copy is a defect.
-    if type( port ) ~= "number" or port % 1 ~= 0 or not ( port >= 1 and port <= 65535 ) then
-        err = "invalid port"
-    --elseif _server[ port ] then
-    --    err =  "listeners on port '" .. port .. "' already exist"
-    elseif sslctx and not luasec then
-        err = "luasec not found"
-    end
-    if err then
-        out_error( "server.lua: function 'addclient': ", err )
-        return nil, err
-    end
-    local client, err = socket_tcp( )
-    if err then
-        return nil, err
-    end
-    local handler
-    local id = { }    -- connection id
-    client:settimeout( 0 )
-    _, err = client:connect( address, port )
-    if err == "timeout" then    -- try again
-        wrapclient( client, listeners, pattern, sslctx, startssl, id )
-    else
-        local serverip, serverport = client:getpeername( )
-        local clientip, clientport = client:getsockname( )
-        handler, client, err = wrapconnection( nil, listeners, client, serverip, clientip, serverport, clientport, pattern, sslctx, startssl, id )
-    end
-    return handler, err, id
-end
 
 addserver = function( p ) -- listeners, port, addr, pattern, sslctx, maxconnections, startssl, family )    -- this function provides a way for other scripts to reg a server
     local err
@@ -1281,7 +1144,6 @@ return {
     tick = tick,
     killall = killall,
     addtimer = addtimer,
-    addclient = addclient,
     addserver = addserver,
 
 }
