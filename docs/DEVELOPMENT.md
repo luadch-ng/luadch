@@ -86,6 +86,34 @@ comments before inserting - they document real ordering dependencies (e.g.
 Not every module belongs in `_core`: some are pulled in on demand via `use`
 from another module (e.g. `cfg_secret`, whose `init()` needs `cfg` to be up).
 
+**The same rule runs backwards, and that direction is easy to miss.** `use` is
+`_global[name] or loadscript(name)`, so a `use "X"` for a module that is *not
+loaded yet* is what pulls X in. **Deleting such a line moves X's load** - it is
+not a no-op just because the local was unused. Before removing any
+`local X = use "Y"`, check Y's position in `_core` against the module you are
+editing: if Y comes first, the call was only reading an already-populated
+`_global` entry and the removal is free. If it does not, find out who else pulls
+Y in and when (#447 PR 5: removing `cfg`'s unused `types_*` aliases orphaned its
+`use "types"`, and `cfg` sits at `_core` 5 while `types` is 28 - safe only
+because `cfg.lua` loads `cfg_defaults` itself, which does `use "types"` ~50 lines
+further into the same load). Stdlib names (`table`, `debug`, `os`, ...) resolve
+from `_G` and never reach `loadscript`, so those are always free.
+
+### Verifying a removal in a core module
+
+`luac -p` proves syntax, not scope. The failure mode that matters here - a
+deleted `local` whose assignment or read is still there - is syntactically
+perfect and dies at hub load under the restricted env. Two checks catch it:
+
+- **Bytecode scan (categorical).** Under the restricted env any reference to a
+  name with no `local` in scope compiles to an `_ENV` access. So:
+  `luac -p -l -l core/<file>.lua | grep '_ENV "<name>"'`. A `GETTABUP` means a
+  dangling read or a captured closure; a `SETTABUP` means a stray global write.
+  Zero hits is proof, not evidence. Validate the scan first by grepping for a
+  name you *know* is global in that file, so a silent zero cannot fool you.
+- **Boot the hub.** The only end-to-end check. `luac -p` and the unit tests both
+  pass on code that cannot load.
+
 ### Rules
 
 - **Passive at load.** A core module must only define functions and return its
