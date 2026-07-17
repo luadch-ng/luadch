@@ -26,9 +26,6 @@ local os = use "os"
 local table = use "table"
 local _G = use "_G"
 
---// lua lib methods //--
-
-
 --// extern libs //--
 
 local adclib = use "adclib"

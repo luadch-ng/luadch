@@ -465,9 +465,6 @@ local ipairs = use "ipairs"
 local assert = use "assert"
 local tostring = use "tostring"
 
---// lua lib methods //--
-
-
 --// core scripts //--
 
 local out
@@ -476,15 +473,12 @@ local util = use "util"
 local const = use "const"
 local secret = use "cfg_secret"
 
-
 --// core methods //--
 
 local out_error
 
 local util_savetable = util.savetable
 local util_loadtable = util.loadtable
-
-
 
 local CONFIG_PATH = const.CONFIG_PATH
 

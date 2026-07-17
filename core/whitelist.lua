@@ -237,15 +237,6 @@ end
 -- Entry construction
 ----------------------------------------------------------------------
 
-local function _rebuild_indices( )
-    _buckets_v4 = { }
-    _buckets_v6 = { }
-    for _, e in ipairs( _entries ) do
-        e._buckets = _bucket_for( e.family, e.network_bytes, e.prefix_len )
-        _bucket_insert( e )
-    end
-end
-
 local function _make_entry( cidr, opts )
     local family, network_bytes, prefix_len = ipmatch_parse_cidr( cidr )
     if not family then
