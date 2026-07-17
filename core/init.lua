@@ -118,7 +118,6 @@ _core = {    -- luadch core, order is important
     -- time); ordering vs hub is irrelevant because the reconcile
     -- runs at init-time, not at hub-loop time.
     "cacert_bootstrap",
-    --"doc",
     -- core/ipmatch.lua (Phase A of #78 arc): pure-Lua IPv4/IPv6
     -- + CIDR parse + prefix-match primitives. No deps beyond
     -- stdlib; load order is just before its consumer blocklist.
@@ -199,7 +198,6 @@ _core = {    -- luadch core, order is important
     -- plugin changes.
     "http_events",
     "types",
-    --"test",
 
 }
 
@@ -325,8 +323,6 @@ init = function( )    -- this function is the start point
         .. "\n\n"
     )
     signal.set( "start", os.time( ) )
-    --doc.export( )
-    --test( )
     mem.free( )
     local bol, err = pcall( hub.loop )
     if not bol and err then
