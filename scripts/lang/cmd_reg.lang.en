@@ -1,7 +1,6 @@
 return {
 
     msg_denied = "You are not allowed to use this command.",
-    msg_import = "Error while importing additional module.",
     msg_report = "[ REG ]--> User: %s  |  registered new User: %s  |  Level: %d [ %s ]  |  Comment: %s",
     msg_nocomment = "no comment defined",
     msg_level = "You are not allowed to reg this level.",
@@ -36,7 +35,6 @@ return {
     ucmd_menu_ct1_2 = "Control",
     ucmd_menu_ct1_3 = "Reg",
     ucmd_menu_ct2 = { "Reg", "OK" },
-    ucmd_passwort = "Password:",
     ucmd_level = "Level:",
     ucmd_nick = "Nick:",
     ucmd_desc = "Comment (optional):",

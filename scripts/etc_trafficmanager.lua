@@ -242,7 +242,6 @@ local help_desc2 = lang.help_desc2 or "Blocks downloads ( d ), uploads ( u ) and
 
 local msg_denied = lang.msg_denied or "[ TRAFFICMANAGER ]--> You are not allowed to use this command."
 local msg_god = lang.msg_god or "[ TRAFFICMANAGER ]--> You are not allowed to block/unblock this user."
-local msg_notregged = lang.msg_notregged or "[ TRAFFICMANAGER ]--> User is not registered."
 local msg_notfound = lang.msg_notfound or "[ TRAFFICMANAGER ]--> User isn't blocked."
 local msg_stillblocked = lang.msg_stillblocked or "[ TRAFFICMANAGER ]--> User:  %s  is already blocked by:  %s  |  reason:  %s"
 local msg_isbot = lang.msg_isbot or "[ TRAFFICMANAGER ]--> User is a bot."
