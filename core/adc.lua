@@ -350,8 +350,8 @@ _protocol = {
                 FM = _regex.default,
                 FB = _regex.default,
                 --// ASCH - Extended searching capability //--  http://adc.sourceforge.net/ADC-EXT.html#_asch_extended_searching_capability
-                FC = _regex.default,
-                TO = _regex.default,
+                -- ASCH also uses FC and TO; both are already declared
+                -- above for base SCH, so they are not repeated here.
                 RC = _regex.default,
 
 
