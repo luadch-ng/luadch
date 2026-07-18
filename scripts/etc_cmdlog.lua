@@ -6,6 +6,19 @@
         
         Usage: [+!#]cmdlog show
 
+        v1.5:
+            - fix (#460): the log baked the localized labels (msg1/msg2) into
+              each line at write-time, so "+cmdlog show" and GET /v1/log/cmd
+              never re-localized - every entry was frozen in whatever language
+              was active when it was logged, and a hub whose language changed
+              showed a mix. Entries are now stored language-neutral (fields
+              separated by the US control byte) and the labels are applied at
+              read-time in the current language, on both the ADC and HTTP path.
+              Old baked lines predating this version have no delimiter and are
+              rendered as-is (their frozen language) rather than dropped.
+              Control bytes in args/nick are now stripped, which also closes a
+              latent newline-in-args log-format corruption.
+
         v1.4:
             - fix: the language lookups read "lang.failmsg1" / "lang.failmsg2",
               but the lang files define the keys as "msg_denied" / "msg_nofile"
@@ -66,7 +79,7 @@
 --------------
 
 local scriptname = "etc_cmdlog"
-local scriptversion = "1.4"
+local scriptversion = "1.5"
 
 -- HTTP API tail-style cap per docs/HTTP_API.md §6.4. Same value
 -- as cmd_errors.lua for consistency across log endpoints.
@@ -91,6 +104,16 @@ local utf_match = utf.match
 local utf_format = utf.format
 local os_date = os.date
 local io_open = io.open
+local util_strip = util.strip_control_bytes
+local table_concat = table.concat
+
+-- #460: entries are stored as US-delimited (0x1f) language-neutral
+-- fields "ts <US> cmd <US> args <US> nick". The delimiter is a control
+-- byte, so strip_control_bytes (applied to every field at write-time)
+-- guarantees it never appears inside a field; a line without it is an
+-- old baked entry (v1.4 and earlier) rendered as-is at read-time.
+local FIELD_SEP = "\31"
+local LINE_PAT  = "^([^\31]*)\31([^\31]*)\31([^\31]*)\31(.*)$"
 
 --// imports
 local logfile = "log/cmd.log"
@@ -143,24 +166,45 @@ hub.setlistener( "onBroadcast", {},
             else
                 s2 = s2 or ""
             end
+            -- #460: store language-neutral fields; labels are applied at
+            -- read-time. strip_control_bytes keeps the delimiter out of any
+            -- field and prevents a newline in args from breaking the line.
+            -- Guard the open so a missing/unwritable log/ dir can't crash
+            -- this onBroadcast listener (which fires for every broadcast).
             local f = io_open( logfile, "a" )
-            f:write( os_date( " [ %Y-%m-%d / %H:%M:%S ]" ) .. msg1 .. s1 .. " " .. s2 .. msg2 .. user:nick() .. "\n" )
-            f:close()
+            if f then
+                f:write( os_date( "%Y-%m-%d / %H:%M:%S" ) .. FIELD_SEP .. util_strip( s1 ) .. FIELD_SEP .. util_strip( s2 ) .. FIELD_SEP .. util_strip( user:nick() ) .. "\n" )
+                f:close()
+            end
         end
         return nil
     end
 )
 
+-- #460: render one stored line for display in the CURRENT language. A
+-- new-format line is four US-delimited fields (ts, cmd, args, nick) and
+-- gets the current msg1/msg2 labels here. A line without the delimiter
+-- is an old baked entry (v1.4 and earlier) and is returned as-is so its
+-- frozen language survives rather than being dropped or mis-parsed.
+local render_line = function( line )
+    local ts, c, a, n = line:match( LINE_PAT )
+    if not ts then return line end
+    return " [ " .. ts .. " ]" .. msg1 .. c .. " " .. a .. msg2 .. n
+end
+
 local onbmsg = function( user, adccmd, parameters, txt )
     local id = utf_match( parameters, "^(%S+)$" )
     if id == cmd_p then
         if user:level() >= minlevel then
-            local msg, msg_log
+            local msg_log
             local file, err = io_open( logfile, "r" )
             if file then
-                msg = file:read( "*a" )
+                -- #460: render each stored line in the current language
+                -- (old baked lines pass through render_line unchanged).
+                local out = { }
+                for line in file:lines() do out[ #out + 1 ] = render_line( line ) end
                 file:close()
-                msg_log = utf_format( msg_out, msg )
+                msg_log = utf_format( msg_out, table_concat( out, "\n" ) )
                 user:reply( msg_log, hub_getbot, hub_getbot )
                 return PROCESSED
             else
@@ -201,10 +245,11 @@ end
 
 -- HTTP handler: GET /v1/log/cmd?lines=N (#82 Phase 3 PR-4).
 -- Admin scope. Mirrors GET /v1/log/error (PR-3) shape:
--- {lines: [string], returned: int, total_lines: int}. The ADC
--- `+cmdlog show` path is unchanged and remains a whole-file dump
--- through the chat banner; the HTTP path uses the same line-tail
--- semantic as the other log endpoints.
+-- {lines: [string], returned: int, total_lines: int}. Each tail line
+-- is rendered in the hub's current language (#460) via the same
+-- render_line as `+cmdlog show`, so the contract is unchanged (still
+-- a list of display strings) but no longer frozen/mixed-language; old
+-- baked lines pass through unchanged.
 --
 -- The ADC-side `etc_cmdlog_minlevel` check does NOT apply on the
 -- HTTP path: the bearer token's `admin` scope IS the
@@ -214,6 +259,7 @@ local http_handler_log_cmd = function( req )
     if n < 1 then n = HTTP_DEFAULT_LINES end
     if n > HTTP_MAX_LINES then n = HTTP_MAX_LINES end
     local lines, total = read_log_tail( logfile, n )
+    for i = 1, #lines do lines[ i ] = render_line( lines[ i ] ) end
     return { status = 200, data = {
         lines       = lines,
         returned    = #lines,

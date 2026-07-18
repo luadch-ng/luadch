@@ -306,6 +306,13 @@ jobs:
       - name: Run etc_webhook unit test
         run: lua5.4 tests/unit/etc_webhook_test.lua
 
+      # etc_cmdlog (#460): the command log is stored language-neutral and
+      # re-localized at read-time. Verifies an entry written under one
+      # language renders in the current language after a switch, old baked
+      # lines fall back to raw, control bytes are stripped, HTTP re-localizes.
+      - name: Run etc_cmdlog unit test
+        run: lua5.4 tests/unit/etc_cmdlog_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -547,6 +554,10 @@ jobs:
       - name: Run etc_webhook unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_webhook_test.lua
+
+      - name: Run etc_cmdlog unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_cmdlog_test.lua
 
       - name: Configure
         shell: msys2 {0}
