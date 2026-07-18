@@ -9,7 +9,25 @@
 
             - <time> are ban minutes; negative are not allowed
             - <time> and <reason> are optional
+            - the keyword `permanent` in the <time> slot bans forever
 
+        v0.44:
+            - feat: permanent ban via the `permanent` keyword in the
+              <time> slot (`+ban nick <NICK> permanent [<REASON>]`) and
+              the HTTP body flag `permanent: true`. Stores a real
+              `ban.permanent = true` marker (time 0), never a magic
+              negative - a negative <time> stays rejected (v0.43). The
+              expiry check never prunes a permanent ban; the kick uses
+              ADC STA 231 + TL-1 (the "permanently banned" code + the
+              no-expiry TL-1 marker) via cmd_ban's own two-arg kill (the
+              TL-1 rides on the IQUI, same as the timed path's TL<sec>),
+              NOT a 30-year finite 232. Same 231/TL-1 semantics the
+              etc_clientblocker / etc_geoip / etc_proxydetect kicks use,
+              though those embed TL-1 on the STA line instead. show /
+              history / the HTTP list
+              render "permanent" instead of a countdown. New lang key
+              msg_permanent (en "permanent" / de "dauerhaft"); the
+              keyword itself is a fixed literal, not translated. #444.
 
         v0.43:
             - fix: reject a <time> below 1 instead of silently losing the ban.
@@ -237,7 +255,7 @@
 --------------
 
 local scriptname = "cmd_ban"
-local scriptversion = "0.43"
+local scriptversion = "0.44"
 
 local cmd = "ban"
 local cmd2 = "unban"
@@ -270,7 +288,8 @@ local msg_denied = lang.msg_denied or "You are not allowed to use this command."
 local msg_notint = lang.msg_notint or "It's not allowed to use decimal numbers for bantime."
 local msg_badtime = lang.msg_badtime or "Bantime must be 1 minute or greater."
 local msg_reason = lang.msg_reason or "No reason."
-local msg_usage = lang.msg_usage or "Usage: [+!#]ban nick|cid|ip <NICK>|<CID>|<IP> [<TIME> <REASON>] / [+!#]ban show|showhis [<NICK>]|clear|clearhis"
+local msg_permanent = lang.msg_permanent or "permanent"
+local msg_usage = lang.msg_usage or "Usage: [+!#]ban nick|cid|ip <NICK>|<CID>|<IP> [<TIME>|permanent <REASON>] / [+!#]ban show|showhis [<NICK>]|clear|clearhis"
 local msg_off = lang.msg_off or "User not found."
 local msg_god = lang.msg_god or "You cannot ban user with higher level than you."
 local msg_bot = lang.msg_bot or "User is a bot."
@@ -388,7 +407,11 @@ local parsedate = function( date )
     return Y .. "-" .. M .. "-" .. D .. " / " .. h .. ":" .. m .. ":" .. s
 end
 
-local add = function( user, target, bantime, reason, script )  -- ban export function
+local add = function( user, target, bantime, reason, script, permanent )  -- ban export function
+    -- `permanent` (optional, backward-compatible 6th arg) stores a ban
+    -- that never expires. When set, the stored `time` is 0 and the
+    -- `permanent` flag governs the expiry check, the show/history render
+    -- and the ADC STA code (231 + TL-1 instead of 232 + TL<seconds>).
     local key = #bans + 1
     local user_firstnick, user_level
     if user then
@@ -422,7 +445,8 @@ local add = function( user, target, bantime, reason, script )  -- ban export fun
         cid = target_cid,
         hash = target_hash,
         ip = target_ip,
-        time = bantime,
+        time = permanent and 0 or bantime,
+        permanent = permanent or nil,
         start = os.time( os.date( "*t" ) ),
         reason = reason,
         by_nick = script,
@@ -435,16 +459,24 @@ local add = function( user, target, bantime, reason, script )  -- ban export fun
     else
         i = #history[ target_firstnick ] + 1
     end
-    history[ target_firstnick ][ i ] = { date = util.date(), reason = reason, bantime = bantime, by_nick = script, start = os.time( os.date( "*t" ) ), }
+    history[ target_firstnick ][ i ] = { date = util.date(), reason = reason, bantime = permanent and 0 or bantime, permanent = permanent or nil, by_nick = script, start = os.time( os.date( "*t" ) ), }
     util.savearray( bans, bans_path )
     util.savetable( history, "history_tbl", history_path )
-    local target_msg = utf.format( msg_ban, script, reason ) .. get_bantime( bantime )
-    -- ADC STA 232 = "Temporarily banned, flag TL" (T1.5 of #147).
-    -- The previous code used 231 (= "Permanently banned") together
-    -- with a finite TL, which is spec-conflicting; clients seeing
-    -- TL on a 231 may treat the ban as permanent regardless. 232 with
-    -- TL is the canonical encoding for a time-limited ban.
-    target:kill( "ISTA 232 " .. hub.escapeto( target_msg ) .. "\n", "TL" .. bantime )
+    local target_msg = utf.format( msg_ban, script, reason ) .. ( permanent and msg_permanent or get_bantime( bantime ) )
+    if permanent then
+        -- ADC STA 231 = "Permanently banned" paired with the no-expiry
+        -- TL-1. Kept in cmd_ban's two-arg kill form so the TL-1 rides on
+        -- the IQUI (like the timed path's TL<sec>), rather than the STA
+        -- line where etc_clientblocker / etc_geoip / etc_proxydetect put
+        -- their TL-1 - same 231/TL-1 semantics, cmd_ban's own framing.
+        -- This is the CORRECT 231 pairing; #147 T1.5 moved TIME-LIMITED
+        -- bans off 231 precisely because 231 with a FINITE TL is
+        -- self-contradictory - a permanent ban with TL-1 is not.
+        target:kill( "ISTA 231 " .. hub.escapeto( target_msg ) .. "\n", "TL-1" )
+    else
+        -- ADC STA 232 = "Temporarily banned, flag TL" (T1.5 of #147).
+        target:kill( "ISTA 232 " .. hub.escapeto( target_msg ) .. "\n", "TL" .. bantime )
+    end
     return PROCESSED
 end
 
@@ -459,7 +491,7 @@ local del = function( target )
     end
 end
 
-local addban = function( by, id, bantime, reason, level, nick, victim )
+local addban = function( by, id, bantime, reason, level, nick, victim, permanent )
     local key = #bans + 1
     if not victim then
         for i, bantbl in ipairs( bans ) do
@@ -480,7 +512,8 @@ local addban = function( by, id, bantime, reason, level, nick, victim )
         cid = victim and victim:cid() or by == "cid" and id or "",
         hash = victim and victim:hash() or "TIGR",
         ip = victim and victim:ip() or by == "ip" and id or "",
-        time = bantime,
+        time = permanent and 0 or bantime,
+        permanent = permanent or nil,
         start = os.time( os.date( "*t" ) ),
         reason = reason,
         by_nick = nick,
@@ -494,7 +527,7 @@ local addban = function( by, id, bantime, reason, level, nick, victim )
         else
             i = #history[ n ] + 1
         end
-        history[ n ][ i ] = { date = util.date(), reason = reason, bantime = bantime, by_nick = nick, start = os.time( os.date( "*t" ) ), }
+        history[ n ][ i ] = { date = util.date(), reason = reason, bantime = permanent and 0 or bantime, permanent = permanent or nil, by_nick = nick, start = os.time( os.date( "*t" ) ), }
     end
     util.savearray( bans, bans_path )
     util.savetable( history, "history_tbl", history_path )
@@ -510,7 +543,8 @@ local addban = function( by, id, bantime, reason, level, nick, victim )
             ip          = bans[ key ].ip,
             reason      = reason or "",
             by_nick     = nick or "",
-            ban_seconds = bantime,
+            ban_seconds = permanent and 0 or bantime,
+            permanent   = permanent or false,
         } )
     end
     return key  -- 1-based index of the newly-written / upserted entry
@@ -521,14 +555,15 @@ end
 local showbans = function()
     local msg = ""
     for i, banstbl in ipairs( bans ) do
-        local remaining = banstbl.time - os.difftime( os.time(), banstbl.start )
+        local time_label = banstbl.permanent and msg_permanent
+            or get_bantime( banstbl.time - os.difftime( os.time(), banstbl.start ) )
         msg = msg .. "\n [" .. i .. "]\n\t" ..
               lblNick .. "\t" .. banstbl.nick .. "\n\t" ..
               lblCid .. "\t" .. banstbl.cid .. "\n\t" ..
               lblIp .. "\t" .. banstbl.ip .. "\n\t" ..
               lblReason .. "\t" .. banstbl.reason .. "\n\t" ..
               lblBy .. "\t" .. banstbl.by_nick .. "\n\t" ..
-              lblTime .. "\t" .. get_bantime( remaining ) .. "\n"
+              lblTime .. "\t" .. time_label .. "\n"
     end
     return utf.format( msg_out, msg )
 end
@@ -541,13 +576,18 @@ local showhistory = function( hnick )
                 found = true
                 msg = msg .. "\n" .. msg_his_nick .. k .. "\n"
                 for i, t in ipairs( v ) do
-                    local remaining = t.bantime - os.difftime( os.time(), t.start )
-                    local state = msg_his_active
-                    if tostring( remaining ):find( "-" ) then state = msg_his_expired end
+                    local state, time_label
+                    if t.permanent then
+                        state, time_label = msg_his_active, msg_permanent
+                    else
+                        local remaining = t.bantime - os.difftime( os.time(), t.start )
+                        state = tostring( remaining ):find( "-" ) and msg_his_expired or msg_his_active
+                        time_label = get_bantime( t.bantime )
+                    end
                     msg = msg .. "\n\t" .. msg_his_ban .. i .. ":\n" ..
                           "\t\t" .. msg_his_state .. state .. "\n" ..
                           "\t\t" .. msg_his_date .. parsedate( t.date ) .. "\n" ..
-                          "\t\t" .. msg_his_bantime .. get_bantime( t.bantime ) .. "\n" ..
+                          "\t\t" .. msg_his_bantime .. time_label .. "\n" ..
                           "\t\t" .. msg_his_reason .. t.reason .. "\n" ..
                           "\t\t" .. msg_his_by .. t.by_nick .. "\n"
                 end
@@ -561,13 +601,18 @@ local showhistory = function( hnick )
         for k, v in util.spairs( history ) do
             msg = msg .. "\n" .. msg_his_nick .. k .. "\n"
             for i, t in ipairs( v ) do
-                local remaining = t.bantime - os.difftime( os.time(), t.start )
-                local state = msg_his_active
-                if tostring( remaining ):find( "-" ) then state = msg_his_expired end
+                local state, time_label
+                if t.permanent then
+                    state, time_label = msg_his_active, msg_permanent
+                else
+                    local remaining = t.bantime - os.difftime( os.time(), t.start )
+                    state = tostring( remaining ):find( "-" ) and msg_his_expired or msg_his_active
+                    time_label = get_bantime( t.bantime )
+                end
                 msg = msg .. "\n\t" .. msg_his_ban .. i .. ":\n" ..
                       "\t\t" .. msg_his_state .. state .. "\n" ..
                       "\t\t" .. msg_his_date .. parsedate( t.date ) .. "\n" ..
-                      "\t\t" .. msg_his_bantime .. get_bantime( t.bantime ) .. "\n" ..
+                      "\t\t" .. msg_his_bantime .. time_label .. "\n" ..
                       "\t\t" .. msg_his_reason .. t.reason .. "\n" ..
                       "\t\t" .. msg_his_by .. t.by_nick .. "\n"
             end
@@ -610,7 +655,6 @@ end
 -- timer). `expires_at` is ISO 8601 UTC, omitted when remaining is
 -- negative.
 local format_ban_entry = function( idx, ban )
-    local remaining = ban.time - os.difftime( os.time(), ban.start )
     local entry = {
         id              = idx,
         nick            = ban.nick or "",
@@ -620,27 +664,41 @@ local format_ban_entry = function( idx, ban )
         reason          = ban.reason or "",
         by_nick         = ban.by_nick or "",
         by_level        = ban.by_level or 0,
-        ban_seconds     = ban.time,
+        ban_seconds     = ban.permanent and 0 or ban.time,
         ban_start       = ban.start,
-        remaining_seconds = remaining,
+        permanent       = ban.permanent or false,
     }
-    if remaining > 0 then
-        entry.expires_at = os.date( "!%Y-%m-%dT%H:%M:%SZ", ban.start + ban.time )
+    if ban.permanent then
+        -- No remaining_seconds and no expires_at: a permanent ban has
+        -- neither. Consumers key off `permanent` (the expires_at date
+        -- filter naturally excludes it, same as an already-expired ban).
+        entry.remaining_seconds = nil
+    else
+        local remaining = ban.time - os.difftime( os.time(), ban.start )
+        entry.remaining_seconds = remaining
+        if remaining > 0 then
+            entry.expires_at = os.date( "!%Y-%m-%dT%H:%M:%SZ", ban.start + ban.time )
+        end
     end
     return entry
 end
 
 local format_history_entry = function( h )
-    local remaining = h.bantime - os.difftime( os.time(), h.start )
-    local state = "active"
-    if remaining <= 0 then state = "expired" end
+    local state
+    if h.permanent then
+        state = "active"
+    else
+        local remaining = h.bantime - os.difftime( os.time(), h.start )
+        state = remaining <= 0 and "expired" or "active"
+    end
     return {
         date       = h.date,
         reason     = h.reason or "",
         by_nick    = h.by_nick or "",
-        bantime    = h.bantime,
+        bantime    = h.permanent and 0 or h.bantime,
         start      = h.start,
         state      = state,
+        permanent  = h.permanent or false,
     }
 end
 
@@ -763,13 +821,22 @@ http_handler_create_ban = function( req )
     -- delete) so the stripped result is never empty when raw_target
     -- was non-empty; no second empty-check needed.
     local target_id = util.strip_control_bytes( raw_target )
+    -- `permanent: true` bans forever (ADC STA 231 + TL-1); it ignores
+    -- duration_minutes and stores time 0 + the permanent flag - the
+    -- HTTP mirror of the ADC `+ban ... permanent` keyword.
+    local permanent = ( body.permanent == true )
     -- duration_minutes optional; falls back to cfg cmd_ban_default_time.
-    local duration_minutes = body.duration_minutes or default_time
-    if not duration_minutes or duration_minutes < 1 then
-        return { status = 400, error = { code = "E_BAD_INPUT",
-            message = "missing duration_minutes and cfg cmd_ban_default_time is unset" } }
+    local duration_minutes, bantime
+    if permanent then
+        duration_minutes, bantime = nil, 0
+    else
+        duration_minutes = body.duration_minutes or default_time
+        if not duration_minutes or duration_minutes < 1 then
+            return { status = 400, error = { code = "E_BAD_INPUT",
+                message = "missing duration_minutes and cfg cmd_ban_default_time is unset" } }
+        end
+        bantime = duration_minutes * 60
     end
-    local bantime = duration_minutes * 60
     local clean_reason = util.strip_control_bytes(
         ( body.reason and body.reason ~= "" ) and body.reason or msg_reason
     )
@@ -817,7 +884,7 @@ http_handler_create_ban = function( req )
     -- gets the highest level so it survives operator-vs-operator
     -- ADC `+unban` attempts (only level >= ban.by_level can lift).
     local new_idx = addban( addban_by, addban_id, bantime, clean_reason,
-                            100, actor_label, addban_victim )
+                            100, actor_label, addban_victim, permanent )
     local entry = bans[ new_idx ]
 
     -- Caller-invoked report + kill, matching the ADC-path ordering
@@ -827,12 +894,17 @@ http_handler_create_ban = function( req )
                            or ( entry.nick ~= "" and entry.nick )
                            or target_id
     local message = utf.format( msg_ok, target_display, actor_label,
-                                get_bantime( bantime ), clean_reason )
+                                ( permanent and msg_permanent or get_bantime( bantime ) ), clean_reason )
     report.send( report_activate, report_hubbot, report_opchat, llevel, message )
     if victim then
-        -- 232 (temporary ban with TL) per ADC STA semantics; matches
-        -- the ADC `+ban` path. The TL value is bantime in seconds.
-        victim:kill( "ISTA 232 " .. hub.escapeto( message ) .. "\n", "TL" .. bantime )
+        if permanent then
+            -- 231 (permanent) + TL-1, matching the ADC `+ban ... permanent` path.
+            victim:kill( "ISTA 231 " .. hub.escapeto( message ) .. "\n", "TL-1" )
+        else
+            -- 232 (temporary ban with TL) per ADC STA semantics; matches
+            -- the ADC `+ban` path. The TL value is bantime in seconds.
+            victim:kill( "ISTA 232 " .. hub.escapeto( message ) .. "\n", "TL" .. bantime )
+        end
     end
     local _audit_target = { }
     _audit_target[ target_type ] = target_id
@@ -840,7 +912,7 @@ http_handler_create_ban = function( req )
     audit.fire( audit.build( "ban.add",
         { nick = actor_label, sid = "<http>" }, _audit_target,
         ( clean_reason ~= "" and clean_reason or nil ),
-        { by = target_type, duration_sec = bantime, online = ( victim ~= nil ) } ) )
+        { by = target_type, duration_sec = bantime, permanent = permanent or nil, online = ( victim ~= nil ) } ) )
 
     local data = {
         action           = "ban",
@@ -849,9 +921,10 @@ http_handler_create_ban = function( req )
         target           = target_id,
         target_nick      = entry.nick ~= "" and entry.nick or nil,
         duration_minutes = duration_minutes,
+        permanent        = permanent,
         reason           = clean_reason,
         by               = actor_label,
-        expires_at       = os.date( "!%Y-%m-%dT%H:%M:%SZ", entry.start + entry.time ),
+        expires_at       = ( not permanent ) and os.date( "!%Y-%m-%dT%H:%M:%SZ", entry.start + entry.time ) or nil,
     }
     return { status = 200, data = data }
 end
@@ -924,11 +997,22 @@ local onbmsg = function( user, command, parameters )
     local by, id = utf.match( parameters, "^(%S+) (%S+)" )
     local mode = utf.match( parameters, "^(%S+)" )
     local hnick = utf.match( parameters, "^%S+ (%S+)" )
-    local time = tonumber( utf.match( parameters, "^%S+ %S+ ([-]?%S+)" ) )
-    local reason = ( time and utf.match( parameters, "^%S+ %S+ [-]?%S+ (.*)" ) ) or ( ( time == nil ) and utf.match( parameters, "^%S+ %S+ (.*)" ) )
+    -- The 3rd token is either a <TIME> in minutes or the literal keyword
+    -- `permanent`. It is a fixed literal (like show/clear/nick), NOT
+    -- translated - only the DISPLAY label msg_permanent is localised.
+    local time_token = utf.match( parameters, "^%S+ %S+ (%S+)" )
+    local permanent = ( time_token == "permanent" )
+    local time, reason
+    if permanent then
+        -- everything after the `permanent` token is the reason
+        reason = utf.match( parameters, "^%S+ %S+ %S+ (.*)" )
+    else
+        time = tonumber( utf.match( parameters, "^%S+ %S+ ([-]?%S+)" ) )
+        reason = ( time and utf.match( parameters, "^%S+ %S+ [-]?%S+ (.*)" ) ) or ( ( time == nil ) and utf.match( parameters, "^%S+ %S+ (.*)" ) )
+    end
     time = time or default_time
     reason = reason or msg_reason
-    local bantime = time * 60
+    local bantime = permanent and 0 or time * 60
     local usernick = hub.escapefrom( user:nick() )
     local userfirstnick = hub.escapefrom( user:firstnick() )
     if mode == "show" then
@@ -968,25 +1052,32 @@ local onbmsg = function( user, command, parameters )
         return PROCESSED
     end
 
-    if not is_integer( time ) then
-        user:reply( msg_notint, hub.getbot() )
-        return PROCESSED
-    end
-    -- Reject <time> below 1. `is_integer` above accepts negatives
-    -- (-5 == math.floor(-5)), so without this a `+ban nick X -5 r`
-    -- stored bantime = -300; the expiry check at login computes a
-    -- remaining that is always negative and PRUNES the ban - the
-    -- target was kicked once and then walked straight back in, while
-    -- the operator believed they had banned them. Zero is rejected
-    -- for the same reason (a 0-minute ban expires instantly).
-    -- Matches the HTTP path, which has enforced `min = 1` since #82
-    -- (request_schema + the duration_minutes < 1 guard) - this closes
-    -- the divergence between the two entry points. A real permanent
-    -- ban is a separate feature (ADC STA 231 + TL-1, keyword rather
-    -- than a magic negative).
-    if time < 1 then
-        user:reply( msg_badtime, hub.getbot() )
-        return PROCESSED
+    -- Time validation is skipped for a `permanent` ban: there is no
+    -- <TIME> to validate (bantime is 0 + the permanent flag governs
+    -- everything downstream). The keyword path is the sanctioned
+    -- alternative to a magic negative time, which the checks below
+    -- still reject.
+    if not permanent then
+        if not is_integer( time ) then
+            user:reply( msg_notint, hub.getbot() )
+            return PROCESSED
+        end
+        -- Reject <time> below 1. `is_integer` above accepts negatives
+        -- (-5 == math.floor(-5)), so without this a `+ban nick X -5 r`
+        -- stored bantime = -300; the expiry check at login computes a
+        -- remaining that is always negative and PRUNES the ban - the
+        -- target was kicked once and then walked straight back in, while
+        -- the operator believed they had banned them. Zero is rejected
+        -- for the same reason (a 0-minute ban expires instantly).
+        -- Matches the HTTP path, which has enforced `min = 1` since #82
+        -- (request_schema + the duration_minutes < 1 guard) - this closes
+        -- the divergence between the two entry points. A real permanent
+        -- ban uses the `permanent` keyword above (ADC STA 231 + TL-1),
+        -- never a magic negative.
+        if time < 1 then
+            user:reply( msg_badtime, hub.getbot() )
+            return PROCESSED
+        end
     end
     if not ( ( by == "sid" or by == "nick" or by == "cid" or by == "ip" ) and id ) then
         user:reply( msg_usage, hub.getbot() )
@@ -1027,15 +1118,15 @@ local onbmsg = function( user, command, parameters )
             user:reply( msg_usage, hub.getbot() )
             return PROCESSED
         else
-            addban( by, id, bantime, reason, level, userfirstnick, nil )
-            local message = utf.format( msg_ok, id, usernick, get_bantime( bantime ), reason )
+            addban( by, id, bantime, reason, level, userfirstnick, nil, permanent )
+            local message = utf.format( msg_ok, id, usernick, ( permanent and msg_permanent or get_bantime( bantime ) ), reason )
             report.send( report_activate, report_hubbot, report_opchat, llevel, message )
             user:reply( message, hub.getbot() )
             local _target = { }
             _target[ by ] = id
             audit.fire( audit.build( "ban.add", user, _target,
                 ( reason ~= msg_reason and reason or nil ),
-                { by = by, duration_sec = bantime, online = false } ) )
+                { by = by, duration_sec = bantime, permanent = permanent or nil, online = false } ) )
             return PROCESSED
         end
     end
@@ -1062,16 +1153,21 @@ local onbmsg = function( user, command, parameters )
         user:reply( msg_usage, hub.getbot() )
         return PROCESSED
     else
-        addban( by, id, bantime, reason, level, userfirstnick, victim )
-        local message = utf.format( msg_ok, hub.escapefrom( targetnick ), usernick, get_bantime( bantime ), reason )
+        addban( by, id, bantime, reason, level, userfirstnick, victim, permanent )
+        local message = utf.format( msg_ok, hub.escapefrom( targetnick ), usernick, ( permanent and msg_permanent or get_bantime( bantime ) ), reason )
         report.send( report_activate, report_hubbot, report_opchat, llevel, message )
-        -- 232 (temporary ban with TL) per ADC STA semantics. 230 is
-        -- "generic kick" - lacks the ban-list intent.
-        target:kill( "ISTA 232 " .. hub.escapeto( message ) .. "\n", "TL" .. bantime )
+        if permanent then
+            -- 231 (permanent) + TL-1, the no-expiry pairing (see add()).
+            target:kill( "ISTA 231 " .. hub.escapeto( message ) .. "\n", "TL-1" )
+        else
+            -- 232 (temporary ban with TL) per ADC STA semantics. 230 is
+            -- "generic kick" - lacks the ban-list intent.
+            target:kill( "ISTA 232 " .. hub.escapeto( message ) .. "\n", "TL" .. bantime )
+        end
         user:reply( message, hub.getbot() )
         audit.fire( audit.build( "ban.add", user, target,
             ( reason ~= msg_reason and reason or nil ),
-            { by = by, duration_sec = bantime, online = true } ) )
+            { by = by, duration_sec = bantime, permanent = permanent or nil, online = true } ) )
         return PROCESSED
     end
 end
@@ -1141,6 +1237,17 @@ hub.setlistener( "onConnect", {},
                 util.savearray( bans, bans_path )  -- save table
                 user:reply( utf.format( msg_ban_attempt, ban.by_nick, ban.reason ), hub.getbot(), hub.getbot() )  -- and send info
                 return nil  -- user can login without problems
+            end
+            -- A permanent ban NEVER expires and MUST NOT be pruned:
+            -- guard before the remaining-time math below, whose
+            -- `string.find(remaining, "-")` would otherwise treat the
+            -- placeholder time (0) as an already-expired ban and delete
+            -- it - a silent unban. The higher-level bypass above still
+            -- applies (an op above the banner can log in and lift it).
+            if ban.permanent then
+                message = utf.format( msg_ban, ban.by_nick, ban.reason ) .. msg_permanent
+                user:kill( "ISTA 231 " .. hub.escapeto( message ) .. "\n", "TL-1" )
+                return PROCESSED
             end
             local remaining = ban.time - os.difftime( os.time(), ban.start )
             if string.find( remaining, "-" ) then
@@ -1221,12 +1328,15 @@ hub.setlistener( "onStart", {},
             } )
             hub.http_register( "POST", "/v1/bans", "admin", http_handler_create_ban, {
                 plugin = scriptname,
-                description = "create a ban (= ADC `+ban nick|cid|ip|sid X T R`); body { target_type, target, duration_minutes?, reason? }",
+                description = "create a ban (= ADC `+ban nick|cid|ip|sid X T R`); body { target_type, target, duration_minutes?, permanent?, reason? }. permanent:true bans forever and ignores duration_minutes.",
                 request_schema = {
                     target_type      = { type = "string", required = true, enum = { "nick", "cid", "ip", "sid" } },
                     target           = { type = "string", required = true, max_length = 64 },
                     -- 525600 minutes = 1 year. Same cap as the ADC-side ucmd_menu7_3.
                     duration_minutes = { type = "integer", required = false, min = 1, max = 525600 },
+                    -- permanent:true = ADC `+ban ... permanent` (STA 231 + TL-1);
+                    -- ignores duration_minutes and stores a never-expiring ban.
+                    permanent        = { type = "boolean", required = false },
                     reason           = { type = "string", required = false, max_length = 256 },
                 },
                 response_schema = {
