@@ -60,7 +60,7 @@
 --------------
 
 local scriptname    = "etc_whitelist"
-local scriptversion = "0.02"
+local scriptversion = "0.03"
 
 local cmd_main = "whitelist"
 
@@ -152,6 +152,8 @@ local msg_bad_cidr      = lang.msg_bad_cidr      or "Invalid CIDR / IP: %s"
 local msg_bad_expires   = lang.msg_bad_expires   or "Invalid expires date '%s'. Expected YYYY-MM-DD."
 local msg_added         = lang.msg_added         or "%s added whitelist entry #%d (%s, source=%s)."
 local msg_save_failed   = lang.msg_save_failed   or "Failed to persist whitelist: %s"
+local msg_open_failed   = lang.msg_open_failed   or "Could not open %s: %s"
+local msg_encode_failed = lang.msg_encode_failed or "JSON encode failed: %s"
 local msg_removed       = lang.msg_removed       or "%s removed whitelist entry #%d (%s, source=%s)."
 local msg_remove_failed = lang.msg_remove_failed or "whitelist.del failed: %s"
 local msg_not_found     = lang.msg_not_found     or "No whitelist entry with id #%d."
@@ -294,7 +296,7 @@ local function do_export_jsonl( actor_label )
     end
     local f, ferr = io.open( path, "w" )
     if not f then
-        return false, "open failed: " .. tostring( ferr )
+        return false, utf_format( msg_open_failed, path, tostring( ferr ) )
     end
     local count = 0
     local rows = whitelist.list( { source = "manual" } )
@@ -312,7 +314,7 @@ local function do_export_jsonl( actor_label )
             }
             if not line then
                 f:close( )
-                return false, "json.encode failed: " .. tostring( jerr )
+                return false, utf_format( msg_encode_failed, tostring( jerr ) )
             end
             f:write( line, "\n" )
             count = count + 1
@@ -364,7 +366,7 @@ local function do_import_jsonl( path, actor_label, actor_level )
     end
     local f, ferr = io.open( path, "r" )
     if not f then
-        return false, "open failed: " .. tostring( ferr )
+        return false, utf_format( msg_open_failed, path, tostring( ferr ) )
     end
     local added, skipped, errors = 0, 0, 0
     local error_log_cap = 5

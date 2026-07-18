@@ -525,6 +525,38 @@ do
 end
 
 ----------------------------------------------------------------------
+-- #456: export/import failure reasons must be localized (rendered
+-- through a lang template), not the raw English helper string. Lang is
+-- empty here so the English fallbacks apply; the point is that the
+-- FAILURE path renders msg_open_failed / msg_encode_failed at all
+-- (pre-fix it returned the raw "open failed:" / "json.encode failed:").
+----------------------------------------------------------------------
+
+do
+    _vfs = { }
+    -- import a path not in the vfs -> io.open read returns nil -> the
+    -- open-failed branch. Reason must be the template, not the raw one.
+    local iok, ireason = wl._do_import_jsonl( "cfg/whitelist-missing.jsonl", "master", 100 )
+    truthy( "#456 import open-fail: returns false", not iok )
+    truthy( "#456 import open-fail: localized 'Could not open'",
+        ireason and ireason:find( "Could not open", 1, true ) )
+    truthy( "#456 import open-fail: raw 'open failed:' gone",
+        not ( ireason and ireason:find( "open failed:", 1, true ) ) )
+
+    -- export with a failing encoder -> the json-encode branch.
+    wl._do_add_entry( "1.2.3.0/24", { reason = "r" }, "op", 100 )
+    local saved = _G.dkjson.encode
+    _G.dkjson.encode = function( ) return nil, "boom" end
+    local eok, ereason = wl._do_export_jsonl( "op" )
+    _G.dkjson.encode = saved
+    truthy( "#456 export encode-fail: returns false", not eok )
+    truthy( "#456 export encode-fail: localized 'JSON encode failed'",
+        ereason and ereason:find( "JSON encode failed", 1, true ) )
+    truthy( "#456 export encode-fail: raw 'json.encode failed:' gone",
+        not ( ereason and ereason:find( "json.encode failed:", 1, true ) ) )
+end
+
+----------------------------------------------------------------------
 
 if _fails > 0 then
     io.stderr:write( string.format( "\nFAIL: %d/%d checks failed\n", _fails, _passes + _fails ) )
