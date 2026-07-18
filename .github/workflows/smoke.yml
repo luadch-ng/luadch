@@ -313,6 +313,12 @@ jobs:
       - name: Run etc_cmdlog unit test
         run: lua5.4 tests/unit/etc_cmdlog_test.lua
 
+      # cmd_userinfo (#459): the +userinfo value column must line up. Drives
+      # the real align_labels against both shipped lang files and asserts the
+      # raw format is ragged (the bug) and the aligned one is uniform.
+      - name: Run cmd_userinfo align unit test
+        run: lua5.4 tests/unit/cmd_userinfo_align_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -558,6 +564,10 @@ jobs:
       - name: Run etc_cmdlog unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_cmdlog_test.lua
+
+      - name: Run cmd_userinfo align unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/cmd_userinfo_align_test.lua
 
       - name: Configure
         shell: msys2 {0}

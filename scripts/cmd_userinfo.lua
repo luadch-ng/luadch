@@ -92,7 +92,7 @@
 --------------
 
 local scriptname = "cmd_userinfo"
-local scriptversion = "0.23"
+local scriptversion = "0.24"
 
 local cmd = "userinfo"
 
@@ -113,7 +113,40 @@ local msg_days = lang.msg_days or " days, "
 local msg_hours = lang.msg_hours or " hours, "
 local msg_minutes = lang.msg_minutes or " minutes, "
 local msg_seconds = lang.msg_seconds or " seconds"
-local msg_userinfo = lang.msg_userinfo or [[
+
+-- #459: the userinfo labels come from the (translatable) lang file with
+-- ragged widths and the value used to get a fixed tab count, so the value
+-- column jumped by label length and by the client's tab-stop width. Pad
+-- every value line's label to one width - computed from the actual labels,
+-- so it is correct in any language - and let the value follow directly;
+-- space-padding in a monospace chat is the only client-independent
+-- alignment. Banner / blank lines (no "%s") are untouched, and only the
+-- FIRST "%s" per line (the value column) is aligned - the second "%s" on
+-- the "Level:" line rides along in the tail.
+-- #core is a BYTE length; the labels are ASCII (DC jargon is kept in
+-- English by the i18n convention), so byte width == column width here.
+local align_labels = function( fmt )
+    local lines, maxw = { }, 0
+    for line in ( fmt .. "\n" ):gmatch( "(.-)\n" ) do
+        lines[ #lines + 1 ] = line
+        local label = line:match( "^(.-)%%s" )
+        if label then
+            local core = label:gsub( "%s+$", "" )
+            if #core > maxw then maxw = #core end
+        end
+    end
+    local width = maxw + 3
+    for i, line in ipairs( lines ) do
+        local label, rest = line:match( "^(.-)(%%s.*)$" )
+        if label then
+            local core = label:gsub( "%s+$", "" )
+            lines[ i ] = core .. string.rep( " ", width - #core ) .. rest
+        end
+    end
+    return table.concat( lines, "\n" )
+end
+
+local msg_userinfo = align_labels( lang.msg_userinfo or [[
 
 
 === USERINFO =============================================================================
@@ -147,7 +180,7 @@ Uptime: %s
 
 ============================================================================= USERINFO ===
 
-  ]]
+  ]] )
 
 local help_title = lang.help_title or "userinfo"
 local help_usage = lang.help_usage or "[+!#]userinfo sid|nick <sid>|<nick>"
@@ -215,30 +248,30 @@ local onbmsg = function( user, command, parameters )
     local level_name = cfg.get( "levels" )[ target:level() ] or "Unreg"
     local userinfo = utf.format(
         msg_userinfo,
-        "\t\t" .. hub.escapefrom( target:nick() ),
-        "\t\t" .. hub.escapefrom( target:firstnick() ),
-        "\t\t" .. hub.escapefrom( target.description() or msg_unknown ),
-        "\t\t" .. util.formatbytes( tonumber( target.share() ) ) or msg_unknown,
-        "\t\t" .. hub.escapefrom( target.email() or msg_unknown ),
-        "\t\t" .. target.slots( ) or msg_unknown,
-        "\t\t" .. ( hn or msg_unknown ) .. "/" .. ( hr or msg_unknown ) .. "/" .. ( ho or msg_unknown ),
-        "\t\t" .. hub.escapefrom( target.version() or msg_unknown ),
-        "\t\t" .. target:sid(),
-        "\t\t" .. target:cid(),
-        "\t\t" .. target_kp,
-        "\t\t" .. target:hash(),
-        "\t\t" .. target:ip(),
-        "\t\t" .. target:clientport(),
-        "\t\t" .. target:serverport(),
-        "\t\t" .. tostring( target:ssl() ),
-        "\t\t" .. tostring( target:features() ),
-        "\t\t" .. tostring( target:isbot() ),
-        "\t\t" .. target:rank(),
-        "\t\t" .. target:level(), level_name,
-        "\t\t" .. tostring( user:isregged() ),
-        "\t" .. tostring( util.formatbytes( rstat ) ),
-        "\t" .. tostring( util.formatbytes( sstat ) ),
-        "\t\t" .. get_lastconnect( target )
+        hub.escapefrom( target:nick() ),
+        hub.escapefrom( target:firstnick() ),
+        hub.escapefrom( target.description() or msg_unknown ),
+        util.formatbytes( tonumber( target.share() ) ) or msg_unknown,
+        hub.escapefrom( target.email() or msg_unknown ),
+        target.slots( ) or msg_unknown,
+        ( hn or msg_unknown ) .. "/" .. ( hr or msg_unknown ) .. "/" .. ( ho or msg_unknown ),
+        hub.escapefrom( target.version() or msg_unknown ),
+        target:sid(),
+        target:cid(),
+        target_kp,
+        target:hash(),
+        target:ip(),
+        target:clientport(),
+        target:serverport(),
+        tostring( target:ssl() ),
+        tostring( target:features() ),
+        tostring( target:isbot() ),
+        target:rank(),
+        target:level(), level_name,
+        tostring( user:isregged() ),
+        tostring( util.formatbytes( rstat ) ),
+        tostring( util.formatbytes( sstat ) ),
+        get_lastconnect( target )
     )
     user:reply( userinfo, hub.getbot(), hub.getbot() )
     return PROCESSED
@@ -263,3 +296,8 @@ hub.setlistener( "onStart", {},
 )
 
 hub.debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
+
+-- Internal test seam (#459): the pure label-alignment transform.
+-- `_`-prefixed per the repo convention for a non-contract, test-only
+-- export (see docs/PLUGIN_API.md §8).
+return { _align_labels = align_labels }
