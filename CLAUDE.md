@@ -136,17 +136,26 @@ order (its inline comments explain each ordering constraint).
 | Crypto + boot trust | `sha256`, `hmac`, `cert_bootstrap`, `cacert_bootstrap` | Pure-Lua SHA-256; HMAC-SHA256 (RFC 2104, sandbox-exposed for signed-webhook auth, #398); first-boot TLS-cert auto-gen (#77); CA-bundle reconciliation |
 | Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `geoip_update`, `bloom`, `ensuredirs` | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader + in-hub GeoLite2 auto-update; bloom filter; boot-time runtime-dir self-heal |
 
-**`core/hci.lua` is not a module** - it is a persisted data file (a plain
-`hubruntime` / `hubruntime_last_check` table) read and rewritten via
-`util.loadtable` / `util.savetable` by `hub_runtime` (60s `onTimer`),
-`cmd_uptime` and `cmd_hubinfo`, and it backs `/v1/runtime`. Its absence from
-`_core` is correct - do not "fix" it by adding it. It is however the one piece
-of mutable plugin state living under `core/` instead of `scripts/data/`,
-contra §7 - and because `core/` is shipped wholesale (`install(DIRECTORY
-core/)`, and Docker bakes it into the image rather than mounting it), every
-upgrade overwrites the operator's accumulated runtime with the pristine
-zeros: [#445](https://github.com/luadch-ng/luadch/issues/445). Not a dead
-file - a misplaced one.
+**`core/hci.lua` is a now-legacy data file** (a plain `hubruntime` /
+`hubruntime_last_check` table). It backs `/v1/runtime` +
+`+runtime`/`+uptime`/`+hubinfo`. It used to be the LIVE store - read and
+rewritten by `hub_runtime` (60s `onTimer`), `cmd_uptime` and `cmd_hubinfo` -
+but that put mutable plugin state under `core/`, which is shipped wholesale
+(`install(DIRECTORY core/)`, and Docker bakes it into the image rather than
+mounting it), so every upgrade overwrote the operator's accumulated runtime
+with pristine zeros. [#445](https://github.com/luadch-ng/luadch/issues/445)
+moved the live store to `scripts/data/hub_runtime.tbl` (operator-owned,
+upgrade-safe, per §7): `hub_runtime` is now the sole writer and migrates the
+legacy value once on load; `cmd_uptime` / `cmd_hubinfo` are pure readers.
+`CMakeLists.txt` excludes `hci.lua` from the `core/` install (`PATTERN
+"hci.lua" EXCLUDE`) so a `cmake --install` upgrade does not zero the
+operator's on-disk `core/hci.lua` before the migration can read it - without
+that, the migration adopts the just-clobbered zeros and recovers nothing.
+`core/hci.lua` is now read-only, kept in-tree as the migration source only;
+a future release deletes it. (Docker cannot migrate - its old counter lived
+in the ephemeral container layer - but persists going forward.) Its absence
+from `_core` is correct either way (it is a data file, not a module) - do not
+"fix" it by adding it.
 
 Two hard ceilings (both enforced by review, not tooling):
 

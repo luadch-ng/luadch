@@ -1262,7 +1262,10 @@ TCP source IP and BINF-advertised IP disagree (`kill_wrong_ips`).
 ### hub_runtime
 
 Track cumulative hub runtime (survives restarts) and provide show /
-reset commands. Persists to `core/hci.lua`.
+reset commands. Persists to `scripts/data/hub_runtime.tbl` (moved from
+`core/hci.lua` in #445 - `core/` is shipped and every upgrade clobbered
+the counter; `scripts/data/` is the operator-owned, upgrade-safe state
+dir. `cmd_uptime` / `cmd_hubinfo` read the same file).
 
 **Commands:** `+runtime show|reset`
 

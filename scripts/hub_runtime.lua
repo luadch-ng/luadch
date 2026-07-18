@@ -6,6 +6,29 @@
 
         usage: [+!#]runtime show|reset
 
+        v0.10:
+            - fix #445: move the persisted runtime store from
+              `core/hci.lua` to `scripts/data/hub_runtime.tbl`.
+              `core/` is a SHIPPED directory (CMake install +
+              baked into the Docker image), so every upgrade wrote
+              a pristine `hubruntime = 0` over the operator's
+              accumulated value; `scripts/data/` is the
+              operator-owned (Docker-mounted) plugin-state dir that
+              upgrades never clobber. Migrates once on load: if the
+              new store is absent, adopt the value from a legacy
+              `core/hci.lua`. That adoption only recovers a value if
+              the legacy file still holds it at boot - so
+              CMakeLists.txt excludes `core/hci.lua` from the
+              install (`PATTERN "hci.lua" EXCLUDE`), leaving the
+              operator's on-disk value in place for a source
+              (`cmake --install`) upgrade to migrate. Docker cannot
+              migrate (the old counter lived in the ephemeral
+              container layer, discarded on recreate) but gains a
+              persistent counter going forward. `core/hci.lua` is
+              never written now; a future release removes it. This
+              plugin is the sole writer; cmd_uptime / cmd_hubinfo
+              became pure readers of the new path in their v-bumps.
+
         v0.9:
             - HTTP API: GET /v1/runtime (read), PUT /v1/runtime (admin)
               #82 Phase 4 PR-4
@@ -49,7 +72,7 @@
 --------------
 
 local scriptname = "hub_runtime"
-local scriptversion = "0.9"
+local scriptversion = "0.10"
 
 local cmd = "runtime"
 local cmd_p1 = "show"
@@ -64,7 +87,12 @@ local report_activate = cfg.get( "hub_runtime_report" )
 local report_opchat = cfg.get( "hub_runtime_report_opchat" )
 local report_hubbot = cfg.get( "hub_runtime_report_hubbot" )
 local llevel = cfg.get( "hub_runtime_llevel" )
-local hci_file = "core/hci.lua"
+-- #445: the persisted store now lives under scripts/data/ (operator-
+-- owned, Docker-mounted, upgrade-safe), NOT core/ (shipped, clobbered
+-- on every install / image update). `legacy_hci_file` is the old
+-- location, read once at load as the migration source and never written.
+local hci_file = "scripts/data/hub_runtime.tbl"
+local legacy_hci_file = "core/hci.lua"
 
 --// msgs
 local help_title = lang.help_title or "hub_runtime.lua"
@@ -99,7 +127,7 @@ local ucmd_menu_reset = lang.ucmd_menu_reset or { "Hub", "Core", "Hub runtime", 
 local msg_unknown = lang.msg_unknown or "<UNKNOWN>"
 
 --// functions
-local check_hci, get_hubuptime, get_hubruntime, set_hubruntime, reset_hubruntime, onbmsg
+local get_hubuptime, get_hubruntime, set_hubruntime, reset_hubruntime, onbmsg
 
 
 ----------
@@ -110,15 +138,34 @@ local minutes = 1
 local delay = minutes * 60
 local start = os.time()
 
-check_hci = function()
-    local hci_tbl = util.loadtable( hci_file )
-    if type( hci_tbl ) ~= "table" then
-        hci_tbl = { [ "hubruntime" ] = 0, [ "hubruntime_last_check" ] = 0, }
-        util.savetable( hci_tbl, "hci_tbl", hci_file )
+-- #445 migration decision (pure; unit-tested via the _runtime_seed
+-- export). Given the current new-store table and the legacy core/hci.lua
+-- table (either may be nil / non-table on a missing / corrupt file),
+-- returns the seed to write to the new store, or nil when the new store
+-- already holds a valid value and must be left untouched.
+--   - new store already valid  -> nil (no-op; do NOT re-adopt legacy)
+--   - new store absent, legacy has a value -> adopt it (upgrade path)
+--   - neither present           -> zeros (fresh hub)
+-- Adopting the legacy value is what stops the fix from zeroing every
+-- operator's counter on the release that introduces it.
+local function runtime_seed( existing, legacy )
+    if type( existing ) == "table" and type( existing.hubruntime ) == "number" then
+        return nil
     end
+    local seed = { hubruntime = 0, hubruntime_last_check = 0 }
+    if type( legacy ) == "table" and type( legacy.hubruntime ) == "number" then
+        seed.hubruntime = legacy.hubruntime
+        seed.hubruntime_last_check = legacy.hubruntime_last_check or 0
+    end
+    return seed
 end
 
-check_hci()
+local function migrate_or_init()
+    local seed = runtime_seed( util.loadtable( hci_file ), util.loadtable( legacy_hci_file ) )
+    if seed then util.savetable( seed, "hub_runtime", hci_file ) end
+end
+
+migrate_or_init()
 
 get_hubuptime = function()
     local hubuptime
@@ -134,9 +181,9 @@ end
 
 -- F-PLG-2 (#133): defensive `or {}` plus `.field or default` so a
 -- mid-run loadtable failure (file deleted, permission flip, fs error)
--- doesn't crash these listeners. check_hci() at script load already
--- creates the file with zero defaults; in steady state these reads
--- succeed.
+-- doesn't crash these listeners. migrate_or_init() at script load
+-- already creates the store with zero defaults; in steady state these
+-- reads succeed.
 get_hubruntime = function()
     local hci_tbl = util.loadtable( hci_file ) or {}
     local hrt = hci_tbl.hubruntime or 0
@@ -156,13 +203,13 @@ set_hubruntime = function()
     local new_time = hrt + sec
     hci_tbl.hubruntime = new_time
     hci_tbl.hubruntime_last_check = util.date()
-    util.savetable( hci_tbl, "hci_tbl", hci_file )
+    util.savetable( hci_tbl, "hub_runtime", hci_file )
 end
 
 reset_hubruntime = function()
     local hci_tbl = util.loadtable( hci_file ) or {}
     hci_tbl.hubruntime = 0
-    util.savetable( hci_tbl, "hci_tbl", hci_file )
+    util.savetable( hci_tbl, "hub_runtime", hci_file )
 end
 
 -- Helpers for raw-seconds access to the persisted runtime counter.
@@ -190,7 +237,8 @@ end
 -- HTTP handler: GET /v1/runtime (#82 Phase 4 PR-4). Read scope.
 -- Returns raw integer seconds for both session (this process's
 -- uptime, from `signal.get("start")`) and total (the persisted
--- accumulator written to `core/hci.lua` by the 60s onTimer).
+-- accumulator written to `scripts/data/hub_runtime.tbl` by the
+-- 60s onTimer).
 --
 -- The ADC `+runtime show` cmd formats both as human-readable
 -- strings via `util.formatseconds`; the HTTP path returns raw
@@ -218,7 +266,7 @@ end
 -- Family-consistent with the #236 registered-users PUTs (all
 -- require a typed body). The only ADC operation in this plugin
 -- is "reset to zero"; PUT generalises to "set runtime to N"
--- because the underlying `core/hci.lua` storage is a plain
+-- because the underlying `scripts/data/hub_runtime.tbl` storage is a plain
 -- integer count - a future ops workflow that needs to seed
 -- runtime from a backup uses the same endpoint without a new
 -- verb.
@@ -242,7 +290,7 @@ local http_handler_put_runtime = function( req )
     local hci_tbl = util.loadtable( hci_file ) or {}
     hci_tbl.hubruntime = hrt_int
     hci_tbl.hubruntime_last_check = util.date()
-    util.savetable( hci_tbl, "hci_tbl", hci_file )
+    util.savetable( hci_tbl, "hub_runtime", hci_file )
     return { status = 200, data = {
         action     = "runtime-set",
         hubruntime = hrt_int,
@@ -323,3 +371,13 @@ hub.setlistener( "onStart", {},
 )
 
 hub.debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
+
+--// public //--
+
+return {
+
+    -- Internal test seam (#445): the pure migration decision. `_`-prefixed
+    -- per the repo convention for a non-contract, test-only export.
+    _runtime_seed = runtime_seed,
+
+}
