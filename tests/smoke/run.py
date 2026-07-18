@@ -5870,6 +5870,29 @@ def test_http_phase4_hub_runtime(staging_dir: Path, proc=None):
             f"PUT /v1/runtime: unexpected envelope; body={body_of(r)!r}"
         )
 
+    # 7b. #445: the runtime store now lives in the operator-owned
+    # scripts/data/ dir, NOT the shipped core/hci.lua that every upgrade
+    # clobbers. Pre-fix the store WAS core/hci.lua and
+    # scripts/data/hub_runtime.tbl never existed - so this existence check
+    # alone fails on the unpatched plugin (race-free: no numeric compare
+    # that an intervening 60s onTimer tick could shift).
+    runtime_tbl = staging_dir / "scripts" / "data" / "hub_runtime.tbl"
+    if not runtime_tbl.is_file():
+        raise TestFailure(
+            "#445: scripts/data/hub_runtime.tbl missing after PUT - the "
+            "runtime store did not move off the shipped core/hci.lua"
+        )
+    if "hubruntime" not in runtime_tbl.read_text(encoding="utf-8", errors="replace"):
+        raise TestFailure("#445: hub_runtime.tbl present but has no hubruntime field")
+    # The shipped core/hci.lua is read only as the migration source and is
+    # never written; the PUT value must not have leaked into it.
+    legacy = staging_dir / "core" / "hci.lua"
+    if legacy.is_file() and str(seeded) in legacy.read_text(encoding="utf-8", errors="replace"):
+        raise TestFailure(
+            f"#445: PUT value {seeded} leaked into the shipped core/hci.lua "
+            "- the store is still written there"
+        )
+
     # 8. Post-PUT GET -> total_seconds >= seeded value (allowing
     # for an intervening 60s onTimer tick to add up to ~60s).
     r = _http_roundtrip(b"GET /v1/runtime HTTP/1.1\r\n" + auth + b"\r\n")

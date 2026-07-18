@@ -4,6 +4,14 @@
 
         usage: [+!#]uptime
 
+        v0.11:
+            - fix #445: read the hub-runtime store from its new home
+              `scripts/data/hub_runtime.tbl` (was `core/hci.lua`,
+              which every upgrade clobbered with zeros). Dropped the
+              local check_hci() - hub_runtime owns creation + the
+              one-time migration; this plugin is now a pure reader and
+              never writes the store.
+
         v0.10: by pulsar
             - removed precaching of hci.lua on scriptstart
 
@@ -48,7 +56,7 @@
 --------------
 
 local scriptname = "cmd_uptime"
-local scriptversion = "0.10"
+local scriptversion = "0.11"
 
 local cmd = "uptime"
 
@@ -57,7 +65,11 @@ local help, hubcmd
 local minlevel = cfg.get( "cmd_uptime_minlevel" )
 local scriptlang = cfg.get( "language" )
 local lang, err = cfg.loadlanguage( scriptlang, scriptname ); lang = lang or {}; err = err and hub.debug( err )
-local hci_file = "core/hci.lua"
+-- #445: read-only reader of hub_runtime's store, now under scripts/data/
+-- (was core/hci.lua, which upgrades clobbered). hub_runtime owns the
+-- file and does the create / migrate; this plugin never writes it, so it
+-- cannot race a zero over the migrated value.
+local hci_file = "scripts/data/hub_runtime.tbl"
 
 --// msgs
 local help_title = lang.help_title or "uptime"
@@ -91,15 +103,12 @@ local msg_uptime = lang.msg_uptime or [[
 --[CODE]--
 ----------
 
-local check_hci = function()
-    local hci_tbl = util.loadtable( hci_file )
-    if type( hci_tbl ) ~= "table" then
-        hci_tbl = { [ "hubruntime" ] = 0, [ "hubruntime_last_check" ] = 0, }
-        util.savetable( hci_tbl, "hci_tbl", hci_file )
-    end
-end
-
-check_hci()
+-- #445: no check_hci() here anymore. Creating the store is hub_runtime's
+-- job (it migrates the legacy value first); a create-if-missing here
+-- could write a zero file before that migration runs. get_hubruntime()
+-- below reads defensively (`or {}` / `or 0`), so a not-yet-created store
+-- simply reads as 0 until hub_runtime loads (it loads earlier in
+-- cfg.scripts, so in practice the value is already there).
 
 local get_lastconnect = function( user )
     local lastconnect
@@ -133,9 +142,10 @@ local get_hubuptime = function()
 end
 
 local get_hubruntime = function()
-    -- F-PLG-2 (#133): mirror of hub_runtime.lua defence. check_hci()
-    -- at script load creates the file; defensive `or {}` / `or 0`
-    -- here keeps mid-run loadtable failure from crashing the listener.
+    -- F-PLG-2 (#133): defensive `or {}` / `or 0` so a missing / mid-run-
+    -- failed loadtable does not crash the listener. #445: hub_runtime
+    -- owns creation + migration of the store; a not-yet-created file just
+    -- reads as 0 here (hub_runtime loads earlier in cfg.scripts).
     local hci_tbl = util.loadtable( hci_file ) or {}
     local hubruntime = hci_tbl.hubruntime or 0
     local y, d, h, m, s = util.formatseconds( hubruntime )

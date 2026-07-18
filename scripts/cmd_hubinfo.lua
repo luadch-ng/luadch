@@ -4,6 +4,16 @@
 
         usage: [+!#]hubinfo
 
+        v0.31:
+            - fix #445: read the hub-runtime store from its new home
+              `scripts/data/hub_runtime.tbl` (was `core/hci.lua`,
+              which every upgrade clobbered with zeros). Dropped the
+              local check_hci() (hub_runtime owns creation + the
+              one-time migration; this plugin is now a pure reader)
+              and made get_hubruntime() re-read on each call instead
+              of caching at load - the cached value went stale as the
+              60s onTimer advanced the counter.
+
         v0.30:
             - route the get_levels() "Level:  " row label through lang
               (msg_level_label). Part of #301 i18n cleanup.
@@ -141,7 +151,7 @@
 --------------
 
 local scriptname = "cmd_hubinfo"
-local scriptversion = "0.30"
+local scriptversion = "0.31"
 
 local cmd = "hubinfo"
 
@@ -170,8 +180,10 @@ local hub_network = cfg.get( "hub_network" ) or ""
 local hub_email = cfg.get( "hub_email" ) or ""
 local hub_owner = cfg.get( "hub_owner" ) or ""
 local ssl_params = cfg.get( "ssl_params" )
-local hci_file = "core/hci.lua"
-local hci_tbl = util.loadtable( hci_file )
+-- #445: read-only reader of hub_runtime's store, now under scripts/data/
+-- (was core/hci.lua, clobbered on every upgrade). hub_runtime owns
+-- creation + the one-time migration; this plugin never writes it.
+local hci_file = "scripts/data/hub_runtime.tbl"
 local cfg_levels = cfg.get( "levels" )
 
 --// table constants from "core/const.lua"
@@ -203,7 +215,6 @@ local check_cpu
 local check_ram_total
 local check_ram_free
 local check_hubshare
-local check_hci
 local checkTable
 local get_certinfos
 
@@ -307,14 +318,9 @@ local msg_out = lang.msg_out or [[
 --[CODE]--
 ----------
 
-check_hci = function()
-    if type( hci_tbl ) ~= "table" then
-        hci_tbl = { [ "hubruntime" ] = 0, [ "hubruntime_last_check" ] = 0, }
-        util.savetable( hci_tbl, "hci_tbl", hci_file )
-    end
-end
-
-check_hci()
+-- #445: no check_hci() here anymore. hub_runtime owns creating +
+-- migrating the store; get_hubruntime() below re-reads it defensively on
+-- each call, so a not-yet-created file just reads as 0.
 
 --// get use_ssl value
 get_ssl_value = function()
@@ -383,10 +389,11 @@ end
 
 --// uptime complete
 get_hubruntime = function()
-    -- F-PLG-2 (#133): defensive `or 0` even though check_hci() at
-    -- file load initialises hci_tbl. Guards against a malformed
-    -- pre-existing hci.lua that loaded as a table but lacks the
-    -- hubruntime field.
+    -- #445: re-read the store on each call (was a load-time cache that
+    -- went stale as hub_runtime's 60s onTimer advanced the counter).
+    -- F-PLG-2 (#133): defensive `or {}` / `or 0` so a missing / mid-run-
+    -- failed loadtable degrades to 0 instead of crashing the listener.
+    local hci_tbl = util.loadtable( hci_file ) or {}
     local hubruntime = hci_tbl.hubruntime or 0
     local y, d, h, m, s = util.formatseconds( hubruntime )
     return y .. msg_years .. d .. msg_days .. h .. msg_hours .. m .. msg_minutes .. s .. msg_seconds
