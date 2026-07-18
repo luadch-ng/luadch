@@ -583,6 +583,48 @@ do
 end
 
 ----------------------------------------------------------------------
+-- #456: export/import failure reasons must be localized (rendered
+-- through a lang template), not the raw English helper string. The
+-- lang is empty here so the plugin uses its English fallbacks; the
+-- point is that the FAILURE path now renders msg_open_failed /
+-- msg_encode_failed at all (pre-fix it returned the raw
+-- "open failed:" / "json.encode failed:" strings).
+----------------------------------------------------------------------
+
+do
+    _entries = { }; _next_id = 1
+    _vfs_enable( )
+
+    -- import a path with no vfs content -> io.open returns nil -> the
+    -- open-failed branch. Reason must be the template, not the raw one.
+    local r1
+    local u1 = { level = function( ) return 100 end, nick = function( ) return "op" end,
+                 reply = function( _self, m ) r1 = m end }
+    _registered.hub.blocklist( u1, nil, "import cfg/blocklist-missing.jsonl" )
+    truthy( "#456 import open-fail: localized 'Could not open'",
+        r1 and r1:find( "Could not open", 1, true ) )
+    falsy( "#456 import open-fail: raw 'open failed:' gone",
+        r1 and r1:find( "open failed:", 1, true ) )
+
+    -- export with a failing encoder -> the json-encode branch.
+    _entries = { }; _next_id = 1
+    plugin._do_add_entry( "192.0.2.0/24", { reason = "x" }, "op", 100 )
+    local saved_encode = _G.dkjson.encode
+    _G.dkjson.encode = function( ) return nil, "boom" end
+    local r2
+    local u2 = { level = function( ) return 100 end, nick = function( ) return "op" end,
+                 reply = function( _self, m ) r2 = m end }
+    _registered.hub.blocklist( u2, nil, "export" )
+    _G.dkjson.encode = saved_encode
+    truthy( "#456 export encode-fail: localized 'JSON encode failed'",
+        r2 and r2:find( "JSON encode failed", 1, true ) )
+    falsy( "#456 export encode-fail: raw 'json.encode failed:' gone",
+        r2 and r2:find( "json.encode failed:", 1, true ) )
+
+    _vfs_disable( )
+end
+
+----------------------------------------------------------------------
 -- Dispatcher: unknown verb path goes to msg_unknown_verb
 ----------------------------------------------------------------------
 
