@@ -54,6 +54,7 @@ local LEGACY_PATH = "core/hci.lua"
 ----------------------------------------------------------------------
 local _files          -- path -> table (nil = "file absent")
 local _writes         -- path -> table (what savetable last wrote)
+local _legacy_reads   -- # times the legacy core/hci.lua was touched at load
 
 local _real_os = os
 
@@ -74,7 +75,10 @@ _G.cfg = {
 
 _G.util = {
     -- path-aware: returns the in-memory table for that path, or nil (absent)
-    loadtable = function( path ) return _files[ path ] end,
+    loadtable = function( path )
+        if path == LEGACY_PATH then _legacy_reads = _legacy_reads + 1 end
+        return _files[ path ]
+    end,
     -- record the write AND reflect it into the fs so a re-read sees it
     savetable = function( t, _name, path ) _writes[ path ] = t; _files[ path ] = t end,
     date          = function( ) return "20260718120000" end,
@@ -82,6 +86,20 @@ _G.util = {
     formatseconds = function( ) return 0, 0, 0, 0, 0 end,
     convertepochdate = function( x ) return x end,
 }
+
+-- migrate_or_init (v0.11) probes the legacy file's existence with io.open
+-- before loadtable, so a missing core/hci.lua logs nothing. Model presence
+-- via _files and count every legacy touch so the "steady state never reads
+-- legacy" assertion below can prove the no-boot-noise fix.
+local _real_io_open = io.open
+io.open = function( path, mode )
+    if path == LEGACY_PATH then
+        _legacy_reads = _legacy_reads + 1
+        if _files[ path ] ~= nil then return { close = function( ) end } end
+        return nil, "no such file"
+    end
+    return _real_io_open( path, mode )
+end
 
 _G.hub = {
     setlistener   = function( ) end,       -- listeners captured but never fired here
@@ -96,6 +114,7 @@ _G.hub = {
 ----------------------------------------------------------------------
 local function load_plugin( )
     _writes = { }
+    _legacy_reads = 0
     return assert( loadfile( "scripts/hub_runtime.lua" ) )( )
 end
 
@@ -171,6 +190,11 @@ _files = {
 load_plugin( )
 is_nil( "steady state: new store not rewritten", _writes[ NEW_PATH ] )
 eq( "steady state: value preserved", _files[ NEW_PATH ].hubruntime, 200 )
+-- #445 follow-up (the no-boot-noise fix): with a valid new store the
+-- legacy core/hci.lua must NEVER be read/probed. Pre-fix migrate_or_init
+-- read it unconditionally on every boot, and util.loadtable logs a
+-- "checkfile: No such file" error for a missing one. Red on v0.10.
+eq( "steady state: legacy file never touched (no boot-time log noise)", _legacy_reads, 0 )
 
 -- (c) FRESH HUB: neither file exists. Loading seeds zeros at the new path.
 _files = { }
