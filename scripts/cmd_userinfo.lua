@@ -6,6 +6,18 @@
         - usage: [+!#]userinfo sid|nick|cid <sid>|<nick>|<cid>
         - no arguments means you get info about yourself
 
+        v0.25:
+            - resolve an online target by firstnick when a nick-prefix is
+              active: usr_nick_prefix re-keys the hub's nick table to the
+              PREFIXED nick, so `+userinfo nick <base nick>` silently
+              reported "user offline" for a prefixed online user. Same
+              firstnick-fallback idiom as etc_trafficmanager (upstream
+              luadch/luadch#240). Nick-prefix resolution fix (read-only).
+
+        v0.24 (retro-noted):
+            - align the +userinfo value column independent of tab width
+              (#459), via the in-code align_labels transform
+
         v0.23: by pulsar
             - added "years" to util.formatseconds
                 - changed get_lastconnect()
@@ -92,7 +104,7 @@
 --------------
 
 local scriptname = "cmd_userinfo"
-local scriptversion = "0.24"
+local scriptversion = "0.25"
 
 local cmd = "userinfo"
 
@@ -218,6 +230,25 @@ local get_lastconnect = function( user )
     return lastconnect
 end
 
+-- Resolve an online user by their firstnick when the plain nick lookup
+-- misses. usr_nick_prefix re-keys the hub's _usernicks table to the
+-- PREFIXED display nick (via user:updatenick), so hub.isnickonline( <base
+-- nick> ) returns nil for a prefixed online user and `+userinfo nick
+-- <base nick>` would report "user offline". firstnick is the ORIGINAL
+-- nick, captured once at login and never re-keyed, so iterating it is
+-- robust against ANY nick-prefix scheme. Same idiom as etc_trafficmanager's
+-- find_online_by_firstnick (closed upstream luadch/luadch#240). Kept
+-- plugin-local rather than changed in core hub.isnickonline, whose
+-- exact-current-nick semantics back availability checks elsewhere.
+local find_online_by_firstnick = function( firstnick )
+    for _, buser in pairs( hub.getusers() ) do
+        if buser:firstnick() == firstnick then
+            return buser
+        end
+    end
+    return nil
+end
+
 local onbmsg = function( user, command, parameters )
     local level = user:level()
     local me = utf.match( parameters, "^(%S+)" )
@@ -230,7 +261,7 @@ local onbmsg = function( user, command, parameters )
             user:reply( msg_usage, hub.getbot() )
             return PROCESSED
         else
-            target = ( by == "nick" and hub.isnickonline( id ) ) or ( by == "sid" and hub.issidonline( id ) )
+            target = ( by == "nick" and ( hub.isnickonline( id ) or find_online_by_firstnick( id ) ) ) or ( by == "sid" and hub.issidonline( id ) )
         end
     end
     if not target then
@@ -300,4 +331,7 @@ hub.debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
 -- Internal test seam (#459): the pure label-alignment transform.
 -- `_`-prefixed per the repo convention for a non-contract, test-only
 -- export (see docs/PLUGIN_API.md §8).
-return { _align_labels = align_labels }
+return {
+    _align_labels             = align_labels,
+    _find_online_by_firstnick = find_online_by_firstnick,
+}
