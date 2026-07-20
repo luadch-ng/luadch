@@ -5,6 +5,16 @@
             - this script adds a command "gag" to mute, kennylize or shadowmute a user
             - usage: [+!#]gag mute|kennylize|shadowmute|ungag|show <NICK> [<DURATION>]
 
+            v0.13:
+                - resolve an online target by firstnick when a nick-prefix
+                  is active. usr_nick_prefix re-keys the hub's nick table
+                  to the PREFIXED nick, so `+gag ... <base nick>` and
+                  `+gag ungag <base nick>` silently hit the "user offline"
+                  path on a prefixed online user (no gag / no notify). The
+                  gag store already keys by firstnick, so only resolution
+                  was affected. Same firstnick-fallback idiom as
+                  etc_trafficmanager (upstream luadch/luadch#240).
+
             v0.12:
                 - the ADC `+gag mute|kennylize|shadowmute` path now
                   rejects a bot target (Hubbot / OpChat / RegChat) with
@@ -112,7 +122,7 @@
 --// settings begin //--
 
 local scriptname = "cmd_gag"
-local scriptversion = "0.12"
+local scriptversion = "0.13"
 
 local cmd = "gag"
 local prm_mute = "mute"
@@ -227,6 +237,7 @@ local save
 local replace_chars
 local parse_duration
 local find_entry
+local find_online_by_firstnick
 local resolve_target_for_ungag
 local cleanup_expired
 local http_handler_gag
@@ -289,12 +300,30 @@ find_entry = function(nick)
     return nil, nil
 end
 
+-- Resolve an online user by their firstnick when the plain nick lookup
+-- misses. usr_nick_prefix re-keys the hub's _usernicks table to the
+-- PREFIXED display nick (via user:updatenick), so hub.isnickonline(<base
+-- nick>) returns nil for a prefixed online user and the gag/ungag paths
+-- would silently take the "user offline" branch. firstnick is the
+-- ORIGINAL nick, captured once at login and never re-keyed, so iterating
+-- it is robust against ANY nick-prefix scheme (the gag store already
+-- keys by firstnick). Same idiom as etc_trafficmanager's
+-- find_online_by_firstnick (closed upstream luadch/luadch#240). Kept
+-- plugin-local rather than changed in core hub.isnickonline, whose
+-- exact-current-nick semantics back availability checks elsewhere.
+find_online_by_firstnick = function(firstnick)
+    for _, buser in pairs(hub.getusers()) do
+        if buser:firstnick() == firstnick then return buser end
+    end
+    return nil
+end
+
 -- Resolve target for ungag: accept online users OR offline registered
 -- users (looked up via hub.getregusers). Returns:
 --   firstnick, display_nick, level, online_user_obj_or_nil
 -- or nil if neither online nor registered.
 resolve_target_for_ungag = function(nick_arg)
-    local online = hub.isnickonline(nick_arg)
+    local online = hub.isnickonline(nick_arg) or find_online_by_firstnick(nick_arg)
     if online then
         return online:firstnick(), online:nick(), online:level(), online
     end
@@ -360,7 +389,7 @@ local onbmsg = function(user, command, parameters)
     end
 
     -- mute / kennylize / shadowmute require online target.
-    local target = hub.isnickonline(target_arg)
+    local target = hub.isnickonline(target_arg) or find_online_by_firstnick(target_arg)
     if not target then
         user:reply(msg_off, hub.getbot())
         return PROCESSED
@@ -760,8 +789,10 @@ end
 hub.debug("** Loaded " .. scriptname .. " " .. scriptversion .. " **")
 
 
--- exposed for the unit test (#355 bot-guard regression)
+-- exposed for the unit tests (#355 bot-guard regression + nick-prefix
+-- resolution regression)
 return {
-    _onbmsg  = onbmsg,
-    _gag_tbl = gag_tbl,
+    _onbmsg                   = onbmsg,
+    _gag_tbl                  = gag_tbl,
+    _find_online_by_firstnick = find_online_by_firstnick,
 }

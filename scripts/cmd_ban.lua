@@ -11,6 +11,20 @@
             - <time> and <reason> are optional
             - the keyword `permanent` in the <time> slot bans forever
 
+        v0.45:
+            - fix: resolve an online target by firstnick when a nick-prefix
+              is active. usr_nick_prefix re-keys the hub's nick table to
+              the PREFIXED nick, so `+ban nick <base nick> ...` (and the
+              HTTP POST /v1/bans nick target) silently took the OFFLINE
+              path on a prefixed online user: the ban was stored but the
+              user was NOT kicked (the operator believed they had removed
+              them). Both the ADC nick branch and http_find_online now
+              fall back to firstnick. Same idiom as etc_trafficmanager's
+              find_online_by_firstnick (closed upstream luadch/luadch#240).
+              This is what looked like "permanent ban does not kick" on the
+              testhub - it was the nick-prefix resolution, not #444. #444
+              permanent itself is unaffected.
+
         v0.44:
             - feat: permanent ban via the `permanent` keyword in the
               <time> slot (`+ban nick <NICK> permanent [<REASON>]`) and
@@ -255,7 +269,7 @@
 --------------
 
 local scriptname = "cmd_ban"
-local scriptversion = "0.44"
+local scriptversion = "0.45"
 
 local cmd = "ban"
 local cmd2 = "unban"
@@ -707,9 +721,30 @@ end
 -- lookup. Offline fallback for `nick` is done by the caller via
 -- `hub.getregusers()` because it must distinguish "offline regged"
 -- (allowed) from "completely unknown" (rejected).
+-- Resolve an online user by their firstnick when the plain nick lookup
+-- misses. usr_nick_prefix re-keys the hub's _usernicks table to the
+-- PREFIXED display nick (via user:updatenick), so hub.isnickonline( <base
+-- nick> ) returns nil for a prefixed online user and the nick ban would
+-- silently take the OFFLINE branch: the ban is stored but the user is not
+-- kicked. firstnick is the ORIGINAL nick, captured once at login and
+-- never re-keyed, so iterating it is robust against ANY nick-prefix
+-- scheme. Same idiom as etc_trafficmanager's find_online_by_firstnick
+-- (closed upstream luadch/luadch#240). Kept plugin-local rather than
+-- changed in core hub.isnickonline, whose exact-current-nick semantics
+-- back availability checks ("is this nick free?") in cmd_reg /
+-- cmd_nickchange.
+local find_online_by_firstnick = function( firstnick )
+    for _, buser in pairs( hub.getusers() ) do
+        if buser:firstnick() == firstnick then
+            return buser
+        end
+    end
+    return nil
+end
+
 local http_find_online = function( target_type, target )
     if target_type == "sid" then return hub.issidonline( target ) end
-    if target_type == "nick" then return hub.isnickonline( target ) end
+    if target_type == "nick" then return hub.isnickonline( target ) or find_online_by_firstnick( target ) end
     if target_type == "cid" then return hub.iscidonline( target ) end
     if target_type == "ip" then return hub.isiponline( target ) end
     return nil
@@ -1083,7 +1118,7 @@ local onbmsg = function( user, command, parameters )
         user:reply( msg_usage, hub.getbot() )
         return PROCESSED
     end
-    local target = ( by == "nick" and hub.isnickonline( id ) ) or
+    local target = ( by == "nick" and ( hub.isnickonline( id ) or find_online_by_firstnick( id ) ) ) or
                    ( by == "sid" and hub.issidonline( id ) ) or
                    ( by == "cid" and hub.iscidonline( id ) ) or
                    ( by == "ip" and hub.isiponline( id ) )
@@ -1374,5 +1409,12 @@ return {    -- export bans
     -- in this file ignore the return - kept additive on purpose.
     bans = bans,
     bans_path = bans_path,
+
+    -- Internal test seams (nick-prefix resolution regression). `_`-prefixed
+    -- per the repo convention for non-contract, test-only exports (see
+    -- docs/PLUGIN_API.md §8); NOT part of the hub.import("cmd_ban") contract.
+    _onbmsg                   = onbmsg,
+    _http_find_online         = http_find_online,
+    _find_online_by_firstnick = find_online_by_firstnick,
 
 }

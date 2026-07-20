@@ -4,6 +4,16 @@
 
         Usage: [+!#]hideshare <NICK>
 
+        v0.6:
+            - resolve an online target by firstnick when a nick-prefix is
+              active: usr_nick_prefix re-keys the hub's nick table to the
+              PREFIXED nick, so `+hideshare <base nick>` silently hit the
+              "user offline" path (no hide/unhide) on a prefixed online
+              user. The hide store already keys by firstnick, so only
+              resolution was affected. Same firstnick-fallback idiom as
+              etc_trafficmanager (upstream luadch/luadch#240). Nick-prefix
+              resolution fix.
+
         v0.5:
             - also hide the shared-file count (ADC INF SF), not just the
               share size (SS) - the file count stayed visible in clients
@@ -34,7 +44,7 @@
 --------------
 
 local scriptname = "usr_hide_share"
-local scriptversion = "0.5"
+local scriptversion = "0.6"
 
 local cmd = "hideshare"
 
@@ -69,6 +79,7 @@ local ucmd_menu_ct2_1 = lang.ucmd_menu_ct2_1 or { "Hide//unhide share", "OK" }
 local checkOnListener
 local checkOnCommand
 local onbmsg
+local find_online_by_firstnick
 
 
 ----------
@@ -166,6 +177,26 @@ hub.setlistener( "onConnect", {},
     end
 )
 
+-- Resolve an online user by their firstnick when the plain nick lookup
+-- misses. usr_nick_prefix re-keys the hub's _usernicks table to the
+-- PREFIXED display nick (via user:updatenick), so hub.isnickonline( <base
+-- nick> ) returns nil for a prefixed online user and this command would
+-- silently take the "user offline" path (no hide/unhide). firstnick is
+-- the ORIGINAL nick, captured once at login and never re-keyed, so
+-- iterating it is robust against ANY nick-prefix scheme (the hide store
+-- already keys by firstnick). Same idiom as etc_trafficmanager's
+-- find_online_by_firstnick (closed upstream luadch/luadch#240). Kept
+-- plugin-local rather than changed in core hub.isnickonline, whose
+-- exact-current-nick semantics back availability checks elsewhere.
+find_online_by_firstnick = function( firstnick )
+    for _, buser in pairs( hub.getusers() ) do
+        if buser:firstnick() == firstnick then
+            return buser
+        end
+    end
+    return nil
+end
+
 onbmsg = function( user, command, parameters )
     local user_nick, user_level = user:nick(), user:level()
     local target_nick, target_firstnick, target_level
@@ -176,7 +207,7 @@ onbmsg = function( user, command, parameters )
             user:reply( msg_denied, hub.getbot() )
             return PROCESSED
         end
-        local target = hub.isnickonline( param )
+        local target = hub.isnickonline( param ) or find_online_by_firstnick( param )
         if target then
             if not target:isbot() then
                 checkOnCommand( user, target )
@@ -193,3 +224,11 @@ onbmsg = function( user, command, parameters )
 end
 
 hub.debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
+
+-- Internal test seams (nick-prefix resolution regression). `_`-prefixed
+-- per the repo convention for non-contract, test-only exports (see
+-- docs/PLUGIN_API.md §8).
+return {
+    _onbmsg                   = onbmsg,
+    _find_online_by_firstnick = find_online_by_firstnick,
+}
