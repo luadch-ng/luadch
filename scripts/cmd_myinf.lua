@@ -4,6 +4,14 @@
 
         usage: [+!#]myinf [<NICK>]
 
+        v0.2:
+            - resolve an online target by firstnick when a nick-prefix is
+              active: usr_nick_prefix re-keys the hub's nick table to the
+              PREFIXED nick, so `+myinf <base nick>` silently fell back to
+              showing your OWN inf instead of the prefixed online user's.
+              Same firstnick-fallback idiom as etc_trafficmanager (upstream
+              luadch/luadch#240). Nick-prefix resolution fix (read-only).
+
         v0.1: by blastbeat
             - Improve formatting
 
@@ -18,7 +26,7 @@
 --------------
 
 local scriptname = "cmd_myinf"
-local scriptversion = "0.1"
+local scriptversion = "0.2"
 
 local cmd = "myinf"
 
@@ -32,6 +40,7 @@ local hub_getbot = hub.getbot()
 local hub_debug = hub.debug
 local hub_import = hub.import
 local hub_isnickonline = hub.isnickonline
+local hub_getusers = hub.getusers
 local cfg_get = cfg.get
 local cfg_loadlanguage = cfg.loadlanguage
 local utf_match = utf.match
@@ -81,6 +90,26 @@ local get_inf = function( target )
     return buf
 end
 
+-- Resolve an online user by their firstnick when the plain nick lookup
+-- misses. usr_nick_prefix re-keys the hub's _usernicks table to the
+-- PREFIXED display nick (via user:updatenick), so hub_isnickonline( <base
+-- nick> ) returns nil for a prefixed online user and `+myinf <base nick>`
+-- would silently fall back to showing the caller's own inf. firstnick is
+-- the ORIGINAL nick, captured once at login and never re-keyed, so
+-- iterating it is robust against ANY nick-prefix scheme. Same idiom as
+-- etc_trafficmanager's find_online_by_firstnick (closed upstream
+-- luadch/luadch#240). Kept plugin-local rather than changed in core
+-- hub.isnickonline, whose exact-current-nick semantics back availability
+-- checks elsewhere.
+local find_online_by_firstnick = function( firstnick )
+    for _, buser in pairs( hub_getusers() ) do
+        if buser:firstnick() == firstnick then
+            return buser
+        end
+    end
+    return nil
+end
+
 local onbmsg = function( user, command, parameters )
     local user_level = user:level()
     if not permission[ user_level ] then
@@ -89,7 +118,7 @@ local onbmsg = function( user, command, parameters )
     end
     local param = utf_match( parameters, "^(%S+)$" )
     if param then
-        local target = hub_isnickonline( param )
+        local target = hub_isnickonline( param ) or find_online_by_firstnick( param )
         if target then
             user:reply( utf_format( msg_inf, target:nick(), get_inf( target ), hub_getbot ) )
             return PROCESSED
@@ -118,3 +147,11 @@ hub.setlistener( "onStart", {},
 )
 
 hub_debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
+
+-- Internal test seams (nick-prefix resolution regression). `_`-prefixed
+-- per the repo convention for non-contract, test-only exports (see
+-- docs/PLUGIN_API.md §8).
+return {
+    _onbmsg                   = onbmsg,
+    _find_online_by_firstnick = find_online_by_firstnick,
+}

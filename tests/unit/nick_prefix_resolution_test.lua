@@ -3,9 +3,11 @@
     tests/unit/nick_prefix_resolution_test.lua
 
     Regression test for the nick-prefix resolution bug across the operator
-    ACTION commands that resolve an arbitrary online user by a typed nick
-    and then act on them (kick / gag / redirect / disconnect / hide-share /
-    message-block).
+    commands that resolve an arbitrary online user by a typed nick and then
+    act on / report about them: ACTION commands (kick / gag / redirect /
+    disconnect / hide-share / message-block) and read-only INFO commands
+    (userinfo / sslinfo / myip / myinf), which showed "offline" or fell
+    back to the caller's own info for a prefixed online user.
 
     THE BUG: usr_nick_prefix.lua prefixes online nicks via
     user:updatenick( prefix .. nick ), which re-keys the hub's internal
@@ -36,10 +38,10 @@
     The behaviour assertions (kick / gag / redirect / block fired) also
     guard against a future "hollow" regression that keeps the seam but
     drops the `or find_online_by_firstnick` wiring, because hub.isnickonline
-    is stubbed to always miss. Reproduce red:
-    `git stash push scripts/cmd_ban.lua scripts/cmd_disconnect.lua
-    scripts/cmd_gag.lua scripts/cmd_redirect.lua scripts/usr_hide_share.lua
-    scripts/etc_msgmanager.lua` then run this file; `git stash pop` to restore.
+    is stubbed to always miss. Reproduce red: `git stash push` the ten
+    touched plugins (cmd_ban, cmd_disconnect, cmd_gag, cmd_redirect,
+    usr_hide_share, etc_msgmanager, cmd_userinfo, cmd_sslinfo, cmd_myip,
+    cmd_myinf) then run this file; `git stash pop` to restore.
 
     Plugins get NO `use`; every hub-injected global is a stub below. Base
     Lua globals (type/pairs/os/io/...) are the real ones - this test runs
@@ -79,6 +81,7 @@ local function make_prefixed_target( )
     t.kill      = function( _self, adcstr ) t._killed = adcstr or true end
     t.redirect  = function( _self, url ) t._redirected = url end
     t.inf       = function( ) return { setnp = function( _s, k, v ) t._inf_set[ k ] = v end } end
+    t.sslinfo   = function( ) return { protocol = "TLSv1.3", cipher = "TLS_AES_256_GCM_SHA384" } end
     return t
 end
 
@@ -91,6 +94,7 @@ local function make_op( )
         nick      = function( ) return "[OP]op" end,
         firstnick = function( ) return "op" end,
         sid       = function( ) return "OOOO" end,
+        ip        = function( ) return "203.0.113.1" end,   -- caller ip (myip self-fallback)
         reply     = function( _self, msg ) last = msg end,
         _last     = function( ) return last end,
     }
@@ -452,6 +456,131 @@ do
     else
         ok( "etc_msgmanager: exports _is_online (pre-fix plugin?)", false )
     end
+end
+
+----------------------------------------------------------------------
+-- READ-ONLY info commands: they only DISPLAY a resolved user, but under a
+-- nick-prefix `+userinfo nick <base>` / `+sslinfo <base>` showed "offline"
+-- and `+myip <base>` / `+myinf <base>` silently fell back to the caller's
+-- own info. Same one-line fallback; the resolution helper is unit-tested
+-- for all four, and cmd_myip + cmd_sslinfo additionally get end-to-end
+-- behaviour checks (target ip / target ssl info reached, not the caller's
+-- / not "not found"). cmd_userinfo + cmd_myinf stay helper-level: an
+-- end-to-end check would need heavy INF / stats accessor stubs and the
+-- wiring is the byte-identical one-liner proven e2e elsewhere in this file.
+-- (usr_uptime resolves a nick only
+-- on its CT2 right-click path, which passes the prefixed %[userNI]; a
+-- typed +uptime shows self and never resolves a base nick - so it is not
+-- reachably broken and is deliberately excluded.)
+----------------------------------------------------------------------
+
+-- cmd_userinfo: `+userinfo nick <base nick>` must resolve, not "offline"
+do
+    local target = make_prefixed_target( )
+    _G.cfg = {
+        get = function( k )
+            if k == "language" then return "en" end
+            if k == "cmd_userinfo_permission" then return { [10] = 10, [20] = 20, [100] = 100 } end
+            if k == "levels" then return { [20] = "REG", [100] = "Owner" } end
+            return nil
+        end,
+        loadlanguage = function( ) return {} end,
+    }
+    _G.utf  = _utf
+    _G.util = {
+        getlowestlevel = function( tbl )
+            local lo; for lvl in pairs( tbl ) do if not lo or lvl < lo then lo = lvl end end
+            return lo or 0
+        end,
+    }
+    _G.audit = _audit
+    _G.hub   = make_hub( target )
+
+    local p = assert( loadfile( "scripts/cmd_userinfo.lua" ) )( )
+    check_helper( "cmd_userinfo", p, target )
+end
+
+-- cmd_sslinfo: `+sslinfo <base nick>` must resolve, not "user not found"
+do
+    local target = make_prefixed_target( )
+    _G.cfg = {
+        get = function( k )
+            if k == "language" then return "en" end
+            if k == "cmd_sslinfo_minlevel" then return 10 end
+            return nil
+        end,
+        loadlanguage = function( ) return {} end,
+    }
+    _G.utf   = _utf
+    _G.util  = {}
+    _G.audit = _audit
+    _G.hub   = make_hub( target )
+
+    local p = assert( loadfile( "scripts/cmd_sslinfo.lua" ) )( )
+    check_helper( "cmd_sslinfo", p, target )
+    if type( p ) == "table" and type( p._onbmsg ) == "function" then
+        local op = make_op( )
+        local r = p._onbmsg( op, "sslinfo", BASE_NICK )
+        ok( "cmd_sslinfo: handler returns PROCESSED", r == "PROCESSED" )
+        ok( "cmd_sslinfo: resolves + shows the prefixed user's ssl info",
+            type( op._last( ) ) == "string" and string.find( op._last( ), PREFIX_NICK, 1, true ) ~= nil )
+        ok( "cmd_sslinfo: reply is NOT 'user not found'", op._last( ) ~= "User not found." )
+    else
+        ok( "cmd_sslinfo: exports _onbmsg (pre-fix plugin?)", false )
+    end
+end
+
+-- cmd_myip: `+myip <base nick>` must show the TARGET's ip, not fall back
+-- to the caller's own ip (the read-only self-fallback symptom).
+do
+    local target = make_prefixed_target( )
+    _G.cfg = {
+        get = function( k ) if k == "language" then return "en" end return nil end,
+        loadlanguage = function( ) return {} end,
+    }
+    _G.utf   = _utf
+    _G.util  = {}
+    _G.audit = _audit
+    _G.hub   = make_hub( target )
+
+    local p = assert( loadfile( "scripts/cmd_myip.lua" ) )( )
+    check_helper( "cmd_myip", p, target )
+    if type( p ) == "table" and type( p._onbmsg ) == "function" then
+        local op = make_op( )
+        local r = p._onbmsg( op, "myip", BASE_NICK )
+        ok( "cmd_myip: handler returns PROCESSED", r == "PROCESSED" )
+        ok( "cmd_myip: shows the prefixed user's ip, not the caller's",
+            type( op._last( ) ) == "string" and string.find( op._last( ), "192.0.2.7", 1, true ) ~= nil )
+        ok( "cmd_myip: reply is NOT the caller's own ip",
+            type( op._last( ) ) == "string" and string.find( op._last( ), "203.0.113.1", 1, true ) == nil )
+    else
+        ok( "cmd_myip: exports _onbmsg (pre-fix plugin?)", false )
+    end
+end
+
+-- cmd_myinf: `+myinf <base nick>` resolution
+do
+    local target = make_prefixed_target( )
+    _G.cfg = {
+        get = function( k )
+            if k == "language" then return "en" end
+            if k == "cmd_myinf_permission" then return { [10] = 10, [20] = 20, [100] = 100 } end
+            return nil
+        end,
+        loadlanguage = function( ) return {} end,
+    }
+    _G.utf  = _utf
+    _G.util = {
+        getlowestlevel = function( tbl )
+            local lo; for lvl in pairs( tbl ) do if not lo or lvl < lo then lo = lvl end end
+            return lo or 0
+        end,
+    }
+    _G.audit = _audit
+    _G.hub   = make_hub( target )
+
+    local p = assert( loadfile( "scripts/cmd_myinf.lua" ) )( )
+    check_helper( "cmd_myinf", p, target )
 end
 
 ----------------------------------------------------------------------
