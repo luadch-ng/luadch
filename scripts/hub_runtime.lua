@@ -6,6 +6,16 @@
 
         usage: [+!#]runtime show|reset
 
+        v0.11:
+            - fix (#445 follow-up): migrate_or_init read core/hci.lua on
+              every boot, even once the new scripts/data/hub_runtime.tbl
+              store already held a value. util.loadtable logs a "checkfile:
+              No such file" error for a missing legacy file, and Docker
+              never ships core/hci.lua, so the error log gained one such
+              line on every single boot. Now the legacy file is consulted
+              only when the new store is absent/corrupt, and its existence
+              is probed with io.open first, so a missing one logs nothing.
+
         v0.10:
             - fix #445: move the persisted runtime store from
               `core/hci.lua` to `scripts/data/hub_runtime.tbl`.
@@ -72,7 +82,7 @@
 --------------
 
 local scriptname = "hub_runtime"
-local scriptversion = "0.10"
+local scriptversion = "0.11"
 
 local cmd = "runtime"
 local cmd_p1 = "show"
@@ -161,7 +171,22 @@ local function runtime_seed( existing, legacy )
 end
 
 local function migrate_or_init()
-    local seed = runtime_seed( util.loadtable( hci_file ), util.loadtable( legacy_hci_file ) )
+    local existing = util.loadtable( hci_file )
+    if type( existing ) == "table" and type( existing.hubruntime ) == "number" then
+        -- New store already holds a value: migration is done. Do NOT read
+        -- the legacy core/hci.lua - util.loadtable logs a scary "checkfile:
+        -- No such file" error for a missing one, and on Docker (core/ is
+        -- baked, never migratable) it is never there, so re-reading it on
+        -- every boot only spams the error log (#445 follow-up).
+        return
+    end
+    -- New store absent / corrupt: consult the legacy core/hci.lua ONCE,
+    -- but probe its existence with io.open first so a missing legacy file
+    -- (the normal case now, and always on Docker) logs nothing.
+    local legacy
+    local f = io.open( legacy_hci_file, "r" )
+    if f then f:close(); legacy = util.loadtable( legacy_hci_file ) end
+    local seed = runtime_seed( existing, legacy )
     if seed then util.savetable( seed, "hub_runtime", hci_file ) end
 end
 
