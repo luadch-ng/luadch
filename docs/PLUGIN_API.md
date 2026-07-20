@@ -771,11 +771,11 @@ is exhaustive, not a sample. A plugin's public API is whatever its
 final `return { ... }` exports under a **bare name**, reached via
 `hub.import( "<plugin>" )`. Exports whose name begins with `_` are
 internal unit-test or migration seams (the repo convention for "not
-API") and are omitted on purpose; five plugins - `cmd_gag`,
-`cmd_userinfo`, `etc_blocklist`, `etc_whitelist`, `hub_runtime` - export
-**only** such seams and so appear nowhere below. Absence from this table
-therefore means a plugin exports nothing public, not that the doc is
-behind.
+API") and are omitted on purpose; eight plugins - `cmd_disconnect`,
+`cmd_gag`, `cmd_redirect`, `cmd_userinfo`, `etc_blocklist`,
+`etc_whitelist`, `hub_runtime`, `usr_hide_share` - export **only** such
+seams and so appear nowhere below. Absence from this table therefore
+means a plugin exports nothing public, not that the doc is behind.
 
 | Plugin | Import | Public exports |
 |---|---|---|

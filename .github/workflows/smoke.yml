@@ -319,6 +319,15 @@ jobs:
       - name: Run cmd_userinfo align unit test
         run: lua5.4 tests/unit/cmd_userinfo_align_test.lua
 
+      # nick-prefix resolution: +ban / +disconnect / +gag / +redirect /
+      # +hideshare / +msgmanager must resolve a prefixed online user by
+      # their base nick (usr_nick_prefix re-keys the hub nick table).
+      # Drives each patched resolution and asserts the prefixed user is
+      # kicked/gagged/redirected/share-toggled/resolved, not sent down the
+      # offline path.
+      - name: Run nick-prefix resolution unit test
+        run: lua5.4 tests/unit/nick_prefix_resolution_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -568,6 +577,10 @@ jobs:
       - name: Run cmd_userinfo align unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/cmd_userinfo_align_test.lua
+
+      - name: Run nick-prefix resolution unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/nick_prefix_resolution_test.lua
 
       - name: Configure
         shell: msys2 {0}
