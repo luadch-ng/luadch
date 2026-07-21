@@ -38,6 +38,8 @@ return {
     msg_export_ok     = "%s exported %d whitelist entries to %s.",
     msg_import_ok     = "%s imported %d entries from %s (%d skipped, %d errors).",
     msg_unsafe_path   = "Path '%s' is unsafe: %s",
+    msg_open_failed   = "Could not open the file: %s",
+    msg_encode_failed = "JSON encode failed: %s",
     msg_import_level  = "Import requires level %d or higher (you are %d).",
 
 }

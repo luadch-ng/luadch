@@ -37,6 +37,8 @@ return {
     msg_export_ok     = "%s hat %d Blocklist-Eintraege nach %s exportiert.",
     msg_import_ok     = "%s hat %d Eintraege aus %s importiert (%d uebersprungen, %d Fehler).",
     msg_unsafe_path   = "Pfad '%s' ist unsicher: %s",
+    msg_open_failed   = "Konnte die Datei nicht oeffnen: %s",
+    msg_encode_failed = "JSON-Kodierung fehlgeschlagen: %s",
     msg_import_level  = "Import erfordert Level %d oder hoeher (du hast %d).",
     msg_save_failed   = "Speichern der Blocklist fehlgeschlagen: %s",
 

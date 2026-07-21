@@ -2,6 +2,15 @@
 
     etc_records.lua by Motnahp
 
+        v0.9:
+            - fix #465: seed the positional records table's slots at load
+              so a missing / empty / corrupt etc_records.tbl no longer
+              crashes the onLogin + onTimer max-tracking comparisons
+              (`> tonumber(records[3|6|8])` -> "compare nil with number"
+              on every login). The `or { }` on load only guarded a nil
+              table, not nil slots. Degrades gracefully now
+              (DEVELOPMENT.md §5); existing values preserved.
+
         v0.8:
             - HTTP API: GET /v1/records (read), DELETE /v1/records (admin)
               #82 Phase 4 PR-2
@@ -42,7 +51,7 @@
 --------------
 
 local scriptname = "etc_records"
-local scriptversion = "0.8"
+local scriptversion = "0.9"
 
 local cmd = "records"
 local prm1 = "show"
@@ -140,6 +149,27 @@ local ucmd_menu_reset = lang.ucmd_menu_reset or { "Hub", "etc", "Hub Records", "
 local start = os_time( )
 local records_path = "scripts/data/etc_records.tbl"
 local records = util_loadtable( records_path ) or { }  -- load the left ones
+
+-- #465: `records` is a positional 8-slot table. A missing / empty /
+-- truncated / corrupt file leaves the numeric max-slots nil, and the
+-- onLogin + onTimer max-tracking comparisons (`> tonumber(records[3|6|8])`
+-- in hubshare / onliners / topshare) then crash with "attempt to compare
+-- nil with number" on EVERY login until the file is restored. `or { }`
+-- above only guards a nil TABLE, not nil slots. Seed any absent / non-
+-- numeric slot to the same default shape reset() builds, so the plugin
+-- degrades gracefully on a missing / corrupt file (DEVELOPMENT.md §5).
+-- Existing values are preserved; `tonumber(...) or N` also repairs a slot
+-- that somehow persisted as a non-numeric string. The date / time / nick
+-- reads are already nil-tolerant downstream (format_recorded_at, `or
+-- "none"`) but are defaulted here too so the table is always well-formed.
+records[ 1 ] = records[ 1 ] or os_date( "%Y-%m-%d" )  -- share record date
+records[ 2 ] = records[ 2 ] or os_date( "%H:%M:%S" )  -- share record time
+records[ 3 ] = tonumber( records[ 3 ] ) or 1          -- max total hubshare (bytes)
+records[ 4 ] = records[ 4 ] or os_date( "%Y-%m-%d" )  -- user-count record date
+records[ 5 ] = records[ 5 ] or os_date( "%H:%M:%S" )  -- user-count record time
+records[ 6 ] = tonumber( records[ 6 ] ) or 0          -- max online users
+records[ 7 ] = records[ 7 ] or "none"                 -- top-share nick
+records[ 8 ] = tonumber( records[ 8 ] ) or 0          -- max single-user share (bytes)
 
 local onbmsg = function( user, adccmd, parameters )
     local id = utf_match( parameters, "^(%S+)$" )

@@ -1,14 +1,15 @@
 ﻿return {
 
     help_title = "cmd_ban.lua - Ban",
-    help_usage = "[+!#]ban nick|cid|ip <NICK>|<CID>|<IP> [<ZEIT> <GRUND>] / [+!#]ban show|showhis [<NICK>]|clear|clearhis",
-    help_desc = "Bannt einen User; <ZEIT> entspricht Minuten und muss mindestens 1 sein",
+    help_usage = "[+!#]ban nick|cid|ip <NICK>|<CID>|<IP> [<ZEIT>|permanent <GRUND>] / [+!#]ban show|showhis [<NICK>]|clear|clearhis",
+    help_desc = "Bannt einen User; <ZEIT> entspricht Minuten und muss mindestens 1 sein, oder das Schlüsselwort 'permanent' für einen Bann, der nie abläuft",
 
     msg_denied = "Du bist nicht befugt diesen Befehl zu nutzen.",
     msg_notint = "Das benutzen von Dezimalzahlen für die Banzeit ist nicht erlaubt",
-    msg_badtime = "Die Banzeit muss mindestens 1 Minute betragen.",
+    msg_badtime = "Die Banzeit muss mindestens 1 Minute betragen (oder das Schlüsselwort 'permanent' nutzen).",
     msg_reason = "Kein Grund.",
-    msg_usage = "Gebrauch: [+!#]ban nick|cid|ip <NICK>|<CID>|<IP> [<ZEIT> <GRUND>] / [+!#]ban show|showhis [<NICK>]|clear|clearhis",
+    msg_permanent = "dauerhaft",
+    msg_usage = "Gebrauch: [+!#]ban nick|cid|ip <NICK>|<CID>|<IP> [<ZEIT>|permanent <GRUND>] / [+!#]ban show|showhis [<NICK>]|clear|clearhis",
     msg_off = "Der User wurde nicht gefunden.",
     msg_god = "Der User hat ein höheres Level als du.",
     msg_bot = "User ist ein Bot.",
@@ -34,6 +35,7 @@
     ucmd_menu7_1 = { "Bannen", "1 Monat" },
     ucmd_menu7_2 = { "Bannen", "6 Monate" },
     ucmd_menu7_3 = { "Bannen", "1 Jahr" },
+    ucmd_menu_perm = { "Bannen", "dauerhaft" },
     ucmd_menu8 = { "Bannen", "andere" },
     ucmd_menu9 = { "User", "Control", "Bannen", "nach NICK" },
     ucmd_menu10 = { "User", "Control", "Bannen", "nach CID" },

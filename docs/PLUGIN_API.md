@@ -766,19 +766,43 @@ end )
 
 ## 8. Bundled plugin exports
 
-Plugins commonly imported via `hub.import()`:
+Every bundled plugin with a public surface is listed here - this table
+is exhaustive, not a sample. A plugin's public API is whatever its
+final `return { ... }` exports under a **bare name**, reached via
+`hub.import( "<plugin>" )`. Exports whose name begins with `_` are
+internal unit-test or migration seams (the repo convention for "not
+API") and are omitted on purpose; eleven plugins - `cmd_disconnect`,
+`cmd_gag`, `cmd_myinf`, `cmd_myip`, `cmd_redirect`, `cmd_sslinfo`,
+`cmd_userinfo`, `etc_blocklist`, `etc_whitelist`, `hub_runtime`,
+`usr_hide_share` - export **only** such seams and so appear nowhere
+below. Absence from this table therefore means a plugin exports nothing
+public, not that the doc is behind.
 
-| Plugin | Module | Methods |
+| Plugin | Import | Public exports |
 |---|---|---|
-| `bot_opchat` | `opchat = hub.import("bot_opchat")` | `opchat.feed( msg )` - send a message to the opchat |
-| `bot_regchat` | `regchat = hub.import("bot_regchat")` | `regchat.feed( msg )` - send to regchat |
-| `etc_report` | `report = hub.import("etc_report")` | `report.send( activate, hubbot, opchat, level, msg )` |
-| `cmd_ban` | `ban = hub.import("cmd_ban")` | `ban.add( user, target, bantime, reason, script )`, `ban.bans()` |
-| `usr_uptime` | `uptime = hub.import("usr_uptime")` | `uptime.tbl()` returns user-uptime database |
-| `etc_trafficmanager` | `block = hub.import("etc_trafficmanager")` | `block.add( firstnick, scriptname, reason )`, `block.del( firstnick, scriptname )` |
-| `etc_hubcommands` | `hubcmd = hub.import("etc_hubcommands")` | `hubcmd.add( cmd_or_list, onbmsg_fn )` - register a `+command` handler |
+| `bot_opchat` | `opchat = hub.import( "bot_opchat" )` | `opchat.feed( msg )` - send a normal message to the opchat; `opchat.bot` - the opchat bot object |
+| `bot_regchat` | `regchat = hub.import( "bot_regchat" )` | `regchat.feed( msg )` - send a normal message to the regchat |
+| `cmd_ban` | `ban = hub.import( "cmd_ban" )` | `ban.add( user, target, bantime, reason, script )` (bantime in seconds); `ban.del( target )`; `ban.bans` - the in-memory ban table **by reference** (see note); `ban.bans_path` - the store path for load-on-demand |
+| `cmd_help` | `help = hub.import( "cmd_help" )` | `help.reg( title, usage, desc, level )` - register a `+help` entry |
+| `etc_aliases` | `al = hub.import( "etc_aliases" )` | `al.resolve( name )` -> alias target or nil; `al.get_aliases_tbl()` -> the alias table |
+| `etc_blocklist_feeds` | `feeds = hub.import( "etc_blocklist_feeds" )` | `feeds.get_status()` -> per-feed refresh status |
+| `etc_clientblocker` | `cb = hub.import( "etc_clientblocker" )` | `cb.resolve( version_string )` -> block reason or nil; `cb.get_patterns_tbl()` -> the pattern table |
+| `etc_geoip` | `geo = hub.import( "etc_geoip" )` | `geo.resolve( country, asn )` -> match string or nil; `geo.classify( ip )` -> country, asn, org; `geo.get_status()` -> policy + DB status |
+| `etc_hubcommands` | `hubcmd = hub.import( "etc_hubcommands" )` | `hubcmd.add( cmd_or_list, onbmsg_fn )` - register a `+command` handler; `hubcmd.has( cmd )` -> bool; `hubcmd.list()` -> `{ name, fn }` pairs |
+| `etc_msgmanager` | `msg = hub.import( "etc_msgmanager" )` | `msg.get_block_tbl()` -> the message-block table |
+| `etc_proxydetect` | `pd = hub.import( "etc_proxydetect" )` | `pd.classify( parsed, ip )` -> matched proxy/VPN types; `pd.get_status()` -> provider + cache status |
+| `etc_report` | `report = hub.import( "etc_report" )` | `report.send( activate, hubbot, opchat, level, msg )` - report to ops at or above `level`; `report.broadcast( msg, llevel, ulevel, from, pm )` - broadcast to a level **range** |
+| `etc_trafficmanager` | `block = hub.import( "etc_trafficmanager" )` | `block.add( firstnick, scriptname, reason )`; `block.del( firstnick, scriptname )` |
+| `etc_usercommands` | `ucmd = hub.import( "etc_usercommands" )` | `ucmd.add( menu, command, params, flags, llevel )` - register a user command; `ucmd.format( menu, command, params, flags, llevel )` -> the UCMD string |
+| `usr_uptime` | `uptime = hub.import( "usr_uptime" )` | `uptime.tbl()` -> the user-uptime database table |
 
-See each plugin's source for the full exported surface.
+> `cmd_ban.bans` is the live table **by reference** - cmd_ban mutates
+> it in place (never rebinds), so a captured `local bans_tbl =
+> ban.bans` stays valid; if you rebind your own local instead, that
+> local goes stale across `+reload` (the #238/#239 hazard, see
+> [`§10`](#10-common-pitfalls)). When you only need a point-in-time
+> read, `util.loadtable( ban.bans_path )` at the call site is the
+> load-on-demand-safe alternative.
 
 ---
 

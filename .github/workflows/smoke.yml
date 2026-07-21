@@ -286,6 +286,18 @@ jobs:
       - name: Run usr_uptime unit test
         run: lua5.4 tests/unit/usr_uptime_test.lua
 
+      # hub_runtime (#445): the persisted runtime store moved from the
+      # shipped core/hci.lua to scripts/data/hub_runtime.tbl with a
+      # one-time migration. Tests the pure decision + the load-time
+      # side effect over an in-memory fs.
+      - name: Run hub_runtime migration unit test
+        run: lua5.4 tests/unit/hub_runtime_migration_test.lua
+
+      # etc_records (#465): a missing / empty / corrupt records .tbl must
+      # not crash the onLogin max-tracking comparisons.
+      - name: Run etc_records unit test
+        run: lua5.4 tests/unit/etc_records_test.lua
+
       # etc_webhook (#398): inbound webhook receiver. Uses the REAL
       # core/hmac.lua so signature verification is genuinely exercised.
       # Covers HMAC pass / wrong / missing, sha256= prefix, event filter,
@@ -293,6 +305,28 @@ jobs:
       # truncation, flood cap, min_level gating, no-secret-skip, inert.
       - name: Run etc_webhook unit test
         run: lua5.4 tests/unit/etc_webhook_test.lua
+
+      # etc_cmdlog (#460): the command log is stored language-neutral and
+      # re-localized at read-time. Verifies an entry written under one
+      # language renders in the current language after a switch, old baked
+      # lines fall back to raw, control bytes are stripped, HTTP re-localizes.
+      - name: Run etc_cmdlog unit test
+        run: lua5.4 tests/unit/etc_cmdlog_test.lua
+
+      # cmd_userinfo (#459): the +userinfo value column must line up. Drives
+      # the real align_labels against both shipped lang files and asserts the
+      # raw format is ragged (the bug) and the aligned one is uniform.
+      - name: Run cmd_userinfo align unit test
+        run: lua5.4 tests/unit/cmd_userinfo_align_test.lua
+
+      # nick-prefix resolution: +ban / +disconnect / +gag / +redirect /
+      # +hideshare / +msgmanager must resolve a prefixed online user by
+      # their base nick (usr_nick_prefix re-keys the hub nick table).
+      # Drives each patched resolution and asserts the prefixed user is
+      # kicked/gagged/redirected/share-toggled/resolved, not sent down the
+      # offline path.
+      - name: Run nick-prefix resolution unit test
+        run: lua5.4 tests/unit/nick_prefix_resolution_test.lua
 
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -524,9 +558,29 @@ jobs:
         shell: msys2 {0}
         run: lua5.4 tests/unit/usr_uptime_test.lua
 
+      - name: Run hub_runtime migration unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/hub_runtime_migration_test.lua
+
+      - name: Run etc_records unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_records_test.lua
+
       - name: Run etc_webhook unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_webhook_test.lua
+
+      - name: Run etc_cmdlog unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_cmdlog_test.lua
+
+      - name: Run cmd_userinfo align unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/cmd_userinfo_align_test.lua
+
+      - name: Run nick-prefix resolution unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/nick_prefix_resolution_test.lua
 
       - name: Configure
         shell: msys2 {0}

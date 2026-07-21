@@ -6,6 +6,14 @@
 
     description: Shows SSL informations about the client to hub connection by you or other users
 
+    v0.05:
+        - resolve an online target by firstnick when a nick-prefix is
+          active: usr_nick_prefix re-keys the hub's nick table to the
+          PREFIXED nick, so `+sslinfo <base nick>` reported "user not
+          found" for a prefixed online user. Same firstnick-fallback idiom
+          as etc_trafficmanager (upstream luadch/luadch#240). Nick-prefix
+          resolution fix (read-only).
+
     v0.04: by pulsar
         - fix showing my own SSL info instead of users SSL info  / thx Tantrix
             - fix #180 -> https://github.com/luadch/luadch/issues/180
@@ -31,7 +39,7 @@
 --------------
 
 local scriptname = "cmd_sslinfo"
-local scriptversion = "0.04"
+local scriptversion = "0.05"
 
 local cmd = "sslinfo"
 
@@ -88,6 +96,25 @@ local get_sslinfo = function( user )
     return buf
 end
 
+-- Resolve an online user by their firstnick when the plain nick lookup
+-- misses. usr_nick_prefix re-keys the hub's _usernicks table to the
+-- PREFIXED display nick (via user:updatenick), so hub.isnickonline( <base
+-- nick> ) returns nil for a prefixed online user and `+sslinfo <base
+-- nick>` would report "user not found". firstnick is the ORIGINAL nick,
+-- captured once at login and never re-keyed, so iterating it is robust
+-- against ANY nick-prefix scheme. Same idiom as etc_trafficmanager's
+-- find_online_by_firstnick (closed upstream luadch/luadch#240). Kept
+-- plugin-local rather than changed in core hub.isnickonline, whose
+-- exact-current-nick semantics back availability checks elsewhere.
+local find_online_by_firstnick = function( firstnick )
+    for _, buser in pairs( hub.getusers() ) do
+        if buser:firstnick() == firstnick then
+            return buser
+        end
+    end
+    return nil
+end
+
 local onbmsg = function( user, command, parameters )
     local user_nick = user:nick()
     local user_level = user:level()
@@ -97,7 +124,7 @@ local onbmsg = function( user, command, parameters )
     end
     local nick = utf.match( parameters, "^(%S+)$" )
     if nick then
-        local target = hub.isnickonline( nick )
+        local target = hub.isnickonline( nick ) or find_online_by_firstnick( nick )
         if target then
             if not target:isbot() then
                 user:reply( utf.format( msg_out, target:nick(), get_sslinfo( target ) ), hub.getbot() )
@@ -134,3 +161,11 @@ hub.setlistener( "onStart", {},
 )
 
 hub.debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
+
+-- Internal test seams (nick-prefix resolution regression). `_`-prefixed
+-- per the repo convention for non-contract, test-only exports (see
+-- docs/PLUGIN_API.md §8).
+return {
+    _onbmsg                   = onbmsg,
+    _find_online_by_firstnick = find_online_by_firstnick,
+}

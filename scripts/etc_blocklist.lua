@@ -55,7 +55,7 @@
 --------------
 
 local scriptname    = "etc_blocklist"
-local scriptversion = "0.02"
+local scriptversion = "0.04"
 
 local cmd_main = "blocklist"
 
@@ -139,6 +139,8 @@ local msg_import_ok     = lang.msg_import_ok     or "%s imported %d entries from
 local msg_unsafe_path   = lang.msg_unsafe_path   or "Path '%s' is unsafe: %s"
 local msg_import_level  = lang.msg_import_level  or "Import requires level %d or higher (you are %d)."
 local msg_save_failed   = lang.msg_save_failed   or "Failed to persist blocklist: %s"
+local msg_open_failed   = lang.msg_open_failed   or "Could not open the file: %s"
+local msg_encode_failed = lang.msg_encode_failed or "JSON encode failed: %s"
 
 
 ----------
@@ -324,7 +326,7 @@ local function do_export_jsonl( actor_label )
 
     local f, ferr = io.open( path, "w" )
     if not f then
-        return false, "open failed: " .. tostring( ferr )
+        return false, utf_format( msg_open_failed, tostring( ferr ) )
     end
 
     local count = 0
@@ -347,7 +349,7 @@ local function do_export_jsonl( actor_label )
             }
             if not line then
                 f:close( )
-                return false, "json.encode failed: " .. tostring( jerr )
+                return false, utf_format( msg_encode_failed, tostring( jerr ) )
             end
             f:write( line, "\n" )
             count = count + 1
@@ -412,7 +414,7 @@ local function do_import_jsonl( path, actor_label, actor_level )
     end
     local f, ferr = io.open( path, "r" )
     if not f then
-        return false, "open failed: " .. tostring( ferr )
+        return false, utf_format( msg_open_failed, tostring( ferr ) )
     end
 
     local added, skipped, errors = 0, 0, 0
@@ -1041,6 +1043,8 @@ return {
     _parse_expires_date         = parse_expires_date,
     _do_add_entry               = do_add_entry,
     _do_del_entry               = do_del_entry,
+    _do_export_jsonl            = do_export_jsonl,
+    _do_import_jsonl            = do_import_jsonl,
     _sanitize_import_row        = _sanitize_import_row,
     _format_show                = format_show,
     _format_count               = format_count,

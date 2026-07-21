@@ -114,7 +114,14 @@ install(FILES dkjson/dkjson.lua      DESTINATION lib/dkjson)
 install(FILES examples/certs/ca-bundle.pem DESTINATION lib/luadch)
 
 # Runtime trees
-install(DIRECTORY core/        DESTINATION core)
+# #445: exclude the legacy core/hci.lua from the install. It is the
+# migration source for hub_runtime's runtime counter, which moved to
+# scripts/data/hub_runtime.tbl. If the install shipped/overwrote it, a
+# `cmake --install` over an existing tree would zero the operator's
+# on-disk core/hci.lua BEFORE the hub boots and the migration can read it
+# - defeating the migration. Excluding it leaves the operator's value in
+# place long enough to be adopted. A future release removes core/hci.lua.
+install(DIRECTORY core/        DESTINATION core PATTERN "hci.lua" EXCLUDE)
 install(DIRECTORY scripts/     DESTINATION scripts)
 install(DIRECTORY examples/cfg/   DESTINATION cfg)
 install(DIRECTORY examples/certs/ DESTINATION certs)
