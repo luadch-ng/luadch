@@ -651,6 +651,117 @@ def test_backup_now(staging_dir: Path):
         raise TestFailure(f"backup sidecar format wrong: {sc!r}")
 
 
+def test_backup_restore_roundtrip(source_install: Path, keep_staging=False):
+    """#480 PR-B: an engine-sealed backup restores cleanly through the real
+    binary via `Luadch --restore`, with genuine AES-256-GCM decrypt. Full
+    loop on its OWN staged tree (independent of the shared hub):
+
+        boot -> +backup now -> stop hub -> corrupt cfg/cfg.tbl
+             -> --restore --verify (must write nothing)
+             -> --restore --force  (must restore cfg.tbl byte-for-byte)
+
+    Exercises the C arg parsing (--restore/--verify/--force), run_restore(),
+    core/restore.lua's bootstrap (real adclib require + backup_archive load),
+    the sidecar check, unpack, path-sanitize, and the atomic apply. Provably
+    fails without PR-B: the pre-PR binary rejects --restore as an unknown
+    option and never writes the file back."""
+    st = stage_install(source_install)
+    proc = None
+    log_file = None
+    # Dedicated ports: the shared hub is still running on TEST_PORT_* when this
+    # runs, so reusing them would make the client connect to THAT hub (whose
+    # dummy password an earlier +setpass test changed). Own ports -> own hub.
+    rt_plain = TEST_PORT_PLAIN + 100
+    try:
+        override_test_ports(st)   # sets etc_backup_passphrase = smoke-backup-pass
+        rt_cfg = st / "cfg" / "cfg.tbl"
+        rt_text = rt_cfg.read_text(encoding="utf-8")
+        for pat, repl in (
+            (r"tcp_ports\s*=\s*\{[^}]*\}", f"tcp_ports = {{ {rt_plain} }}"),
+            (r"ssl_ports\s*=\s*\{[^}]*\}", f"ssl_ports = {{ {TEST_PORT_TLS + 100} }}"),
+            (r"tcp_ports_ipv6\s*=\s*\{[^}]*\}", f"tcp_ports_ipv6 = {{ {TEST_PORT_PLAIN_V6 + 100} }}"),
+            (r"ssl_ports_ipv6\s*=\s*\{[^}]*\}", f"ssl_ports_ipv6 = {{ {TEST_PORT_TLS_V6 + 100} }}"),
+        ):
+            rt_text, n = re.subn(pat, repl, rt_text, count=1)
+            if n != 1:
+                raise RuntimeError(f"round-trip: could not re-port cfg.tbl: {pat}")
+        rt_cfg.write_text(rt_text, encoding="utf-8")
+        for stale in ("servercert.pem", "serverkey.pem", "cacert.pem", "cakey.pem"):
+            (st / "certs" / stale).unlink(missing_ok=True)
+        proc, log_file = start_hub(st)
+        wait_for_port(HUB_HOST, rt_plain, START_TIMEOUT_SEC)
+
+        # Produce one real backup through the engine.
+        backups_dir = st / "cfg" / "backups"
+        with socket.create_connection(
+            (HUB_HOST, rt_plain), timeout=PROTOCOL_TIMEOUT_SEC
+        ) as sock:
+            sid, reader = _adc_login(sock, "dummy", "test")
+            sock.sendall(f"BMSG {sid} +backup\\snow\n".encode("utf-8"))
+            reader.recv_until(
+                lambda f: f.startswith(("EMSG ", "DMSG ", "BMSG ")) and ("written" in f or "failed" in f),
+                timeout=PROTOCOL_TIMEOUT_SEC,
+            )
+        arts = sorted(backups_dir.glob("luadch-backup-*.ldbk"))
+        if not arts:
+            raise TestFailure("round-trip: no backup artifact was produced")
+        artifact = arts[-1]
+
+        # Stop the hub so --restore can take the single-instance lock (a
+        # restore over a running hub is refused by design).
+        stop_hub(proc, log_file)
+        proc = None
+
+        cfg = st / "cfg" / "cfg.tbl"
+        original = cfg.read_bytes()
+        corrupt = b"-- CORRUPTED BY SMOKE TEST --\n"
+        cfg.write_bytes(corrupt)
+
+        binary = st / ("Luadch.exe" if sys.platform == "win32" else "luadch")
+        env = dict(os.environ, LUADCH_BACKUP_PASSPHRASE="smoke-backup-pass")
+
+        # --verify is a dry run over the POPULATED tree (no --force): it must
+        # still exit 0 and write nothing - the conflict refusal is for a real
+        # apply, not a verify.
+        rv = subprocess.run(
+            [str(binary), "--restore", str(artifact), "--verify"],
+            cwd=str(st), env=env, capture_output=True, text=True, timeout=60,
+        )
+        if rv.returncode != 0:
+            raise TestFailure(f"--verify exited {rv.returncode}:\n{rv.stdout}\n{rv.stderr}")
+        if cfg.read_bytes() != corrupt:
+            raise TestFailure("--verify wrote to disk; it must be a dry run")
+
+        # Real restore: cfg.tbl must come back exactly.
+        rr = subprocess.run(
+            [str(binary), "--restore", str(artifact), "--force"],
+            cwd=str(st), env=env, capture_output=True, text=True, timeout=60,
+        )
+        if rr.returncode != 0:
+            raise TestFailure(f"--restore exited {rr.returncode}:\n{rr.stdout}\n{rr.stderr}")
+        if cfg.read_bytes() != original:
+            raise TestFailure("cfg.tbl was not restored to its original bytes")
+
+        # A wrong passphrase must be rejected (GCM auth), not silently applied.
+        cfg.write_bytes(corrupt)
+        bad = subprocess.run(
+            [str(binary), "--restore", str(artifact), "--force"],
+            cwd=str(st), env=dict(os.environ, LUADCH_BACKUP_PASSPHRASE="wrong-pass"),
+            capture_output=True, text=True, timeout=60,
+        )
+        if bad.returncode == 0:
+            raise TestFailure("--restore accepted a wrong passphrase")
+        if cfg.read_bytes() != corrupt:
+            raise TestFailure("--restore wrote files despite a wrong passphrase")
+    finally:
+        if proc is not None:
+            stop_hub(proc, log_file)
+        if keep_staging:
+            log(f"restore round-trip staging kept at {st.parent}")
+        else:
+            shutil.rmtree(st.parent, ignore_errors=True)
+
+
 def test_s1_fragmented_frame_reassembled():
     """Phase 8 S1: an ADC frame split across two TCP segments must be
     reassembled and processed as one frame.
@@ -13127,6 +13238,19 @@ def main():
             failed.append("single-instance lock refuses second start")
         else:
             log("PASS  single-instance lock refuses second start")
+
+        # #480 PR-B: backup -> --restore round-trip on its own staged tree
+        # (real AES-256-GCM decrypt through the binary). Independent of the
+        # shared hub above; stages + tears down its own install.
+        try:
+            test_backup_restore_roundtrip(
+                args.install_dir.resolve(), keep_staging=args.keep_staging,
+            )
+        except Exception as e:
+            log(f"FAIL  backup -> restore round-trip (#480 PR-B): {e}")
+            failed.append("backup -> restore round-trip (#480 PR-B)")
+        else:
+            log("PASS  backup -> restore round-trip (#480 PR-B)")
 
         # #128 plaintext-mode test runs AFTER the regular battery
         # because cfg_secret.init() reads encrypt_usertbl once at
