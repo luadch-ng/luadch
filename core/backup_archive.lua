@@ -87,6 +87,9 @@ local adclib = use "adclib"
 local adclib_random_bytes = adclib.random_bytes
 local adclib_aes_gcm_seal = adclib.aes_gcm_seal
 local adclib_aes_gcm_open = adclib.aes_gcm_open
+-- OpenSSL PBKDF2 (fast). nil on a standalone lua / stubbed adclib, where
+-- _derive_key falls back to the pure-Lua PBKDF2 below.
+local adclib_pbkdf2 = adclib.pbkdf2_sha256
 
 --// core scripts //--
 
@@ -135,13 +138,13 @@ end
 -- needed here (a 256-bit AES key), so a single block index (1) suffices:
 -- DK = U1 XOR U2 XOR ... XOR Uc, Ui = HMAC(pass, U(i-1)), U1 = HMAC(pass,
 -- salt || INT32_BE(1)).
-local function _pbkdf2( password, salt, iters, dklen )
+local function _pbkdf2_lua( password, salt, iters, dklen )
     dklen = dklen or KEY_SIZE
     if dklen > 32 then
-        error( "backup_archive._pbkdf2: dklen > 32 unsupported", 2 )
+        error( "backup_archive._pbkdf2_lua: dklen > 32 unsupported", 2 )
     end
     if type( iters ) ~= "number" or iters < 1 then
-        error( "backup_archive._pbkdf2: iters must be a number >= 1", 2 )
+        error( "backup_archive._pbkdf2_lua: iters must be a number >= 1", 2 )
     end
     local u = hmac_bytes( password, salt .. string_pack( ">I4", 1 ) )
     local t = u
@@ -150,6 +153,19 @@ local function _pbkdf2( password, salt, iters, dklen )
         t = _xor32( t, u )
     end
     return string_sub( t, 1, dklen )
+end
+
+-- Derive the AES key. Prefer OpenSSL's PBKDF2 via adclib: the pure-Lua one
+-- is correct but runs ~tens of seconds at the default iteration count, which
+-- would freeze the single-threaded hub for the whole backup. Both produce
+-- the SAME key (PBKDF2 is deterministic), so artifacts stay interoperable
+-- regardless of which path sealed / opens them; the Lua path is the
+-- standalone / no-adclib fallback (unit tests, a broken build).
+local function _derive_key( password, salt, iters, dklen )
+    if type( adclib_pbkdf2 ) == "function" then
+        return adclib_pbkdf2( password, salt, iters, dklen or KEY_SIZE )
+    end
+    return _pbkdf2_lua( password, salt, iters, dklen )
 end
 
 ----------------------------------// USTAR //--
@@ -396,7 +412,7 @@ local function pack( files, meta, passphrase, opts )
     if type( salt ) ~= "string" or #salt ~= SALT_SIZE then
         return nil, "backup_archive: RNG failed (salt)"
     end
-    local key = _pbkdf2( passphrase, salt, iters, KEY_SIZE )
+    local key = _derive_key( passphrase, salt, iters, KEY_SIZE )
     local nonce = adclib_random_bytes( NONCE_SIZE )
     if type( nonce ) ~= "string" or #nonce ~= NONCE_SIZE then
         return nil, "backup_archive: RNG failed (nonce)"
@@ -455,7 +471,7 @@ local function unpack( blob, passphrase )
     local nonce = string_sub( blob, nonce_start, ct_start - 1 )
     local ct_tag = string_sub( blob, ct_start )
 
-    local key = _pbkdf2( passphrase, salt, iters, KEY_SIZE )
+    local key = _derive_key( passphrase, salt, iters, KEY_SIZE )
     local ok, tar, oerr = pcall( adclib_aes_gcm_open, key, nonce, ct_tag )
     if not ok then
         return nil, "backup_archive: decrypt error: " .. tostring( tar )
@@ -514,11 +530,17 @@ do
     -- never trust memory for crypto vectors. A silent regression in the
     -- XOR / iteration / block-index logic derives wrong keys, i.e.
     -- unrecoverable backups, so fail loud at load like sha256 / hmac.
-    local dk = _pbkdf2( "password", "salt", 1, KEY_SIZE )
+    local dk = _pbkdf2_lua( "password", "salt", 1, KEY_SIZE )
     local hex = { }
     for i = 1, KEY_SIZE do hex[ i ] = string_format( "%02x", string_byte( dk, i ) ) end
     if table_concat( hex ) ~= "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b" then
         error( "backup_archive self-test FAILED: PBKDF2-HMAC-SHA256 c=1 vector mismatch", 2 )
+    end
+    -- If the OpenSSL PBKDF2 is present it MUST agree with the vetted pure-Lua
+    -- one - a mismatch would silently make artifacts sealed by one path
+    -- unreadable by the other.
+    if type( adclib_pbkdf2 ) == "function" and adclib_pbkdf2( "password", "salt", 1, KEY_SIZE ) ~= dk then
+        error( "backup_archive self-test FAILED: adclib pbkdf2_sha256 disagrees with the PBKDF2 KAT", 2 )
     end
     -- ustar build -> parse fidelity on a tiny fixture (also proves the
     -- checksum our writer emits validates).
@@ -542,7 +564,8 @@ return {
     DEFAULT_ITERS = DEFAULT_ITERS,
 
     -- test seams
-    _pbkdf2             = _pbkdf2,
+    _pbkdf2             = _pbkdf2_lua,
+    _derive_key        = _derive_key,
     _build_tar          = _build_tar,
     _parse_tar          = _parse_tar,
     _manifest_serialize = _manifest_serialize,

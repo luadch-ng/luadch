@@ -160,6 +160,12 @@ def override_test_ports(staging_dir: Path):
          '{ "etc_proxydetect.lua", enabled = true }'),
         (r"etc_proxydetect_enabled\s*=\s*false", "etc_proxydetect_enabled = true"),
         (r"etc_proxydetect_check_levels = \{[^}]*\}", "etc_proxydetect_check_levels = { }"),
+        # #480: etc_backup ships ENABLED but is inert (nags, never runs)
+        # until a passphrase is set. Set one so test_backup_now can drive a
+        # real +backup now and assert a sealed artifact lands on disk. The
+        # daily_at schedule stays at 04:00, so no scheduled backup fires
+        # during the run; only the explicit +backup now does.
+        (r'etc_backup_passphrase\s*=\s*""', 'etc_backup_passphrase = "smoke-backup-pass"'),
     ]
     for pattern, replacement in rewrites:
         new_text, count = re.subn(pattern, replacement, text, count=1)
@@ -591,6 +597,58 @@ def test_command_routing():
         )
         if len(response) < 20:
             raise TestFailure(f"+help response unexpectedly short: {response!r}")
+
+
+def test_backup_now(staging_dir: Path):
+    """#480 PR-A: `+backup now` produces an encrypted .ldbk artifact + a
+    .sha256 sidecar. Exercises the whole engine path through the plugin
+    command: real file collection (io + the listdir C primitive over
+    scripts/data + scripts/cfg), OpenSSL PBKDF2 + AES-256-GCM seal, atomic
+    write, and the sidecar. dummy is level 100 (> etc_backup_oplevel 80); the
+    passphrase is set in the staged cfg by override_test_ports."""
+    backups_dir = staging_dir / "cfg" / "backups"
+    before = (
+        set(backups_dir.glob("luadch-backup-*.ldbk"))
+        if backups_dir.exists()
+        else set()
+    )
+    with socket.create_connection(
+        (HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC
+    ) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+        # The space in "+backup now" MUST be the ADC escape \s, or the hub
+        # parses "now" as a separate ADC field and the command sees no
+        # subcommand (multi-word BMSG bodies need \s, not a raw space).
+        sock.sendall(f"BMSG {sid} +backup\\snow\n".encode("utf-8"))
+        # The hubbot reply carries "Backup written: <path>" on success or
+        # "Backup failed: ..." otherwise. Match on those words so we skip
+        # etc_hubcommands' own "[command] +backup" chat-echo frame.
+        response = reader.recv_until(
+            lambda f: f.startswith(("EMSG ", "DMSG ", "BMSG ")) and ("written" in f or "failed" in f),
+            timeout=PROTOCOL_TIMEOUT_SEC,
+        )
+    if "written" not in response:
+        raise TestFailure(f"+backup now did not report success: {response!r}")
+
+    # A new artifact must exist on disk.
+    new = set(backups_dir.glob("luadch-backup-*.ldbk")) - before
+    if not new:
+        raise TestFailure(f"+backup now wrote no .ldbk artifact in {backups_dir}")
+    artifact = next(iter(new))
+    if artifact.stat().st_size < 100:
+        raise TestFailure(
+            f"backup artifact suspiciously small: {artifact.stat().st_size} bytes"
+        )
+    # It must be an LDBK1 blob, not plaintext (the seal actually ran).
+    if artifact.read_bytes()[:4] != b"LDBK":
+        raise TestFailure(f"artifact is not an LDBK archive: {artifact.name}")
+    # The sidecar exists and is the standard `sha256sum` format.
+    sidecar = artifact.parent / (artifact.name + ".sha256")
+    if not sidecar.exists():
+        raise TestFailure(f"backup sidecar missing: {sidecar}")
+    sc = sidecar.read_text(encoding="utf-8").strip()
+    if not re.match(r"^[0-9a-f]{64}  luadch-backup-.*\.ldbk$", sc):
+        raise TestFailure(f"backup sidecar format wrong: {sc!r}")
 
 
 def test_s1_fragmented_frame_reassembled():
@@ -12751,6 +12809,17 @@ def run_tests(staging_dir: Path):
             failed.append(name)
         else:
             log(f"PASS  {name}")
+
+    # #480: drive a real +backup now and assert a sealed artifact lands on
+    # disk. Needs staging_dir for the file check, so it runs here (main hub
+    # still up) rather than in the no-arg TESTS list.
+    try:
+        test_backup_now(staging_dir)
+    except Exception as e:
+        log(f"FAIL  +backup now writes an encrypted artifact (#480): {e}")
+        failed.append("+backup now writes an encrypted artifact (#480)")
+    else:
+        log("PASS  +backup now writes an encrypted artifact (#480)")
 
     # State-of-disk tests run after the protocol tests so any post-login
     # save (HPAS lastconnect update) has had a chance to land.

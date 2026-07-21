@@ -20,6 +20,7 @@
 #include <string.h>
 #include <libgen.h>
 #include <limits.h>
+#include <dirent.h>   /* opendir / readdir - listdir() */
 #endif
 #ifdef _WIN32
 #include <windows.h>
@@ -230,6 +231,95 @@ static int makedir(lua_State *L)
   return 1;
 }
 
+/*
+ * listdir(path) -> { "name1", "name2", ... } | nil, errmsg
+ *
+ * Lists the entries of a directory (excluding "." and ".."), as a Lua array
+ * in readdir / FindNextFile order. Registered as a global so core Lua can
+ * enumerate the operator state directories (scripts/data/, scripts/cfg/)
+ * for the backup engine (#480) - the tree ships no lfs / readdir otherwise.
+ * Core-only, like makedir; NOT exposed to the plugin sandbox. Returns
+ * (nil, message) when the directory cannot be opened (missing, not a
+ * directory, permission). An empty directory yields an empty table.
+ */
+static int listdir(lua_State *L)
+{
+  const char *path = luaL_checkstring(L, 1);
+#ifdef _WIN32
+  char pattern[MAX_PATH];
+  int n = snprintf(pattern, sizeof(pattern), "%s\\*", path);
+  if (n < 0 || n >= (int)sizeof(pattern))
+  {
+    lua_pushnil(L);
+    lua_pushstring(L, "listdir: path too long");
+    return 2;
+  }
+  WIN32_FIND_DATAA fd;
+  HANDLE h = FindFirstFileA(pattern, &fd);
+  if (h == INVALID_HANDLE_VALUE)
+  {
+    lua_pushnil(L);
+    /* lua_pushfstring understands only %d/%s/%f/%p/%c/%% - NOT %lu; feeding it
+     * %lu raises "invalid option '%l'" and breaks the (nil, err) contract, so
+     * the DWORD error is cast to int (codes are small, positive). */
+    lua_pushfstring(L, "listdir: cannot open '%s' (error %d)",
+                    path, (int)GetLastError());
+    return 2;
+  }
+  lua_newtable(L);
+  int i = 0;
+  do
+  {
+    if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
+    {
+      continue;
+    }
+    lua_pushstring(L, fd.cFileName);
+    lua_rawseti(L, -2, ++i);
+  } while (FindNextFileA(h, &fd));
+  /* A clean end is ERROR_NO_MORE_FILES; anything else means the enumeration
+   * was cut short. Surface it rather than returning a partial listing - a
+   * truncated scripts/data listing would silently under-collect a backup. */
+  DWORD ferr = GetLastError();
+  FindClose(h);
+  if (ferr != ERROR_NO_MORE_FILES)
+  {
+    lua_pop(L, 1);
+    lua_pushnil(L);
+    lua_pushfstring(L, "listdir: enumeration failed for '%s' (error %d)",
+                    path, (int)ferr);
+    return 2;
+  }
+  return 1;
+#elif defined(__unix__)
+  DIR *d = opendir(path);
+  if (!d)
+  {
+    lua_pushnil(L);
+    lua_pushfstring(L, "listdir: cannot open '%s' (errno %d)", path, errno);
+    return 2;
+  }
+  lua_newtable(L);
+  int i = 0;
+  struct dirent *e;
+  while ((e = readdir(d)) != NULL)
+  {
+    if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+    {
+      continue;
+    }
+    lua_pushstring(L, e->d_name);
+    lua_rawseti(L, -2, ++i);
+  }
+  closedir(d);
+  return 1;
+#else
+  lua_pushnil(L);
+  lua_pushstring(L, "listdir: unsupported platform");
+  return 2;
+#endif
+}
+
 /* Resulting soft RLIMIT_NOFILE after raise_fd_limit(): the practical
  * concurrent-socket ceiling on the POSIX poll backend. 0 = unknown (Windows,
  * or getrlimit failed), -1 = unlimited (RLIM_INFINITY), else the fd count.
@@ -338,6 +428,7 @@ static void run_lua(void)
   lua_register(L, "doexit", doexit);
   lua_register(L, "requestexit", requestexit);
   lua_register(L, "makedir", makedir);
+  lua_register(L, "listdir", listdir);
   lua_register(L, "getfdlimit", getfdlimit);
   int err = luaL_loadfile(L, "core/init.lua") || lua_pcall(L, 0, 0, 0);
   if (err)
