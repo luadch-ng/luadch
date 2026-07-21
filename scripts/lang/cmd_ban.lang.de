@@ -35,6 +35,7 @@
     ucmd_menu7_1 = { "Bannen", "1 Monat" },
     ucmd_menu7_2 = { "Bannen", "6 Monate" },
     ucmd_menu7_3 = { "Bannen", "1 Jahr" },
+    ucmd_menu_perm = { "Bannen", "dauerhaft" },
     ucmd_menu8 = { "Bannen", "andere" },
     ucmd_menu9 = { "User", "Control", "Bannen", "nach NICK" },
     ucmd_menu10 = { "User", "Control", "Bannen", "nach CID" },
