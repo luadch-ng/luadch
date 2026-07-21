@@ -259,8 +259,11 @@ static int listdir(lua_State *L)
   if (h == INVALID_HANDLE_VALUE)
   {
     lua_pushnil(L);
-    lua_pushfstring(L, "listdir: cannot open '%s' (error %lu)",
-                    path, (unsigned long)GetLastError());
+    /* lua_pushfstring understands only %d/%s/%f/%p/%c/%% - NOT %lu; feeding it
+     * %lu raises "invalid option '%l'" and breaks the (nil, err) contract, so
+     * the DWORD error is cast to int (codes are small, positive). */
+    lua_pushfstring(L, "listdir: cannot open '%s' (error %d)",
+                    path, (int)GetLastError());
     return 2;
   }
   lua_newtable(L);
@@ -283,8 +286,8 @@ static int listdir(lua_State *L)
   {
     lua_pop(L, 1);
     lua_pushnil(L);
-    lua_pushfstring(L, "listdir: enumeration failed for '%s' (error %lu)",
-                    path, (unsigned long)ferr);
+    lua_pushfstring(L, "listdir: enumeration failed for '%s' (error %d)",
+                    path, (int)ferr);
     return 2;
   }
   return 1;
