@@ -81,6 +81,10 @@ local table        = use "table"
 local table_concat = table.concat
 local table_sort   = table.sort
 
+-- debug.sethook is used ONLY to bound the manifest-eval work (see
+-- _manifest_parse); the standard way to cap untrusted Lua execution.
+local debug_sethook = ( use "debug" ).sethook
+
 --// extern libs //--
 
 local adclib = use "adclib"
@@ -119,6 +123,8 @@ local MAX_TAR_ENTRIES    = 100000   -- parse-side bomb guard
 local MAX_NAME           = 100      -- ustar name field (no prefix-split yet)
 
 local MANIFEST_NAME      = "MANIFEST"
+local MANIFEST_MAX_BYTES = 65536    -- a real manifest is a handful of scalars
+local MANIFEST_MAX_INSTR = 200000   -- eval work ceiling (real parse ~dozens)
 local MODE_0644          = 420      -- rw-r--r-- (caller passes per-file modes)
 
 local ZERO_BLOCK         = string_rep( "\0", TAR_BLOCK )
@@ -342,11 +348,23 @@ local function _manifest_serialize( meta )
 end
 
 -- Parse a manifest chunk in a sandboxed empty environment (text only, no
--- globals) - same protection as util.loadtable_string.
+-- globals) - same protection as util.loadtable_string, PLUS a work bound.
+-- The empty _ENV blocks code execution, but a crafted manifest (a foreign
+-- archive whose passphrase the operator holds) could still `while true do end`
+-- and hang the offline restore. An instruction-count hook aborts any chunk
+-- that runs past a budget far above a real table construction; because the
+-- env is empty the chunk cannot reach a long-running C call that would slip
+-- the hook, so the count bound is sufficient (DEVELOPMENT.md §5: bound the
+-- WORK, not just the depth).
 local function _manifest_parse( str )
+    if type( str ) ~= "string" or #str > MANIFEST_MAX_BYTES then
+        return nil, "manifest: missing or too large"
+    end
     local fn, err = load( str, "backup_manifest", "t", { } )
     if not fn then return nil, "manifest: " .. tostring( err ) end
+    debug_sethook( function( ) error( "manifest: instruction budget exceeded", 0 ) end, "", MANIFEST_MAX_INSTR )
     local ok, tbl = pcall( fn )
+    debug_sethook( )   -- always clear the hook, success or not
     if not ok or type( tbl ) ~= "table" then
         return nil, "manifest: invalid table"
     end

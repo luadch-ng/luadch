@@ -26,7 +26,7 @@ local adclib = require( "adclib" )
 local _real = {
     type = type, error = error, pcall = pcall, tostring = tostring,
     tonumber = tonumber, load = load, pairs = pairs, ipairs = ipairs,
-    string = string, table = table, io = io,
+    string = string, table = table, io = io, debug = debug,
     adclib = adclib,
 }
 _G.use = function( name )
