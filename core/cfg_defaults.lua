@@ -3422,6 +3422,81 @@ local defaults = {
         end
     },
 
+    -- etc_backup.lua (#480): automatic encrypted backups of the operator
+    -- state set. The engine (core/backup.lua) reads dir / keep / passphrase /
+    -- include; the plugin drives the schedule + the owner readiness nag.
+    -- See docs/BACKUP.md.
+    etc_backup_enabled = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    -- Destination. Default cfg/backups so artifacts land under the
+    -- upgrade-preserved cfg/ tree (and the Docker cfg mount). An absolute
+    -- path is allowed (a mounted backup volume); the engine creates it via
+    -- the raw makedir primitive.
+    etc_backup_dir = { "cfg/backups",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    -- Retention: keep the newest N artifacts, prune older ones each run.
+    etc_backup_keep = { 7,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 1 and value <= 1000
+        end
+    },
+    -- Primary schedule: a daily backup at this server-local HH:MM. Empty
+    -- string disables the daily slot (falls back to the interval below). The
+    -- plugin parses/validates the HH:MM shape and treats a bad value as "no
+    -- daily slot", so the validator only enforces it is a string.
+    etc_backup_daily_at = { "04:00",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    -- Fallback cadence when etc_backup_daily_at is empty: every N hours
+    -- (0 = off). For hubs wanting more than one backup a day.
+    etc_backup_interval_hours = { 0,
+        function( value )
+            return types_number( value, nil, true )
+                and value % 1 == 0 and value >= 0 and value <= 168
+        end
+    },
+    -- Include master.key in the (encrypted) artifact. Default true for
+    -- self-contained disaster recovery; false keeps the key strictly out of
+    -- the backup (the plugin then warns the operator to save it separately).
+    etc_backup_include_master_key = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    -- Secret: the passphrase that encrypts the artifact (PBKDF2 -> AES-256-
+    -- GCM). Resolved env-var-first via core/secrets (registered by the
+    -- plugin) so GET /v1/config redacts it. Prefer the env var
+    -- LUADCH_ETC_BACKUP_PASSPHRASE over a plaintext value here. Independent
+    -- of master.key - store it out-of-band; losing it makes every artifact
+    -- unrecoverable.
+    etc_backup_passphrase = { "",
+        function( value )
+            return types_utf8( value, nil, true )
+        end
+    },
+    -- Level allowed to run +backup now / list / status. Default 80 (ADMIN).
+    etc_backup_oplevel = { 80,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    -- Level that receives the "backup not configured / not writable" hubbot
+    -- nag on login + at start. Default 100 (HUBOWNER).
+    etc_backup_notify_level = { 100,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+
     -- etc_webhook.lua: inbound webhook receiver (Discourse / GitHub /
     -- ...). Only the master switch lives in cfg.tbl; ALL endpoint config
     -- (paths, headers, secrets, templates, ...) lives in the
