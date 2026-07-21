@@ -11,6 +11,14 @@
             - <time> and <reason> are optional
             - the keyword `permanent` in the <time> slot bans forever
 
+        v0.46:
+            - feat: add a `permanent` entry to the right-click Ban submenu
+              (CT2), alongside the existing 1 hour ... 1 year / other
+              durations. Sends `+ban sid <SID> permanent <reason>` - the
+              #444 keyword path on the SID target (prefix-agnostic). New
+              lang key ucmd_menu_perm (en "permanent" / de "dauerhaft");
+              the sent keyword itself stays the fixed literal `permanent`.
+
         v0.45:
             - fix: resolve an online target by firstnick when a nick-prefix
               is active. usr_nick_prefix re-keys the hub's nick table to
@@ -269,7 +277,7 @@
 --------------
 
 local scriptname = "cmd_ban"
-local scriptversion = "0.45"
+local scriptversion = "0.46"
 
 local cmd = "ban"
 local cmd2 = "unban"
@@ -329,6 +337,7 @@ local ucmd_menu7 = lang.ucmd_menu7 or { "Ban", "1 week" }
 local ucmd_menu7_1 = lang.ucmd_menu7_1 or { "Ban", "1 month" }
 local ucmd_menu7_2 = lang.ucmd_menu7_2 or { "Ban", "6 months" }
 local ucmd_menu7_3 = lang.ucmd_menu7_3 or { "Ban", "1 year" }
+local ucmd_menu_perm = lang.ucmd_menu_perm or { "Ban", "permanent" }
 local ucmd_menu8 = lang.ucmd_menu8 or { "Ban", "other" }
 local ucmd_menu9 = lang.ucmd_menu9 or { "User", "Control", "Ban", "by NICK" }
 local ucmd_menu10 = lang.ucmd_menu10 or { "User", "Control", "Ban", "by CID" }
@@ -1331,6 +1340,8 @@ hub.setlistener( "onStart", {},
             ucmd.add( ucmd_menu7_1, cmd, { "sid", "%[userSID]", "40320", "%[line:" .. ucmd_reason .. "]" }, { "CT2" }, minlevel ) -- 1 month
             ucmd.add( ucmd_menu7_2, cmd, { "sid", "%[userSID]", "241920", "%[line:" .. ucmd_reason .. "]" }, { "CT2" }, minlevel ) -- 6 month
             ucmd.add( ucmd_menu7_3, cmd, { "sid", "%[userSID]", "525600", "%[line:" .. ucmd_reason .. "]" }, { "CT2" }, minlevel ) -- 1 year
+            -- `permanent` is the #444 keyword (fixed literal in the time slot), not a minute count.
+            ucmd.add( ucmd_menu_perm, cmd, { "sid", "%[userSID]", "permanent", "%[line:" .. ucmd_reason .. "]" }, { "CT2" }, minlevel ) -- permanent
             ucmd.add( ucmd_menu8, cmd, { "sid", "%[userSID]", "%[line:" .. ucmd_time .. "]", "%[line:" .. ucmd_reason .. "]" }, { "CT2" }, minlevel )
             -- unban
             ucmd.add( ucmd_menu_ct1_1, cmd2, { "nick", "%[line:" .. ucmd_nick .. "]" }, { "CT1" }, minlevel2 )

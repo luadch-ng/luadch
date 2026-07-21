@@ -35,6 +35,7 @@
     ucmd_menu7_1 = { "Ban", "1 month" },
     ucmd_menu7_2 = { "Ban", "6 months" },
     ucmd_menu7_3 = { "Ban", "1 year" },
+    ucmd_menu_perm = { "Ban", "permanent" },
     ucmd_menu8 = { "Ban", "other" },
     ucmd_menu9 = { "User", "Control", "Ban", "by NICK" },
     ucmd_menu10 = { "User", "Control", "Ban", "by CID" },
