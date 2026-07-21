@@ -78,7 +78,10 @@ that environment:
     wrapper); plain Lua `string.*` byte methods are not directly
     reachable
   - luadch core: `hub`, `cfg`, `util`, `util_http`, `adc`, `adclib`,
-    `signal`, `out`, `unicode`, `sysinfo`
+    `signal`, `out`, `unicode`, `sysinfo`, `backup` (the automatic-backup
+    engine, #480; `+backup` driver `etc_backup` calls `backup.run`/
+    `.readiness`/`.list`) - and more; the list above is illustrative, so
+    treat `SANDBOX_GLOBALS` as the authority
   - Optional libs (may be `false` if not built): `ssl` (with `.x509`
     pre-attached), `socket`, `basexx`, `zlib_stream`, `dkjson`
 - **Notably absent** (a malicious plugin cannot reach these):

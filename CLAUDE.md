@@ -133,8 +133,18 @@ order (its inline comments explain each ordering constraint).
 | Boot + config | `init`, `const`, `cfg`, `cfg_defaults`, `cfg_users`, `cfg_lang`, `cfg_secret`, `secrets` | Restricted env + module loader; program constants; settings/user.tbl/language handling; AES-256-GCM at-rest crypto; env-var-first secret lookup |
 | Network + ADC | `server`, `iostream`, `adc`, `hub`, `hub_dispatch`, `hub_user_object`, `hub_bot_object`, `hbri`, `ratelimit`, `blocklist`, `whitelist`, `ipmatch` | event loop + SSL (poll on POSIX / select on Windows, #310); framing pipeline; ADC parse/escape/format; main loop + login; command dispatch; user/bot objects; dual-stack secondary-IP verification; DoS limits; pre-handshake IP/CIDR blocklist; global allowlist (whitelist beats automated blocks, not manual pins); IP/CIDR primitives |
 | HTTP API | `http`, `http_router`, `http_client`, `http_filter`, `http_events`, `util_http` | Inbound HTTP/JSON API + router + auth; non-blocking OUTBOUND client; filter/sort/paginate helper; deferred-event endpoints; plugin endpoint helper |
-| Crypto + boot trust | `sha256`, `hmac`, `cert_bootstrap`, `cacert_bootstrap` | Pure-Lua SHA-256; HMAC-SHA256 (RFC 2104, sandbox-exposed for signed-webhook auth, #398); first-boot TLS-cert auto-gen (#77); CA-bundle reconciliation |
-| Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `geoip_update`, `bloom`, `ensuredirs` | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader + in-hub GeoLite2 auto-update; bloom filter; boot-time runtime-dir self-heal |
+| Crypto + boot trust | `sha256`, `hmac`, `cert_bootstrap`, `cacert_bootstrap`, `backup_archive` | Pure-Lua SHA-256; HMAC-SHA256 (RFC 2104, sandbox-exposed for signed-webhook auth, #398); first-boot TLS-cert auto-gen (#77); CA-bundle reconciliation; LDBK1 encrypted backup archive format (tar + AES-256-GCM, PBKDF2, #480) |
+| Infra | `util`, `out`, `mem`, `signal`, `types`, `scripts`, `audit`, `sysinfo`, `mmdb`, `geoip_update`, `bloom`, `ensuredirs`, `backup` | File I/O + table helpers; logging; GC; timers; ADC type validation; plugin loader + sandbox + listener registry; onAudit JSONL log; system info; MaxMind DB reader + in-hub GeoLite2 auto-update; bloom filter; boot-time runtime-dir self-heal; backup engine (collect restore-min set + seal + rotate, #480, exposed to the sandbox as `backup`) |
+
+**`core/restore.lua` is a standalone offline entry, not a `_core` module.**
+The C launcher's `run_restore()` (`hub/hub.c`) loads it into a fresh Lua state
+for `./luadch --restore <file>` (backup restore, #480 PR-B); it boots no hub
+(the cfg it would read is what it restores) and never appears in `_core` -
+like `init.lua` itself. Two C primitives back the arc: `listdir(path)`
+(core-only global, like `makedir` - NOT sandboxed) enumerates the state dirs
+for the backup engine, and `adclib.pbkdf2_sha256` (OpenSSL PKCS5_PBKDF2_HMAC)
+keeps the KDF off the pure-Lua path that would freeze the single-threaded hub
+~40s per backup. Operator guide: [`docs/BACKUP.md`](docs/BACKUP.md).
 
 **`core/hci.lua` is a now-legacy data file** (a plain `hubruntime` /
 `hubruntime_last_check` table). It backs `/v1/runtime` +
