@@ -49,9 +49,14 @@ cmake --install build
 
 ```sh
 cd build/install/luadch
-./luadch              # plain ADC on port 5000
-./certs/make_cert.sh  # once, for TLS on port 5001
+./luadch              # TLS-only by default: adcs://<host>:5001
 ```
+
+Fresh installs are **TLS-only** (`ssl_ports = {5001}`, `tcp_ports = {}`);
+the TLS certificate is **auto-generated on first boot** by
+`core/cert_bootstrap.lua` (#77) - no cert step needed.
+`certs/make_cert.{sh,bat}` exist only for manual regeneration. Plain
+`adc://` requires explicitly enabling `tcp_ports` in `cfg/cfg.tbl`.
 
 ---
 
@@ -140,11 +145,12 @@ cmake --install build
 
 ```cmd
 cd build\install\luadch
-Luadch.exe                 :: plain ADC on port 5000
-certs\make_cert.bat        :: once, for TLS on port 5001
+Luadch.exe                 :: TLS-only by default: adcs://<host>:5001
 ```
 
-The OpenSSL DLLs are bundled into the install tree automatically.
+The TLS certificate is auto-generated on first boot (#77);
+`certs\make_cert.bat` is only for manual regeneration. The OpenSSL DLLs are
+bundled into the install tree automatically.
 
 ---
 
@@ -208,14 +214,17 @@ Pi 4 / Pi 5 / Apple Silicon Linux / AWS Graviton, etc.). Verify with
 
 ## First-time login
 
-Whichever platform you built on:
+Whichever platform you built on (TLS-only by default; the certificate is
+auto-generated on first boot, #77):
 
 ```
 Nick:     dummy
 Password: test
-Address:  adc://127.0.0.1:5000     (plain)
-          adcs://127.0.0.1:5001    (TLS, after the cert script)
+Address:  adcs://127.0.0.1:5001    (TLS; production clients should pin the
+                                    keyprint: adcs://host:5001/?kp=SHA256/...)
 ```
+
+Plain `adc://` requires explicitly enabling `tcp_ports` in `cfg/cfg.tbl`.
 
 After login: `+reg <yournick> 100`, `+delreg dummy`, `+reload`. The dummy
 default account is hubowner — **delete it as soon as you have your own**.

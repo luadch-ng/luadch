@@ -49,6 +49,18 @@ promoted to `master`, so pull requests go against **`dev`** - see
 - **Atomic plugin saves** ([#133](https://github.com/luadch-ng/luadch/issues/133)) - `util.savearray` / `util.savetable` use tmp + rename so a hub crash mid-write leaves the `.tbl` intact
 - **Docker plugin + language autosync** ([#118](https://github.com/luadch-ng/luadch/pull/118)) - container restarts pull in new bundled scripts and lang files without overwriting operator customisations
 
+### 3.2.x feature era (Phase 8+, on `master`)
+
+- **HTTP / JSON API** ([#82](https://github.com/luadch-ng/luadch/issues/82)) - token-authed REST surface for users, bans, registered users, config, logs, and a live `/v1/events` stream; see [`docs/HTTP_API.md`](docs/HTTP_API.md)
+- **Audit log** ([#84](https://github.com/luadch-ng/luadch/issues/84)) - structured JSONL `onAudit` records across ~20 plugins, exposed via `etc_auditlog` + the HTTP event stream
+- **Unified pre-handshake blocklist + in-hub GeoIP** ([#78](https://github.com/luadch-ng/luadch/issues/78) / [#79](https://github.com/luadch-ng/luadch/issues/79)) - CIDR/IPv6 blocklist with provenance, stealth mode, external feeds (Tor / Spamhaus / AbuseIPDB), MaxMind GeoLite2 country/ASN, and live proxy/VPN detection ([#352](https://github.com/luadch-ng/luadch/issues/352)); operator guide in [`docs/BLOCKLIST.md`](docs/BLOCKLIST.md)
+- **Global allowlist / whitelist** (#78 allowlist) - trusted infrastructure (hublist pingers etc.) exempt from the *automated* blockers, never from a manual ban
+- **Client blocker** ([#81](https://github.com/luadch-ng/luadch/issues/81)) - version-range client filtering
+- **Real dual-stack HBRI** ([#214](https://github.com/luadch-ng/luadch/issues/214)) - secondary-IP verification for IPv4+IPv6 clients
+- **Inbound webhook receiver + status-push heartbeat** ([#398](https://github.com/luadch-ng/luadch/issues/398) / [#395](https://github.com/luadch-ng/luadch/issues/395)) - HMAC-authed inbound webhooks (Discourse / GitHub) and an outbound status heartbeat
+- **`select`->`poll` event loop** ([#310](https://github.com/luadch-ng/luadch/issues/310)) - lifts the ~1024 concurrent-socket ceiling on POSIX
+- **ADC command aliases** ([#327](https://github.com/luadch-ng/luadch/issues/327)) - operator-defined `+alias`es
+
 See [`docs/SECURITY.md`](docs/SECURITY.md) for the full threat model
 and operator guidance.
 

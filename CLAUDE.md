@@ -94,7 +94,7 @@ The repo bundles all runtime dependencies as source - there is no external packa
 manager. This is intentional (the project ships as a self-contained build) but means
 dependency updates are manual.
 
-### Bundled dependencies (verified 2026-07-05; a dependency bump MUST update this table)
+### Bundled dependencies (verified 2026-07-21; a dependency bump MUST update this table)
 
 | Component   | Bundled version | Path           | Notes                                |
 |-------------|-----------------|----------------|--------------------------------------|
@@ -254,15 +254,18 @@ the index. Do not re-plan closed phases.
 ### Phase 8+ - feature development (current era)
 
 Each Phase-8+ item gets its own tracker issue, scope, and §1a.6 review gate.
-The strict "one phase at a time" discipline (§1b) still applies. Active
-engineering journals: [`PHASE_8_IO.md`](docs/phases/PHASE_8_IO.md) (IO/framing
-rework), [`PHASE_8A.md`](docs/phases/PHASE_8A.md) (ADC input-validation
-audit), [`PHASE_8B_DUAL_STACK.md`](docs/phases/PHASE_8B_DUAL_STACK.md)
-(dual-stack + HBRI).
+The strict "one phase at a time" discipline (§1b) still applies. The Phase-8
+engineering journals ([`PHASE_8_IO.md`](docs/phases/PHASE_8_IO.md) IO/framing
+rework, [`PHASE_8A.md`](docs/phases/PHASE_8A.md) ADC input-validation audit,
+[`PHASE_8B_DUAL_STACK.md`](docs/phases/PHASE_8B_DUAL_STACK.md) dual-stack +
+HBRI) are **historical** - those arcs shipped; read them for the narrative,
+not for open work.
 
 Shipped feature arcs so far (closed trackers, details in the issues): HTTP
 API #82, audit log #84, real HBRI #214, registered-users API family #236,
-subsystem managers #249, client blocker #81, aliases #327.
+subsystem managers #249, client blocker #81, aliases #327, unified blocklist
++ in-hub GeoIP #78/#79/#352, global whitelist/allowlist (#78 deferred item),
+status-push heartbeat #395, inbound webhook receiver #398.
 
 **Unified blocklist arc [#78](https://github.com/luadch-ng/luadch/issues/78)
 COMPLETE + on master (2026-07-10); #78 + #79 + #352 closed.** All precursors
@@ -274,62 +277,51 @@ cross-host to a signed CDN URL), boot-time runtime-dir self-heal
 (`core/ensuredirs.lua` + a `makedir` C primitive #382, #384) with a daemon
 `umask(027)` hardening, and an `etc_blocklist_feeds` reload-throttle (#386).
 
-**Current era: feature plugins + bug-issue triage.** Shipped to master
-(3.2.x, still no `v3.2.0` tag): push/pull status export (`etc_status_push`
-#395), the inbound webhook receiver (`etc_webhook` #398, the first
-`scope="none"` plugin route - live against a Discourse forum + a GitHub org),
-plus Sopor-reported fixes (v3.1.13 ratelimit hub-crash #401, `usr_uptime`
-undercount #405, BLOM smoke de-flake #408; **v3.1.14** Windows `FD_SETSIZE`
-64->1024 hub-crash #416, Sopor - the Windows luasocket build inherited the
-Winsock-default 64-socket `select()` cap; the Linux `>1024` sibling of that
-crash was the `select`->`poll` port, done in #310/#436). Shipped to master
-2026-07-13 (#419/#420/#423 all closed): the
-ADC parser now discards messages with unknown escape sequences per ADC 3.1
-(#419) + hub-bot INF `EM` escaping (#423), and an `etc_webhook` body-field
-`conditions` filter (#420 - fixed a live double-announce by filtering on a
-JSON body field like a GitHub release `action=released` or a Discourse
-opening post, not just the event header).
+**Current state (3.2.x on `master`, still no `v3.2.0` tag).** The items that
+used to sit here as "in flight on `dev`" have all merged. Recently shipped to
+master (frozen history - the live delta is always
+`git log --oneline origin/master..origin/dev`, never a list written here):
 
-**On `dev`, pending testhub validation then a dev->master MERGE** (exact
-delta: `git log --oneline origin/master..origin/dev` - do not trust a list
-written here): the `select`->`poll` event-loop port (#310 / PR #436) which
-removes the ~1024 concurrent-socket ceiling on POSIX and leaves Windows on
-`select`; `core/sysinfo.lua`'s `Get-CimInstance` -> `Get-WmiObject` fallback
-(#432) so old-Windows hubowners (Server 2008 R2 / Win7 = PowerShell 2.0,
-which has no `Get-CimInstance`) get real `+hubinfo` OS/CPU/RAM instead of
-`<UNKNOWN>` (Sopor; the pre-refactor 3.1.x plugin also CRASHED on the
-nil-concat - shipped a v0.30 `cmd_hubinfo` drop-in per §8); a `release.yml`
-zlib-dev fix (#441 - `find_package(ZLIB REQUIRED)` is unconditional but no
-release leg installed the dev package, so the first `v3.2.0` tag would have
-failed the aarch64 build at configure); a repo-wide plugin lang-key guard
-(#442); `CONTRIBUTING.md` documenting the dev-branch policy (#440); and
-three external cleanups from @Kcchouette (#437/#438/#439). Many hubowners
-run ancient Windows (the UCRT release build also needs KB2999226 there -
-the Universal C Runtime). A
-recurring pattern this era:
-a **periodic-fetch plugin must persist its next-fetch deadline across
-`+reload`**, or every reload re-hits a rate-limited provider - fixed twice
-(`etc_blocklist_feeds` #386, `etc_geoip` auto-update #414); general rule in
-[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3. Alongside, the
-`gh issue list --label bug` backlog is worked one at a time (each: deep-dive
-from source per §1a.3/4, since many are old-version reports asking "fixed in
-3.x?"). GitFlow A per fix; batch dev->master as a MERGE commit (never squash
-- see §8 branch hygiene).
+- **`select`->`poll` event-loop port (#310)** - lifts the ~1024 concurrent-
+  socket ceiling on POSIX (the Linux sibling of Sopor's Windows 64-socket
+  `FD_SETSIZE` crash #416); Windows stays on `select`. `hub/hub.c` raises the
+  fd soft limit to hard at boot.
+- **#78 global whitelist / allowlist** - `core/whitelist.lua` consulted by
+  every IP-blocking path so trusted infra (hublist pingers etc.) is exempt
+  from the AUTOMATED blockers (GeoIP / proxydetect / feeds / hub-limit) but
+  NOT from a deliberate manual `+ban` / `+blocklist` (**Model A**: a manual
+  block wins). Engine + `etc_whitelist` + pinger seed + per-plugin guards +
+  HTTP `/v1/whitelist`. NOT extended to `usr_share` / `usr_slots` /
+  `usr_nick_*`.
+- **single-instance lock + port-hijack fix (#433/#434)**, `sysinfo`
+  old-Windows `Get-WmiObject` fallback (#432), `CONTRIBUTING.md` (#440), a
+  repo-wide plugin lang-key guard (#442), a `release.yml` zlib-dev fix (#441),
+  external cleanups from @Kcchouette (#437/#438/#439).
+- **`etc_status_push` #395** (push heartbeat) + **`etc_webhook` #398** (inbound
+  HMAC receiver, first `scope="none"` route) + the ADC unknown-escape discard
+  #419 / hub-bot `EM` escaping #423 / webhook `conditions` filter #420.
+- **the #447 dead-code audit**, then a post-#447 correctness/i18n batch:
+  `cmd_ban` permanent ban (#444 keyword + #475 right-click menu entry),
+  `hub_runtime` store moved out of shipped `core/` (#445), `etc_records`
+  defensive load (#465), exhaustive PLUGIN_API §8 (#457),
+  `etc_cmdlog` / `cmd_userinfo` / blocklist+whitelist i18n + alignment
+  (#460 / #459 / #456).
+- **nick-prefix resolution arc (#473/#474/#477)** - `usr_nick_prefix` re-keys
+  the hub nick table to the PREFIXED nick, so ten operator commands
+  (+ `bot_session_chat`) that resolved an online user by a TYPED base nick
+  silently took the offline path (`+ban` stored but no kick; others no-op).
+  They now fall back to `user:firstnick()` - the `etc_trafficmanager` /
+  upstream-`luadch/luadch#240` idiom; `bot_session_chat` re-keys its whole
+  member/owner identity model to firstnick.
 
-**On `dev`: the #78 allowlist (global whitelist) - 4-PR arc A-D MERGED
-(PRs #427/#431/#429/#430), pending testhub -> dev->master.** The allowlist deferred from the
-unified-blocklist arc. A `core/whitelist.lua` engine consulted by every
-IP-blocking path so trusted infrastructure (hublist pingers etc.) is exempt
-from the AUTOMATED blockers (GeoIP / proxydetect / feeds / hub-limit) - but
-NOT from a deliberate manual `+ban` / `+blocklist` (Model A: a manual block
-wins). Phase A (engine + `blocklist.check_ip` precedence +
-`whitelist.is_whitelisted` sandbox global), B (`+whitelist` plugin +
-bundled hublist-pinger seed, `etc_whitelist`), C (per-plugin guards in
-etc_geoip / etc_proxydetect / usr_hubs - where the log goes quiet), D (HTTP
-`/v1/whitelist`). NOT extended to the share / slots / nick-policy plugins
-(`usr_share` / `usr_slots` / `usr_nick_*`). Source of truth: the
-whitelist-arc PRs (deferred item of
-[#78](https://github.com/luadch-ng/luadch/issues/78)).
+`dev` and `master` track closely; open work is the feature-arc backlog -
+`gh issue list --repo luadch-ng/luadch` (no open bugs). Durable pattern from
+this era: a **periodic-fetch plugin must persist its next-fetch deadline
+across `+reload`**, or every reload re-hits a rate-limited provider - fixed
+twice (`etc_blocklist_feeds` #386, `etc_geoip` #414); general rule in
+[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3. Workflow: GitFlow A per fix
+(deep-dive from source per §1a.3/4); batch dev->master as a MERGE commit
+(never squash - §8 branch hygiene).
 
 **HTTP-endpoint authoring** (which helper for which endpoint shape, envelope
 contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and
