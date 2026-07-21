@@ -267,6 +267,13 @@ local SANDBOX_GLOBALS = {
     -- HMAC-SHA256). Raw sha256 deliberately stays OUT of the sandbox -
     -- plugins get the MAC primitive, not the underlying hash.
     "hmac",
+    -- core/backup.lua (#480 PR-A): automatic-backup engine. The thin
+    -- scheduler/CLI plugin etc_backup.lua calls backup.run / .readiness /
+    -- .list. The engine reads its own policy (dir / keep / passphrase /
+    -- include_master_key) from cfg + secrets, NOT from caller args, so a
+    -- plugin can only trigger a backup to the operator-configured
+    -- destination - it cannot redirect the artifact or pick the key.
+    "backup",
     "unicode",
     -- read-only program constants (PROGRAM_NAME / VERSION / FORK /
     -- COPYRIGHT / CONFIG_PATH). Static strings, no capability; lets
