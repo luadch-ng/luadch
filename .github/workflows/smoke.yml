@@ -404,8 +404,9 @@ jobs:
       # #275 COV-2 holistic review follow-up: the Lua-side unit tests
       # MUST run on Windows too. Linux-only coverage masks divergences
       # in the MinGW UCRT64 Lua 5.4 build (locale-dependent string
-      # ops, integer-width / pattern-class edge cases). Same five
-      # tests as the Linux job, same order.
+      # ops, integer-width / pattern-class edge cases). Same set as the
+      # Linux job (minus the two C-module tests, which are Linux-only),
+      # same order.
       - name: Run iostream unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/iostream_test.lua

@@ -1123,6 +1123,9 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 | GET | `/v1/whitelist/counts` | read | `etc_whitelist` (= ADC `+whitelist count`) - **landed (#78 allowlist Phase D)** [^http-whitelist-2] |
 | POST | `/v1/whitelist` | admin | `etc_whitelist` (= ADC `+whitelist add`) - **landed (#78 allowlist Phase D)** [^http-whitelist-3] |
 | DELETE | `/v1/whitelist/{id}` | admin | `etc_whitelist` (= ADC `+whitelist del`) - **landed (#78 allowlist Phase D)** [^http-whitelist-4] |
+| GET | `/v1/geoip` | read | `etc_geoip` - GeoIP policy + MMDB status (country/ASN DB freshness) |
+| GET | `/v1/proxydetect` | read | `etc_proxydetect` - proxy/VPN detection provider + cache status |
+| GET | `/v1/blocklist/feeds` | read | `etc_blocklist_feeds` - per-feed refresh status (last pull, entry counts, errors) |
 
 [^http-ban-1]: Returns `{ok:true, data:{bans:[entry, ...]}}`. Each entry carries `id` (1-based index into the live bans array - the same `{id}` accepted by DELETE), `nick`, `cid`, `hash`, `ip`, `reason`, `by_nick`, `by_level`, `ban_seconds`, `ban_start` (epoch seconds, hub clock), `permanent` (bool - a permanent ban never expires; #444), `remaining_seconds` (can be negative for not-yet-pruned-expired entries; pruning happens on `onConnect` of the banned user, not on a timer), and `expires_at` (ISO 8601 UTC, omitted when `remaining_seconds <= 0`). **For a permanent ban** (`permanent:true`) `ban_seconds` is `0` and BOTH `remaining_seconds` and `expires_at` are omitted - a consumer distinguishes "permanent" from "expired-not-yet-pruned" by the `permanent` flag, not by the absent expiry. The `id` is NOT a stable surrogate key - it shifts every time a ban is removed (the underlying `bans` array is reindexed by `table.remove`). Operators / tooling MUST re-list before issuing a follow-up DELETE.
 
