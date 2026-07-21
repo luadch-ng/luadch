@@ -328,6 +328,12 @@ jobs:
       - name: Run nick-prefix resolution unit test
         run: lua5.4 tests/unit/nick_prefix_resolution_test.lua
 
+      # bot_session_chat: session-chat owner + members are keyed by
+      # firstnick, so +add/+del by a typed base nick resolves a prefixed
+      # online user and stores/matches the firstnick.
+      - name: Run bot_session_chat nick-prefix unit test
+        run: lua5.4 tests/unit/bot_session_chat_prefix_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -581,6 +587,10 @@ jobs:
       - name: Run nick-prefix resolution unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/nick_prefix_resolution_test.lua
+
+      - name: Run bot_session_chat nick-prefix unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/bot_session_chat_prefix_test.lua
 
       - name: Configure
         shell: msys2 {0}

@@ -8,6 +8,20 @@
             - if a user creates a session chat then only he has the permission to add/remove members
             - only members can read/write
 
+        v0.5:
+            - identify chat owner + members by firstnick instead of the
+              current display nick. usr_nick_prefix re-keys the hub nick
+              table to the PREFIXED nick, so `+add <base nick>` could not
+              resolve a prefixed online user (silent "user not online"),
+              and a bare fallback would have stored an inconsistent key
+              (the membership checks compared the prefixed current nick).
+              The whole identity model now uses user:firstnick() - the
+              original, prefix-independent nick - so add/del/membership are
+              robust against any nick-prefix scheme, matching the store-by-
+              firstnick convention of cmd_gag / usr_hide_share /
+              etc_msgmanager. Same find_online_by_firstnick fallback idiom
+              as etc_trafficmanager (upstream luadch/luadch#240).
+
         v0.4:
             - fix #26 / thx Sopor
             - removed table lookups
@@ -37,7 +51,7 @@
 --------------
 
 local scriptname = "bot_session_chat"
-local scriptversion = "0.4"
+local scriptversion = "0.5"
 
 --// command in main (rightclick)
 local cmd = "sessionchat"
@@ -64,7 +78,8 @@ local scriptlang = cfg.get( "language" )
 --// functions
 local feed, client, onbmsg
 local reg_chats_onstart, check_If_chat_exists, check_if_member, check_if_owner,
-      get_members, check_if_online, refresh_bot, msg_to_members, remove_chats
+      get_members, check_if_online, refresh_bot, msg_to_members, remove_chats,
+      find_online_by_firstnick
 
 --// database
 local sessions_file = "scripts/data/bot_session_chat.tbl"
@@ -210,12 +225,13 @@ end
 --// check if user is chat owner
 check_if_owner = function( user, chat )
     sessions_tbl = util.loadtable( sessions_file ) or {}
-    local user_nick = user:nick()
+    -- owner is stored by firstnick (prefix-independent identity)
+    local user_firstnick = user:firstnick()
     for k, v in pairs( sessions_tbl ) do
         if k == chat then
             for k, v in pairs( v ) do
                 if k == "owner" then
-                    if v == user_nick then
+                    if v == user_firstnick then
                         return true
                     end
                 end
@@ -285,6 +301,24 @@ refresh_bot = function( chat )
     end
 end
 
+-- Resolve an online user by their firstnick when the plain nick lookup
+-- misses. usr_nick_prefix re-keys the hub's _usernicks table to the
+-- PREFIXED display nick (via user:updatenick), so hub.isnickonline( <base
+-- nick> ) returns nil for a prefixed online user. Members are stored by
+-- firstnick, so both the +add resolution and the member-lookup below need
+-- this to reach a prefixed member. firstnick is the ORIGINAL nick,
+-- captured once at login and never re-keyed. Same idiom as
+-- etc_trafficmanager's find_online_by_firstnick (closed upstream
+-- luadch/luadch#240).
+find_online_by_firstnick = function( firstnick )
+    for _, buser in pairs( hub.getusers() ) do
+        if buser:firstnick() == firstnick then
+            return buser
+        end
+    end
+    return nil
+end
+
 --// send msg to all members
 msg_to_members = function( chat, msg )
     sessions_tbl = util.loadtable( sessions_file ) or {}
@@ -294,7 +328,9 @@ msg_to_members = function( chat, msg )
             for k, v in pairs( v ) do
                 if k == "members" then
                     for i, usr in pairs( v ) do
-                        local user = hub.isnickonline( usr ) or false
+                        -- `usr` is a firstnick; resolve it to the (possibly
+                        -- prefixed) online user object.
+                        local user = hub.isnickonline( usr ) or find_online_by_firstnick( usr )
                         if user then
                             user:reply( msg, bot_name, bot_name )
                         end
@@ -323,8 +359,8 @@ feed = function( msg, dispatch, chat, cmd )
     local txt2 = utf.match( txt_adc, "^[+!#]%S+ (%S+)" )
     for sid, user in pairs( hub.getusers() ) do
         local bot_nick = chat:nick()
-        local user_nick = user:nick()
-        if check_if_member( user_nick, bot_nick ) then
+        -- members are keyed by firstnick, so match on the caller's firstnick
+        if check_if_member( user:firstnick(), bot_nick ) then
             if txt == ( cmd_help or cmd_members ) then
                 -- do not send chat commands to users
             elseif txt == ( cmd_add and txt2 ) or ( cmd_del and txt2 ) then
@@ -342,8 +378,9 @@ client = function( bot, cmd )
         if not user then
             return true
         end
-        local user_nick = user:nick()
-        if not check_if_member( user_nick, bot:nick() ) then
+        -- members are keyed by firstnick (prefix-independent identity)
+        local user_firstnick = user:firstnick()
+        if not check_if_member( user_firstnick, bot:nick() ) then
             user:reply( msg_denied_2, bot, bot )
             return true
         end
@@ -368,23 +405,28 @@ client = function( bot, cmd )
         end
         if cmd2 == cmd_add and id then
             if check_if_owner( user, bot:nick() ) then
-                local target = hub.isnickonline( id ) or false
+                -- resolve the typed nick, tolerating an active nick-prefix
+                local target = hub.isnickonline( id ) or find_online_by_firstnick( id )
                 if target then
-                    if not check_if_member( id, bot:nick() ) then
+                    -- members are stored + matched by firstnick; show the
+                    -- resolved current nick in the announcements
+                    local target_firstnick = target:firstnick()
+                    local target_nick = target:nick()
+                    if not check_if_member( target_firstnick, bot:nick() ) then
                         sessions_tbl = util.loadtable( sessions_file ) or {}
                         --// add user
-                        table.insert( sessions_tbl[ bot:nick() ][ members ], id )
+                        table.insert( sessions_tbl[ bot:nick() ][ members ], target_firstnick )
                         util.savetable( sessions_tbl, "sessions_tbl", sessions_file )
                         --// msg to existing members
-                        msg_to_members( bot:nick(), msg_new_member .. id )
+                        msg_to_members( bot:nick(), msg_new_member .. target_nick )
                         --// msg to new member
                         local msg_help = utf.format( msg_help_member, msg_help_1, msg_help_2 )
                         target:reply( msg_help, bot_name, bot_name )
-                        target:reply( msg_welcome .. id, bot_name, bot_name )
+                        target:reply( msg_welcome .. target_nick, bot_name, bot_name )
                         --// refresh members count in description
                         refresh_bot( bot:nick() )
                     else
-                        user:reply( msg_already .. id, bot_name, bot_name )
+                        user:reply( msg_already .. target_nick, bot_name, bot_name )
                     end
                 else
                     user:reply( msg_notonline .. id, bot_name, bot_name )
@@ -396,15 +438,21 @@ client = function( bot, cmd )
         end
         if cmd2 == cmd_del and id then
             if check_if_owner( user, bot:nick() ) then
-                if check_if_member( id, bot:nick() ) then
+                -- members are keyed by firstnick; resolve the typed nick to
+                -- the stored key (fall back to `id` for an offline member,
+                -- whose base nick the owner types = their firstnick).
+                local target = hub.isnickonline( id ) or find_online_by_firstnick( id )
+                local member_key = target and target:firstnick() or id
+                local member_disp = target and target:nick() or id
+                if check_if_member( member_key, bot:nick() ) then
                     sessions_tbl = util.loadtable( sessions_file ) or {}
-                    if user_nick ~= id then
+                    if user_firstnick ~= member_key then
                         for k, v in pairs( sessions_tbl ) do
                             if k == bot:nick() then
                                 for k, v in pairs( v ) do
                                     if k == "members" then
                                         for i, usr in pairs( v ) do
-                                            if id == usr then
+                                            if member_key == usr then
                                                 --// del user
                                                 table.remove( sessions_tbl[ bot:nick() ][ members ], i )
                                                 util.savetable( sessions_tbl, "sessions_tbl", sessions_file )
@@ -416,9 +464,8 @@ client = function( bot, cmd )
                             end
                         end
                         --// msg to still existing members
-                        msg_to_members( bot:nick(), msg_del .. id )
+                        msg_to_members( bot:nick(), msg_del .. member_disp )
                         --// msg to member
-                        local target = hub.isnickonline( id ) or false
                         if target then
                             target:reply( msg_del_2, bot_name, bot_name )
                         end
@@ -442,7 +489,8 @@ onbmsg = function( user, command, parameters )
     sessions_tbl = util.loadtable( sessions_file ) or {}
     local chatname = utf.match( parameters, "^(%S+)$" )
     local user_level = user:level()
-    local user_nick = user:nick()
+    local user_nick = user:nick()                 -- display (announcements)
+    local user_firstnick = user:firstnick()       -- stored identity (owner + member)
     if user_level < minlevel then
         user:reply( msg_denied, hub.getbot() )
         return PROCESSED
@@ -471,16 +519,17 @@ onbmsg = function( user, command, parameters )
             user:reply( msg_chatexists, hub.getbot() )
             return PROCESSED
         else
-            --// reg the chat
-            local description = utf.format( chatdesc, user_nick, 1 )
+            --// reg the chat (description "by:" uses firstnick to match the
+            --// stored owner, so it stays stable across refresh_bot / restart)
+            local description = utf.format( chatdesc, user_firstnick, 1 )
             local nick, desc = chatprefix .. chatname, description
             sessionchat, err = hub.regbot{ nick = nick, desc = desc, client = client }
             err = err and error( err )
-            --// save chat infos to tbl
+            --// save chat infos to tbl (owner + members keyed by firstnick)
             sessions_tbl[ nick ] = {}
-            sessions_tbl[ nick ].owner = user_nick
+            sessions_tbl[ nick ].owner = user_firstnick
             sessions_tbl[ nick ].members = {}
-            table.insert( sessions_tbl[ nick ][ members ], user_nick )
+            table.insert( sessions_tbl[ nick ][ members ], user_firstnick )
             util.savetable( sessions_tbl, "sessions_tbl", sessions_file )
             --// send msg to all
             local msg = utf.format( msg_create, user_nick, nick )
@@ -521,11 +570,12 @@ hub.setlistener( "onStart", {},
 hub.setlistener( "onLogout", {},
     function( user )
         sessions_tbl = util.loadtable( sessions_file ) or {}
-        local user_nick = user:nick()
+        -- owner is stored by firstnick (prefix-independent identity)
+        local user_firstnick = user:firstnick()
         local chat
         for k, v in pairs( sessions_tbl ) do
             if k then
-                if sessions_tbl[ k ].owner == user_nick then
+                if sessions_tbl[ k ].owner == user_firstnick then
                     chat = hub.isnickonline( k )
                     chat:kill( "ISTA 230 " )
                     sessions_tbl[ k ] = nil
@@ -543,3 +593,14 @@ hub.setlistener( "onExit", {},
 )
 
 hub.debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
+
+-- Internal test seams (nick-prefix resolution regression). `_`-prefixed
+-- per the repo convention for non-contract, test-only exports (see
+-- docs/PLUGIN_API.md §8).
+return {
+    _client                   = client,
+    _onbmsg                   = onbmsg,
+    _check_if_member          = check_if_member,
+    _check_if_owner           = check_if_owner,
+    _find_online_by_firstnick = find_online_by_firstnick,
+}
