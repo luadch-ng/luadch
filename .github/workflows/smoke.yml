@@ -207,6 +207,13 @@ jobs:
       - name: Run hmac unit test
         run: lua5.4 tests/unit/hmac_test.lua
 
+      # core/backup_archive.lua (#480 P0): ustar writer/reader, PBKDF2-
+      # HMAC-SHA256 KDF (Python-verified vectors), manifest and the full
+      # pack()/unpack() plumbing via a fake identity crypto. The real
+      # AES-256-GCM round-trip is the crypto test below (Linux-only).
+      - name: Run backup_archive unit test
+        run: lua5.4 tests/unit/backup_archive_test.lua
+
       # #78 Precursor 0d: core/cacert_bootstrap.lua reconcile_bundle
       # decision-matrix (source-missing / installed / no-op / warned /
       # auto-updated branches). Uses OS temp dir for file fixtures.
@@ -361,6 +368,15 @@ jobs:
           cd build/install/luadch
           LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/zlib_stream_test.lua
 
+      # core/backup_archive.lua real AES-256-GCM round-trip (#480 P0):
+      # pack/unpack fidelity, ciphertext secrecy, wrong-passphrase + GCM
+      # tamper rejection. Same install-tree + bundled-liblua + adclib
+      # requirement as the two C-module tests above, so Linux-only.
+      - name: Run backup_archive crypto unit test
+        run: |
+          cd build/install/luadch
+          LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/backup_archive_crypto_test.lua
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -514,6 +530,10 @@ jobs:
       - name: Run hmac unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/hmac_test.lua
+
+      - name: Run backup_archive unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/backup_archive_test.lua
 
       - name: Run cacert_bootstrap unit test
         shell: msys2 {0}
