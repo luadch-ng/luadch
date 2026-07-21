@@ -107,7 +107,11 @@ local function _next_daily( now, hhmm )
     if not h or not m or h < 0 or h > 23 or m < 0 or m > 59 then return nil end
     local t = os_date( "*t", now )
     local cand = os_time{ year = t.year, month = t.month, day = t.day, hour = h, min = m, sec = 0 }
+    -- A spring-forward-gap HH:MM makes os.time return nil; the caller then
+    -- falls back to the interval. Accepted (once-a-year, narrow).
     if not cand then return nil end
+    -- Flat +24h: across a DST change the slot is 1h off for that one day and
+    -- self-corrects on the next recompute. Accepted for a backup schedule.
     if cand <= now then cand = cand + 86400 end   -- today's slot passed -> tomorrow
     return cand
 end
@@ -277,7 +281,15 @@ hub_setlistener( "onStart", { },
 
         load_state( )
         local now = os_time( )
-        next_backup_at = enabled and _schedule_next( now, last_backup_at ) or nil
+        -- Honor the persisted deadline across +reload / restart so an interval
+        -- countdown is not reset on every boot (the #386/#414 anti-pattern)
+        -- and a slot missed while the hub was down still fires on boot. Only
+        -- recompute when there is no persisted deadline (first run).
+        if enabled then
+            next_backup_at = next_backup_at or _schedule_next( now, last_backup_at )
+        else
+            next_backup_at = nil
+        end
 
         -- command trio (help / right-click menu / +cmd dispatcher)
         local help = hub_import( "cmd_help" )
@@ -292,7 +304,6 @@ hub_setlistener( "onStart", { },
         if hubcmd then hubcmd.add( cmd_main, on_backup, oplevel ) end
 
         notify_if_unready( nil )   -- nag owners already online (e.g. after +reload)
-        hub_debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
         return nil
     end
 )
@@ -305,7 +316,11 @@ hub_setlistener( "onTimer", { },
         local now = os_time( )
         if now >= next_backup_at then
             in_flight = true
-            do_backup( "scheduled", nil )
+            -- Guard the run: a raise deep inside (audit / reply) must not
+            -- wedge the scheduler with in_flight stuck true and next_backup_at
+            -- past-due, which would silently stop all future backups until a
+            -- +reload. next_backup_at is always advanced afterwards.
+            pcall( do_backup, "scheduled", nil )
             next_backup_at = _schedule_next( now, now )
             persist_state( )
             in_flight = false

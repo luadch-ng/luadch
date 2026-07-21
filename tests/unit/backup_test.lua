@@ -73,7 +73,7 @@ _cfg, _secret = { }, { }
 do
     local c = B._config( )
     eq( "default enabled = true",    c.enabled, true )
-    eq( "default dir = backups",     c.dir,     "backups" )
+    eq( "default dir = cfg/backups", c.dir,     "cfg/backups" )
     eq( "default keep = 7",          c.keep,    7 )
     eq( "default include_mk = true", c.include_mk, true )
     eq( "no passphrase -> nil",      c.passphrase, nil )

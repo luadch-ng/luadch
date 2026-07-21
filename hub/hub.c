@@ -274,7 +274,19 @@ static int listdir(lua_State *L)
     lua_pushstring(L, fd.cFileName);
     lua_rawseti(L, -2, ++i);
   } while (FindNextFileA(h, &fd));
+  /* A clean end is ERROR_NO_MORE_FILES; anything else means the enumeration
+   * was cut short. Surface it rather than returning a partial listing - a
+   * truncated scripts/data listing would silently under-collect a backup. */
+  DWORD ferr = GetLastError();
   FindClose(h);
+  if (ferr != ERROR_NO_MORE_FILES)
+  {
+    lua_pop(L, 1);
+    lua_pushnil(L);
+    lua_pushfstring(L, "listdir: enumeration failed for '%s' (error %lu)",
+                    path, (unsigned long)ferr);
+    return 2;
+  }
   return 1;
 #elif defined(__unix__)
   DIR *d = opendir(path);

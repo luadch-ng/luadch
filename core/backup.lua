@@ -57,10 +57,12 @@ local table       = use "table"
 local table_sort  = table.sort
 
 local os        = use "os"
-local os_time   = os.time
-local os_date   = os.date
-local os_rename = os.rename
-local os_remove = os.remove
+local os_time    = os.time
+local os_date    = os.date
+local os_rename  = os.rename
+local os_remove  = os.remove
+local os_getenv  = os.getenv
+local os_execute = os.execute
 
 local io        = use "io"
 local io_open   = io.open
@@ -100,7 +102,7 @@ local MASTERKEY_ENTRY  = "__masterkey__"
 local BACKUP_PREFIX     = "luadch-backup-"
 local BACKUP_SUFFIX     = ".ldbk"
 local SIDECAR_SUFFIX    = ".sha256"
-local DEFAULT_DIR       = "backups"
+local DEFAULT_DIR       = "cfg/backups"
 local DEFAULT_KEEP      = 7
 
 ----------------------------------// CONFIG SNAPSHOT //--
@@ -247,6 +249,16 @@ local function _write_atomic( path, content )
     return false, rerr or "rename failed"
 end
 
+-- POSIX chmod 600 on the sealed artifact - it bundles the (encrypted)
+-- master.key / user.tbl / serverkey, so keep it owner-only even though the
+-- AES-256-GCM sealing already protects the contents (the daemon umask leaves
+-- new files group-readable). Best-effort, no-op on Windows. Mirrors
+-- cfg_secret's helper.
+local function _chmod_600( path )
+    if os_getenv "COMSPEC" and os_getenv "WINDIR" then return end
+    os_execute( "chmod 600 '" .. tostring( path ):gsub( "'", "'\\''" ) .. "'" )
+end
+
 ----------------------------------// PUBLIC: READINESS //--
 
 -- Config sanity the owner nag enumerates. Never raises; returns a list of
@@ -331,6 +343,7 @@ local function run( )
     if not wok then
         return nil, "backup: cannot write '" .. path .. "': " .. tostring( werr )
     end
+    _chmod_600( path )
 
     -- Sidecar: passphrase-free integrity check (sha256sum -c). Best-effort -
     -- the backup itself already succeeded.

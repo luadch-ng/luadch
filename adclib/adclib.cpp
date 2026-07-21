@@ -728,6 +728,10 @@ int pbkdf2_sha256(lua_State* L)
     size_t pw_len, salt_len;
     const char* pw   = luaL_checklstring(L, 1, &pw_len);
     const char* salt = luaL_checklstring(L, 2, &salt_len);
+    if (pw_len > INT_MAX || salt_len > INT_MAX)
+    {
+        return luaL_error(L, "pbkdf2_sha256: password/salt too large");
+    }
     lua_Integer iters = luaL_checkinteger(L, 3);
     lua_Integer dklen = luaL_checkinteger(L, 4);
     if (iters < 1 || iters > 100000000)
