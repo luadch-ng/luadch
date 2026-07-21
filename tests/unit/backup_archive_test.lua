@@ -28,7 +28,7 @@
 local _real = {
     type = type, error = error, pcall = pcall, tostring = tostring,
     tonumber = tonumber, load = load, pairs = pairs, ipairs = ipairs,
-    string = string, table = table, io = io,
+    string = string, table = table, io = io, debug = debug,
     adclib = {
         random_bytes = function( n ) return string.rep( "R", n ) end,
         aes_gcm_seal = function( _key, _nonce, pt ) return pt .. string.rep( "\0", 16 ) end,
@@ -131,6 +131,23 @@ eq( "manifest: number field",  m_out.created_at,         1700000000 )
 eq( "manifest: bool field",    m_out.include_master_key, true )
 eq( "manifest: kinds map a",   m_out.kinds[ "__masterkey__" ], "masterkey" )
 eq( "manifest: kinds map b",   m_out.kinds[ "cfg/user.tbl" ],  "tree" )
+
+-- #485: a crafted manifest must not hang the offline restore. Pre-fix this
+-- spins forever (the eval had no work bound); post-fix the instruction-count
+-- hook aborts it and _manifest_parse returns (nil, err). If this test ever
+-- HANGS instead of failing fast, the bound regressed.
+do
+    local bad = A._manifest_parse( "return (function() while true do end end)()" )
+    ok( "manifest: infinite loop bounded -> nil", bad == nil )
+    -- an over-budget bounded loop is refused too, not silently accepted
+    local heavy = A._manifest_parse( "local x=0 for i=1,1e9 do x=x+1 end return {}" )
+    ok( "manifest: over-budget loop -> nil", heavy == nil )
+    -- oversized manifest rejected before load
+    local huge = A._manifest_parse( "return {}" .. string.rep( " ", 70000 ) )
+    ok( "manifest: oversized -> nil", huge == nil )
+    -- a normal manifest still parses after all that
+    ok( "manifest: normal still ok", type( A._manifest_parse( "return { a = 1 }" ) ) == "table" )
+end
 
 ----------------------------------------------------------------------
 -- Full pack()/unpack() plumbing (identity crypto, iters=1 for speed).
