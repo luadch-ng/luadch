@@ -380,6 +380,15 @@ jobs:
           cd build/install/luadch
           LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/adclib_unescape_test.lua
 
+      # #483 adclib hashpas/hasholdpas salt-guard diagnostic. Same
+      # install-tree + bundled-liblua requirement as adclib_unescape, so
+      # Linux-only. Proves the guard raises "salt length N out of range"
+      # (not the "invalid option '%z'" format error the pre-fix %zu gave).
+      - name: Run adclib_hashpas unit test
+        run: |
+          cd build/install/luadch
+          LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/adclib_hashpas_test.lua
+
       # zlib_stream.gunzip() C round-trip (GeoIP auto-update precursor).
       # Same install-tree + bundled-liblua requirement as adclib above, so
       # Linux-only (msys2 lua segfaults loading our C modules).
