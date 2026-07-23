@@ -65,8 +65,8 @@ ecosystem - clients pin against it instead of validating a CA chain.
 ```
 Nick:     dummy
 Password: test
-Address:  adc://127.0.0.1:5000      (plain)
-          adcs://127.0.0.1:5001/?kp=SHA256/<as logged>
+Address:  adcs://127.0.0.1:5001/?kp=SHA256/<as logged>   (TLS, the default)
+          adc://127.0.0.1:5000                            (plain, only if you enabled tcp_ports)
 ```
 
 After login, register yourself, delete the bootstrap account, reload:
