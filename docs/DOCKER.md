@@ -113,6 +113,34 @@ or, in the hub itself (after logging in as a level-100 user):
 `+reload` is faster (no TCP listener restart) and what you'll usually
 want for non-network-port changes.
 
+## Backups
+
+Full guide: [`docs/BACKUP.md`](BACKUP.md). The Docker essentials:
+
+- **Enable it:** add `{ "etc_backup.lua", enabled = true }` to the `scripts`
+  list in `cfg/cfg.tbl`, then set the passphrase in the service's
+  `environment:` (it must reach the container - `.env` alone does not):
+  ```yaml
+  environment:
+    - LUADCH_ETC_BACKUP_PASSPHRASE=${LUADCH_ETC_BACKUP_PASSPHRASE}
+  ```
+  Restart the container. `!backup status` should show "ready".
+- **Where they land:** `./cfg/backups/` on the host (default `etc_backup_dir =
+  "cfg/backups"`, inside the already-mounted `./cfg`). No extra volume needed.
+- **Off-site:** the hub only writes locally - mirror `./cfg/backups/` to a
+  remote yourself (rclone/restic/cron). BACKUP.md has an rclone walkthrough.
+- **Restore** (hub stopped, one-shot container; the passphrase env and args are
+  forwarded automatically):
+  ```sh
+  docker compose stop luadch
+  docker compose run --rm luadch --restore cfg/backups/<file>.ldbk --verify
+  docker compose run --rm luadch --restore cfg/backups/<file>.ldbk --force
+  docker compose up -d luadch
+  ```
+  If your `master_key_path` is on the `./secrets/` mount (the recommended
+  layout), add `--master-key-path /secrets/master.key` - restore refuses an
+  out-of-tree path from the manifest unless you name it explicitly.
+
 ## TLS-only deployments
 
 Once your users are on `adcs://` URLs, drop the plain port:

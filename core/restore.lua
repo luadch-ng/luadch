@@ -293,9 +293,16 @@ local function main( )
         return 1
     end
 
+    -- Primary env for restore; fall back to the backup engine's own env name
+    -- so an operator whose compose already sets LUADCH_ETC_BACKUP_PASSPHRASE
+    -- (secrets.lookup convention) need not add a second variable just to restore.
     local passphrase = os_getenv "LUADCH_BACKUP_PASSPHRASE"
     if type( passphrase ) ~= "string" or passphrase == "" then
-        print( "luadch restore: set the backup passphrase in $LUADCH_BACKUP_PASSPHRASE, e.g." )
+        passphrase = os_getenv "LUADCH_ETC_BACKUP_PASSPHRASE"
+    end
+    if type( passphrase ) ~= "string" or passphrase == "" then
+        print( "luadch restore: set the backup passphrase in $LUADCH_BACKUP_PASSPHRASE" )
+        print( "  (or $LUADCH_ETC_BACKUP_PASSPHRASE), e.g." )
         print( "  LUADCH_BACKUP_PASSPHRASE='...' ./luadch --restore " .. file )
         return 1
     end

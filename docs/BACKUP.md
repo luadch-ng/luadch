@@ -129,22 +129,59 @@ cd cfg/backups && sha256sum -c luadch-backup-YYYYMMDD-HHMMSS.ldbk.sha256
 
 ## Off-site copies
 
-The hub does not push anywhere. Copy `cfg/backups/` off the box on your own
-schedule. Examples:
+A backup that lives only on the hub host dies with that host. The hub does not
+push anywhere by design, so mirroring `cfg/backups/` off the box is your job -
+and the important half of a real backup strategy. The `.ldbk` is already
+encrypted (AES-256-GCM), so the destination can be any untrusted remote.
+
+### rclone (recommended)
+
+[rclone](https://rclone.org) syncs a local directory to ~all cloud/remote
+backends (S3, Backblaze B2, Google Drive, WebDAV, SFTP, ...) with one config.
+
+1. Install rclone (`apt install rclone`, or the static binary from rclone.org).
+2. Configure a remote once, interactively:
+   ```sh
+   rclone config
+   # n) New remote  -> name it e.g. "backup"
+   #    pick a backend (e.g. Backblaze B2 / S3 / Drive), paste keys/token
+   ```
+3. Test it:
+   ```sh
+   rclone lsd backup:            # lists buckets/dirs on the remote
+   ```
+4. Copy the backups up:
+   ```sh
+   rclone copy ./cfg/backups backup:luadch-hub/backups --progress
+   ```
+5. Automate it in the host's crontab, a little AFTER the daily backup runs
+   (default 04:00, remember the container-UTC note below):
+   ```cron
+   20 4 * * *  rclone copy /srv/luadch/cfg/backups backup:luadch-hub/backups
+   ```
+6. Confirm what landed:
+   ```sh
+   rclone ls backup:luadch-hub/backups
+   ```
+
+**`copy` vs `sync`:** `copy` only adds/updates - the remote keeps every artifact
+even after the hub's rotation (`etc_backup_keep`) prunes it locally, so you get
+a longer off-site history. `sync` mirrors exactly, propagating local deletions.
+Prefer `copy` unless you deliberately want the remote to match local retention.
+
+Optional defense-in-depth: an `rclone crypt` remote encrypts a second time
+on top of the already-encrypted `.ldbk` (useful if the remote's account itself
+is a concern). Not required.
+
+### Alternatives
 
 ```sh
-# rclone to any remote (S3, B2, WebDAV, SFTP, ...)
-rclone sync /opt/luadch/cfg/backups remote:luadch-backups
+# restic (dedup + its own encryption + snapshots)
+restic -r s3:s3.example.com/luadch backup /srv/luadch/cfg/backups
 
-# restic (dedup + its own encryption on top)
-restic -r s3:s3.example.com/luadch backup /opt/luadch/cfg/backups
-
-# plain scp in cron
-0 5 * * * scp -q /opt/luadch/cfg/backups/*.ldbk* backup@host:/srv/luadch/
+# plain scp in cron (simplest, no history management)
+0 5 * * *  scp -q /srv/luadch/cfg/backups/*.ldbk* backup@host:/srv/luadch/
 ```
-
-The `.ldbk` is already encrypted, so an untrusted remote is acceptable; restic's
-extra layer is optional defense-in-depth.
 
 ## Restore
 
@@ -202,20 +239,51 @@ Rebuild a dead hub on a fresh host:
 
 ## Docker
 
-- Mount the backup dir out of the container so artifacts survive it:
-  `-v ./cfg/backups:/luadch/cfg/backups` (or point `etc_backup_dir` at a
-  dedicated volume).
-- Set the passphrase via env: `-e LUADCH_ETC_BACKUP_PASSPHRASE=...`.
-- Container clocks are usually UTC - `etc_backup_daily_at` is server-local, so
-  pick the hour in UTC.
-- To restore, run the one-shot in a container over the target tree with the hub
-  stopped:
-  ```sh
-  docker compose run --rm -e LUADCH_BACKUP_PASSPHRASE=... \
-    luadch --restore cfg/backups/luadch-backup-....ldbk
-  ```
-  See [DOCKER.md](DOCKER.md) for the `master_key_path`-on-`secrets/`-mount
-  layout.
+The install root in the image is `/opt/luadch`. Setup:
+
+- **No separate backups volume needed.** The default `etc_backup_dir =
+  "cfg/backups"` is inside the already-mounted `./cfg:/opt/luadch/cfg`, so
+  artifacts land in `./cfg/backups/` on the host automatically. (Do NOT add a
+  second mount onto `/opt/luadch/cfg` - it shadows the cfg mount and breaks the
+  hub.) Only mount a dedicated volume if you set `etc_backup_dir` to a path
+  *outside* cfg, e.g. `etc_backup_dir = "/opt/luadch/backups"` +
+  `- ./backups:/opt/luadch/backups`.
+- Set the passphrase via env in the service's `environment:` (the standard
+  secrets-lookup name): `LUADCH_ETC_BACKUP_PASSPHRASE=...`. `.env` alone is not
+  enough - it must reach the container via `environment:` or `env_file:`.
+- Container clocks are usually **UTC** - `etc_backup_daily_at` is server-local,
+  so pick the hour in UTC (04:00 = 04:00 UTC).
+
+**Restore** runs as a one-shot container with the hub stopped (the entrypoint
+forwards args to the binary, and restore accepts the same
+`LUADCH_ETC_BACKUP_PASSPHRASE` your compose already sets):
+
+```sh
+docker compose stop luadch
+
+# dry run first
+docker compose run --rm luadch --restore cfg/backups/luadch-backup-....ldbk --verify
+
+# apply (--force overwrites the existing tree)
+docker compose run --rm luadch --restore cfg/backups/luadch-backup-....ldbk --force
+
+docker compose up -d luadch      # boot again, then log in to confirm
+```
+
+**master.key on a `secrets/` mount:** if `master_key_path` points outside the
+tree (e.g. `/secrets/master.key` via a `- ./secrets:/secrets` mount, the
+recommended layout), restore will NOT auto-write there - it refuses an
+out-of-tree path from the manifest so a foreign archive cannot steer an
+arbitrary write. Add `--master-key-path` to opt in explicitly:
+
+```sh
+docker compose run --rm luadch \
+  --restore cfg/backups/luadch-backup-....ldbk --force \
+  --master-key-path /secrets/master.key
+```
+
+(On an older image whose entrypoint does not forward args, override it:
+`docker compose run --rm --entrypoint /opt/luadch/luadch luadch --restore ...`.)
 
 ## Security model
 

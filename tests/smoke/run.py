@@ -722,10 +722,14 @@ def test_backup_restore_roundtrip(source_install: Path, keep_staging=False):
 
         # --verify is a dry run over the POPULATED tree (no --force): it must
         # still exit 0 and write nothing - the conflict refusal is for a real
-        # apply, not a verify.
+        # apply, not a verify. It also drives the passphrase via the FALLBACK
+        # env name (LUADCH_ETC_BACKUP_PASSPHRASE, the backup engine's own) with
+        # the primary NOT set, proving restore accepts either.
+        verify_env = {k: v for k, v in os.environ.items() if k != "LUADCH_BACKUP_PASSPHRASE"}
+        verify_env["LUADCH_ETC_BACKUP_PASSPHRASE"] = "smoke-backup-pass"
         rv = subprocess.run(
             [str(binary), "--restore", str(artifact), "--verify"],
-            cwd=str(st), env=env, capture_output=True, text=True, timeout=60,
+            cwd=str(st), env=verify_env, capture_output=True, text=True, timeout=60,
         )
         if rv.returncode != 0:
             raise TestFailure(f"--verify exited {rv.returncode}:\n{rv.stdout}\n{rv.stderr}")
