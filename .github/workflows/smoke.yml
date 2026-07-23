@@ -70,6 +70,12 @@ jobs:
       - name: Run util_safe_path unit test
         run: lua5.4 tests/unit/util_safe_path_test.lua
 
+      # #453 util string helpers: trimstring rejects non-strings with
+      # (nil, err) instead of stringifying; encode/decode round-trip
+      # (their coercion is pinned as intentional).
+      - name: Run util_string unit test
+        run: lua5.4 tests/unit/util_string_test.lua
+
       - name: Run util_makedir unit test
         run: lua5.4 tests/unit/util_makedir_test.lua
 
@@ -475,6 +481,10 @@ jobs:
       - name: Run util_safe_path unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/util_safe_path_test.lua
+
+      - name: Run util_string unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/util_string_test.lua
 
       - name: Run util_makedir unit test
         shell: msys2 {0}

@@ -405,7 +405,8 @@ or `cfg/cfg.tbl`. Returns `nil` if no key exists.
 
 ### 5.3 util.*
 
-File I/O and helpers. All errors return `nil, err`.
+File I/O and helpers. Errors return `nil, err` unless noted otherwise
+(the obfuscation helpers below coerce their input instead of erroring).
 
 #### Persistence
 
@@ -434,8 +435,18 @@ local human = util.formatbytes( 1234567890 )   -- "1.15 GB"
 #### Strings
 
 ```lua
-local trimmed = util.trimstring( "  hello  " )
+local trimmed = util.trimstring( "  hello  " )   -- -> "hello"
 local pass = util.generatepass( 20 )           -- random alphanumeric, default len 20
+```
+
+`util.trimstring` requires a **string**: a non-string argument returns
+`(nil, err)` rather than stringifying it (`trimstring( nil )` is an
+error, not the literal `"nil"`). An all-whitespace or empty string
+trims to `""`. Guard the result if the input can be nil:
+
+```lua
+local rel, err = util.trimstring( maybe_nil )
+if not rel then ... end    -- missing / non-string input
 ```
 
 #### Tables
@@ -457,6 +468,12 @@ local plain = util.decode( encoded )
 > strings in source. For real secrets use the `cfg_secret.lua`
 > AES-256-GCM at-rest module. See
 > [`docs/SECURITY.md`](SECURITY.md) for the threat model.
+>
+> Unlike `trimstring`, they accept any value: a non-string is stringified
+> via `tostring` first, so the round-trip is guaranteed only for strings
+> (and decimal numbers, which round-trip to their string form). Passing a
+> table / boolean / nil "works" but encodes the stringified form, not the
+> object.
 
 ### 5.4 utf.*
 
