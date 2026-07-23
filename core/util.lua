@@ -773,8 +773,17 @@ convertepochdate = function( t )
 end
 
 --// trim whitespaces from both ends of a string
+-- Trim surrounding whitespace. Contract (#453): string in, string out;
+-- a non-string is a caller error and returns (nil, err) per the util.*
+-- convention (PLUGIN_API.md §5.3). The old `local str = tostring( str )`
+-- shadow silently stringified anything - trimstring( nil ) returned the
+-- literal "nil", a data-corruption footgun for callers that trusted the
+-- dead type guard removed in #447. See strip_control_bytes below for the
+-- other, deliberately-lenient convention (non-string -> "").
 trimstring = function( str )
-    local str = tostring( str )
+    if type( str ) ~= "string" then
+        return nil, "trimstring: string expected, got " .. type( str )
+    end
     return string_find( str, "^%s*$" ) and "" or string_match( str, "^%s*(.*%S)" )
 end
 
@@ -872,6 +881,11 @@ do
     local Key14 = 4887
     local inv256
     --// encode
+    -- Non-cryptographic reversible scramble (PLUGIN_API.md §5.3). The
+    -- tostring() coercion is intentional and kept as-is (#453): it has
+    -- zero in-tree callers, round-trips cleanly for strings and decimal
+    -- numbers, and produces no data-corruption footgun (you decode back
+    -- what you encoded). Unlike trimstring above, it is NOT hardened.
     encode = function( str )
         local str = tostring( str )
         if not inv256 then
