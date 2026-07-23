@@ -79,6 +79,9 @@ and operator guidance.
   CVE-tracking process, how to report a security issue
 - **[docs/DOCKER.md](docs/DOCKER.md)** - container image, mount layout,
   TLS-only deployments, troubleshooting
+- **[docs/BACKUP.md](docs/BACKUP.md)** - encrypted backups + offline
+  restore: configuration, the `+backup` command, off-site mirroring
+  (rclone), and the disaster-recovery runbook
 - **[docs/PLUGIN_API.md](docs/PLUGIN_API.md)** - plugin scripting API
   reference (listeners, modules, objects, conventions, pitfalls)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - which branch to target, what a

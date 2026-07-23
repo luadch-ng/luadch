@@ -97,13 +97,14 @@ The hub auto-generates a self-signed cert on first boot if none exists at the co
 
 ```lua
 ssl_params = {
-    mode      = "server",
-    protocol  = "any",
-    options   = { "all", "no_sslv2", "no_sslv3", "no_tlsv1", "no_tlsv1_1" },
-    cafile    = "certs/cacert.pem",
+    mode        = "server",
+    key         = "certs/serverkey.pem",
     certificate = "certs/servercert.pem",
-    key       = "certs/serverkey.pem",
-    verify    = { "none" },
+    cafile      = "certs/cacert.pem",
+    protocol    = "tlsv1_3",   -- TLS 1.3 only; cannot negotiate down
+    options     = { "no_sslv2", "no_sslv3", "no_tlsv1", "no_tlsv1_1", "no_renegotiation" },
+    ciphers     = "HIGH+kEDH:HIGH+kEECDH:HIGH:!PSK:!SRP:!3DES:!aNULL",
+    curve       = "prime256v1",
 },
 ```
 
@@ -137,14 +138,14 @@ do not run a public hub with `dummy / test` active.
 The hub uses an integer-based user level system. Higher levels grant
 more permissions. Bundled defaults:
 
-| Level | Name      | What it can do                              |
-|-------|-----------|---------------------------------------------|
-| 100   | HUBOWNER  | Everything (registers / deletes / shutdown) |
-| 80    | OPERATOR  | (TODO: list typical OP-level capabilities)  |
-| 60    | VIP       | (TODO)                                      |
-| 40    | REG       | Registered user, basic chat / commands      |
-| 20    | UNREG     | Anonymous connection                        |
-| 0     | BANNED    | Refused                                     |
+| Level | Name     | What it can do                                  |
+|-------|----------|-------------------------------------------------|
+| 100   | HUBOWNER | Everything (registers / deletes / shutdown)     |
+| 80    | ADMIN    | Admin operations, user + registration management |
+| 60    | OPERATOR | Moderation (ban / kick / gag / redirect)        |
+| 40    | SVIP     | Super-VIP: elevated privileges, exemptions      |
+| 20    | REG      | Registered user, basic chat / commands          |
+| 0     | UNREG    | Anonymous (unregistered) connection             |
 
 Customise per-script `minlevel` in `cfg.tbl` to grant or restrict
 specific commands.
