@@ -1,0 +1,36 @@
+return {
+
+    help_title = "etc_backup.lua - backup",
+    help_usage = "+backup now|list|status",
+    help_desc  = "Automatic encrypted backups: run one now, list artifacts, show status.",
+
+    ucmd_now    = { "Hub", "Backup", "run now" },
+    ucmd_list   = { "Hub", "Backup", "list" },
+    ucmd_status = { "Hub", "Backup", "status" },
+
+    msg_denied    = "You are not allowed to use this command.",
+    msg_usage     = "Usage: +backup now|list|status",
+    msg_now_ok    = "Backup written: ",
+    msg_now_fail  = "Backup failed: ",
+    msg_list_head = "Backups in ",
+    msg_list_none = "  (none yet)",
+    msg_bytes     = " bytes",
+    msg_files     = " files",
+
+    msg_st_enabled  = "enabled: ",
+    msg_st_schedule = "schedule: ",
+    msg_st_daily    = "daily at ",
+    msg_st_every    = "every ",
+    msg_st_none     = "none",
+    msg_st_next     = "next: ",
+    msg_st_last     = "last: ",
+    msg_st_ready    = "ready: ",
+    msg_st_yes      = "yes",
+    msg_st_no       = "no",
+
+    msg_nag_head = "Backup is ENABLED but not fully configured:",
+    msg_iss_pass = "  - no passphrase set (etc_backup_passphrase / env LUADCH_ETC_BACKUP_PASSPHRASE)",
+    msg_iss_dir  = "  - the backup directory is not writable (etc_backup_dir)",
+    msg_iss_mk   = "  - master.key is not readable (etc_backup_include_master_key)",
+
+}

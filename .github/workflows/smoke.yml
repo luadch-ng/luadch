@@ -207,6 +207,33 @@ jobs:
       - name: Run hmac unit test
         run: lua5.4 tests/unit/hmac_test.lua
 
+      # core/backup_archive.lua (#480 P0): ustar writer/reader, PBKDF2-
+      # HMAC-SHA256 KDF (Python-verified vectors), manifest and the full
+      # pack()/unpack() plumbing via a fake identity crypto. The real
+      # AES-256-GCM round-trip is the crypto test below (Linux-only).
+      - name: Run backup_archive unit test
+        run: lua5.4 tests/unit/backup_archive_test.lua
+
+      # core/backup.lua (#480 PR-A) engine: collection spec (which files +
+      # modes + master.key toggle + .tbl/.tmp filter), rotation victim
+      # selection, cfg/secrets config interpretation. Pure seams; the full
+      # read/pack/write path is covered by the backup smoke test.
+      - name: Run backup engine unit test
+        run: lua5.4 tests/unit/backup_test.lua
+
+      # scripts/etc_backup.lua (#480 PR-A) schedule math: daily-at HH:MM
+      # (today-vs-tomorrow slot), interval-from-anchor, overdue-fires-now,
+      # invalid HH:MM falls back to the interval. Loaded with stubbed globals.
+      - name: Run etc_backup schedule unit test
+        run: lua5.4 tests/unit/etc_backup_schedule_test.lua
+
+      # core/restore.lua (#480 PR-B) offline-restore pure logic: the
+      # _safe_rel path-traversal guard (reject absolute / ".." / drive /
+      # UNC), master.key dest resolution, plan building + reject routing,
+      # sha256 sidecar verify. Fake adclib; no --restore run.
+      - name: Run restore unit test
+        run: lua5.4 tests/unit/restore_test.lua
+
       # #78 Precursor 0d: core/cacert_bootstrap.lua reconcile_bundle
       # decision-matrix (source-missing / installed / no-op / warned /
       # auto-updated branches). Uses OS temp dir for file fixtures.
@@ -353,6 +380,15 @@ jobs:
           cd build/install/luadch
           LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/adclib_unescape_test.lua
 
+      # #483 adclib hashpas/hasholdpas salt-guard diagnostic. Same
+      # install-tree + bundled-liblua requirement as adclib_unescape, so
+      # Linux-only. Proves the guard raises "salt length N out of range"
+      # (not the "invalid option '%z'" format error the pre-fix %zu gave).
+      - name: Run adclib_hashpas unit test
+        run: |
+          cd build/install/luadch
+          LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/adclib_hashpas_test.lua
+
       # zlib_stream.gunzip() C round-trip (GeoIP auto-update precursor).
       # Same install-tree + bundled-liblua requirement as adclib above, so
       # Linux-only (msys2 lua segfaults loading our C modules).
@@ -360,6 +396,15 @@ jobs:
         run: |
           cd build/install/luadch
           LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/zlib_stream_test.lua
+
+      # core/backup_archive.lua real AES-256-GCM round-trip (#480 P0):
+      # pack/unpack fidelity, ciphertext secrecy, wrong-passphrase + GCM
+      # tamper rejection. Same install-tree + bundled-liblua + adclib
+      # requirement as the two C-module tests above, so Linux-only.
+      - name: Run backup_archive crypto unit test
+        run: |
+          cd build/install/luadch
+          LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/backup_archive_crypto_test.lua
 
       - uses: actions/setup-python@v5
         with:
@@ -404,8 +449,9 @@ jobs:
       # #275 COV-2 holistic review follow-up: the Lua-side unit tests
       # MUST run on Windows too. Linux-only coverage masks divergences
       # in the MinGW UCRT64 Lua 5.4 build (locale-dependent string
-      # ops, integer-width / pattern-class edge cases). Same five
-      # tests as the Linux job, same order.
+      # ops, integer-width / pattern-class edge cases). Same set as the
+      # Linux job (minus the two C-module tests, which are Linux-only),
+      # same order.
       - name: Run iostream unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/iostream_test.lua
@@ -513,6 +559,22 @@ jobs:
       - name: Run hmac unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/hmac_test.lua
+
+      - name: Run backup_archive unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/backup_archive_test.lua
+
+      - name: Run backup engine unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/backup_test.lua
+
+      - name: Run etc_backup schedule unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_backup_schedule_test.lua
+
+      - name: Run restore unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/restore_test.lua
 
       - name: Run cacert_bootstrap unit test
         shell: msys2 {0}

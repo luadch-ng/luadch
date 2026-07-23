@@ -194,6 +194,13 @@ Then handle that path the same way you handle
 The hub still enforces 0600 on the configured path on POSIX. On
 Windows, apply `icacls` to the new path - see §4.
 
+The built-in encrypted backup ([`docs/BACKUP.md`](BACKUP.md), #480) is the
+pass-phrase-encrypted archive this section recommends: the `.ldbk` is sealed
+with AES-256-GCM under an operator passphrase independent of `master.key`, and
+`etc_backup_include_master_key = false` keeps the key out of the archive
+entirely - so an exfiltrated backup does not hand over both halves. Prefer it
+over a raw `tar czf cfg/`.
+
 ### What the on-disk encryption protects against
 
 - Backup / snapshot exfiltration of `cfg/` without the host - **only

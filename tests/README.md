@@ -23,10 +23,10 @@ tests/
                   CIDs and password challenge responses for the login
                   flow tests. Self-tests on import.
   unit/
-    iostream_test.lua  Pure-Lua unit test for core/iostream.lua
-                  (Phase 8 framing pipeline). Stubs the `use` sandbox
-                  shim, loads the module standalone, asserts the
-                  stage/pipeline contract. Exit 0/1.
+    *_test.lua    Pure-Lua unit tests (one per module/plugin) - stub the
+                  `use` sandbox shim / plugin globals, load the target
+                  standalone, assert its contract. Exit 0/1. Run
+                  `ls tests/unit/*.lua` for the current set.
   README.md       (this file)
 ```
 
@@ -51,9 +51,8 @@ tests/
   matching `CID = Tiger(PID)`, GPA salt receipt, HPAS response
   computed as `Tiger(password || salt)`. Asserts the hub transitions
   the client to NORMAL state by emitting our own BINF echo. Exercises
-  `createuser`'s user object end-to-end (the user object factory is
-  the largest single function in `core/hub.lua` and a top target for
-  the Phase 6d refactor), the BINF parser, salt generation, and
+  `createuser`'s user object end-to-end (the user object factory in
+  `core/hub_user_object.lua`), the BINF parser, salt generation, and
   password verification.
 - **TLS ADC full login (dummy/test).** Same login flow over TLS.
 - **`+cmd` routing (post-login `+help`).** After a successful login,
@@ -111,11 +110,13 @@ lua tests/unit/iostream_test.lua      # exit 0 = all pass, 1 = a failure
 
 **These run in CI on BOTH platforms.** `.github/workflows/smoke.yml` runs
 the whole `tests/unit/*_test.lua` set on the Linux leg (`lua5.4`) and the
-Windows leg (msys2 `lua`) before the build+smoke step. When you add a unit
-test you MUST add a step for it to both legs, or it is silent
-non-coverage. (The one exception is `adclib_unescape_test.lua`, which
-needs the built C module and so runs on the Linux leg only, after install,
-with `LD_LIBRARY_PATH=.`.)
+Windows leg (msys2 `lua5.4`, the versioned `lua54` package - the unversioned
+`lua` rolled to Lua 5.5 and broke the suite, #388) before the build+smoke
+step. When you add a unit test you MUST add a step for it to both legs, or
+it is silent non-coverage. (The exceptions are the C-module tests -
+`adclib_unescape_test.lua` and `zlib_stream_test.lua` - which need the built
+C module and so run on the Linux leg only, after install, with
+`LD_LIBRARY_PATH=.`.)
 
 The unit-test authoring contract + the regression-fail-pre-fix recipe are
 in [`../docs/DEVELOPMENT.md`](../docs/DEVELOPMENT.md) §4.

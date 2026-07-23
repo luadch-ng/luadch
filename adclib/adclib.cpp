@@ -215,8 +215,11 @@ int hash_pas(lua_State* L)
 
     size_t saltBytes = salt_len * 5 / 8;
     if (saltBytes == 0 || saltBytes > MAX_SALT_BYTES) {
-        return luaL_error(L, "hashpas: salt length %zu out of range",
-                          saltBytes);
+        // luaL_error routes through lua_pushvfstring, which supports only
+        // a fixed conversion set (no %zu). Use %I with lua_Integer, matching
+        // the gen_self_signed_cert diagnostic below (#483).
+        return luaL_error(L, "hashpas: salt length %I out of range",
+                          (lua_Integer)saltBytes);
     }
     unsigned char chunk[MAX_SALT_BYTES];
 
@@ -240,8 +243,9 @@ int hash_pas_oldschool(lua_State* L)
 
     size_t saltBytes = salt_len * 5 / 8;
     if (saltBytes == 0 || saltBytes > MAX_SALT_BYTES) {
-        return luaL_error(L, "hasholdpas: salt length %zu out of range",
-                          saltBytes);
+        // See hash_pas: %zu is unsupported by lua_pushvfstring (#483).
+        return luaL_error(L, "hasholdpas: salt length %I out of range",
+                          (lua_Integer)saltBytes);
     }
     unsigned char chunk1[MAX_SALT_BYTES];
     unsigned char chunk2[SIZE];
@@ -711,6 +715,48 @@ int unescape(lua_State* L)
     return 1;
 }
 
+/*
+ * pbkdf2_sha256(password, salt, iterations, dklen) -> derived key (raw bytes)
+ *
+ * PBKDF2-HMAC-SHA256 via OpenSSL. The pure-Lua PBKDF2 in
+ * core/backup_archive.lua is correct but ~tens of seconds at 200k
+ * iterations - far too slow for the single-threaded hub, which would freeze
+ * for the whole backup. This C path derives the SAME key (PBKDF2 is
+ * deterministic) in ~1ms, so the backup passphrase keeps a strong iteration
+ * count without stalling the loop. The Lua impl stays as the standalone /
+ * self-test fallback and cross-checks against this one at load.
+ */
+int pbkdf2_sha256(lua_State* L)
+{
+    ERR_clear_error();
+    size_t pw_len, salt_len;
+    const char* pw   = luaL_checklstring(L, 1, &pw_len);
+    const char* salt = luaL_checklstring(L, 2, &salt_len);
+    if (pw_len > INT_MAX || salt_len > INT_MAX)
+    {
+        return luaL_error(L, "pbkdf2_sha256: password/salt too large");
+    }
+    lua_Integer iters = luaL_checkinteger(L, 3);
+    lua_Integer dklen = luaL_checkinteger(L, 4);
+    if (iters < 1 || iters > 100000000)
+    {
+        return luaL_error(L, "pbkdf2_sha256: iterations out of range (1..100000000)");
+    }
+    if (dklen < 1 || dklen > 1024)
+    {
+        return luaL_error(L, "pbkdf2_sha256: dklen out of range (1..1024)");
+    }
+    unsigned char out[1024];
+    if (PKCS5_PBKDF2_HMAC(pw, (int)pw_len,
+                          (const unsigned char *)salt, (int)salt_len,
+                          (int)iters, EVP_sha256(), (int)dklen, out) != 1)
+    {
+        return luaL_error(L, "pbkdf2_sha256: PKCS5_PBKDF2_HMAC failed");
+    }
+    lua_pushlstring(L, (const char *)out, (size_t)dklen);
+    return 1;
+}
+
 static const luaL_Reg adclib[] = {
     {"hash", hash_pid},
     {"hashpas", hash_pas},
@@ -722,6 +768,7 @@ static const luaL_Reg adclib[] = {
     {"random_bytes", random_bytes},
     {"aes_gcm_seal", aes_gcm_seal},
     {"aes_gcm_open", aes_gcm_open},
+    {"pbkdf2_sha256", pbkdf2_sha256},
     {"gen_self_signed_cert", gen_self_signed_cert},
     {"cert_fingerprint_sha256", cert_fingerprint_sha256},
     {"constant_time_eq", constant_time_eq},

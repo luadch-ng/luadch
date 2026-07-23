@@ -188,6 +188,15 @@ _core = {    -- luadch core, order is important
     -- module is in _G when the plugin sandbox iterates the
     -- whitelist.
     "sysinfo",
+    -- core/backup.lua (#480 PR-A): automatic-backup engine - collects the
+    -- restore-minimum state set, seals it via core/backup_archive.lua, writes
+    -- + rotates the .ldbk artifact. Needs full os.rename/remove + raw
+    -- makedir/listdir + secrets, so it lives in core, not the plugin sandbox.
+    -- Loaded AFTER its file-scope use deps (cfg / out / const / secrets;
+    -- backup_archive loads on demand) and BEFORE scripts so it is in _G when
+    -- the plugin sandbox iterates the whitelist (scripts/etc_backup.lua calls
+    -- backup.run / .readiness / .list). Passive at load - no init(), no I/O.
+    "backup",
     "scripts",
     -- #263: HTTP API event ringbuffer. Loaded AFTER scripts so its
     -- init() can register a core-side tap into scripts.firelistener;

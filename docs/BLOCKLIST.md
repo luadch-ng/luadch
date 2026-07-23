@@ -140,8 +140,8 @@ hub:
 services:
   luadch:
     volumes:
-      - ./cfg:/luadch/cfg
-      - geoip_data:/luadch/cfg/geoip
+      - ./cfg:/opt/luadch/cfg
+      - geoip_data:/opt/luadch/cfg/geoip
   geoipupdate:
     image: maxmindinc/geoipupdate
     restart: unless-stopped

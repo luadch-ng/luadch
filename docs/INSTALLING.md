@@ -206,7 +206,9 @@ What is worth backing up:
 Everything else (`core/`, `scripts/*.lua`, `lib/`, `lang/`) reproduces
 from a fresh build.
 
-Rsync-style nightly backup script template:
+Rsync-style nightly backup script template (a simple *unencrypted* mirror -
+note it copies `user.tbl` and `master.key` together, the exact bundling
+[`docs/SECURITY.md`](SECURITY.md) warns about):
 
 ```sh
 #!/bin/sh
@@ -217,6 +219,10 @@ rsync -a --delete /opt/luadch/cfg/        "$DST"/cfg/
 rsync -a --delete /opt/luadch/certs/      "$DST"/certs/
 rsync -a --delete /opt/luadch/scripts/data/ "$DST"/scripts-data/
 ```
+
+For an encrypted, rotating backup with an offline restore, prefer the built-in
+backup feature instead: [`docs/BACKUP.md`](BACKUP.md) (`+backup`, AES-256-GCM
+`.ldbk` artifacts, `./luadch --restore`).
 
 ---
 

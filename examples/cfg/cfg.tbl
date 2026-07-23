@@ -1354,6 +1354,19 @@ return { -- the settings are a lua table, do not tough this!
     etc_webhook_activate = false,  -- opt-in. false = never receives. Set true AND define at least one endpoint (with a secret) in cfg/webhooks.tbl to start receiving signed webhooks. (boolean)
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_backup.lua settings | AUTOMATIC ENCRYPTED BACKUPS of the operator state set (cfg.tbl, user.tbl + .bak, the TLS cert/key, master.key, and every scripts/data + scripts/cfg *.tbl). Each run writes ONE AES-256-GCM sealed .ldbk artifact (+ a .sha256 sidecar) to etc_backup_dir and prunes to etc_backup_keep. Restore is offline (`Luadch --restore <file>`, see docs/BACKUP.md). Off-site copies are the operator's job (rclone/restic/cron the backup dir). REQUIRES a passphrase - without one the plugin nags the owner and does nothing.
+
+    etc_backup_enabled = true,  -- master switch. true = the schedule + `+backup` are live (nagging the owner until a passphrase is set); false = fully inert. (boolean)
+    etc_backup_dir = "cfg/backups",  -- where artifacts are written. Default under cfg/ so they survive an upgrade (cfg/ is excluded) and sit on the Docker cfg mount. An ABSOLUTE path is allowed (a mounted backup volume). This dir is NOT itself backed up. (string)
+    etc_backup_keep = 7,  -- retention: keep the newest N artifacts, delete older ones after each run. (integer 1..1000)
+    etc_backup_daily_at = "04:00",  -- PRIMARY schedule: back up once a day at this SERVER-LOCAL time (quiet hours). Empty "" disables the daily slot and uses the interval below. (string "HH:MM")
+    etc_backup_interval_hours = 0,  -- fallback cadence, used ONLY when etc_backup_daily_at is empty: back up every N hours. 0 = off. (integer 0..168)
+    etc_backup_include_master_key = true,  -- include cfg/master.key in the (encrypted) artifact so a restore is self-contained. false keeps the key strictly out of the backup and reminds you to store it yourself. Losing master.key makes an encrypted user.tbl unreadable. (boolean)
+    etc_backup_passphrase = "",  -- REQUIRED. The passphrase that encrypts every artifact (PBKDF2 -> AES-256-GCM). PREFER the env var LUADCH_ETC_BACKUP_PASSPHRASE over a plaintext value here (redacted from GET /v1/config either way). Store it OUT-OF-BAND (a password manager), independent of master.key: losing it makes EVERY backup unrecoverable. (string)
+    etc_backup_oplevel = 80,  -- minimum level for +backup now|list|status. Default 80 (ADMIN). (integer)
+    etc_backup_notify_level = 100,  -- who gets the "backup not configured / not writable" hubbot reminder on login + at start. Default 100 (HUBOWNER). (integer)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_records.lua settings | this script adds and shows statistics about hubshare/usershare records
 
     etc_records_min_level = 20,  -- minlevel to show record statistic? (integer)
@@ -1574,6 +1587,7 @@ return { -- the settings are a lua table, do not tough this!
         { "etc_blocklist_feeds.lua", enabled = false },  -- #78 Phase E external IP/CIDR feeds (Tor exits, Spamhaus DROP) pulled over HTTPS into the blocklist store. OFF by default. Store WRITER (the engine blocks pre-handshake), so chain position is not load-bearing. Enable here + set etc_blocklist_feeds_enabled=true + turn on a feed - see docs/BLOCKLIST.md.
         { "etc_proxydetect.lua", enabled = false },  -- #78 Phase F live proxy/VPN/Tor detection via a provider API on connect. OFF by default (needs a provider + API key - see docs/BLOCKLIST.md). Per-connection post-handshake lookup; must sit AFTER hub_inf_manager like etc_geoip. Enable here + set etc_proxydetect_enabled=true + etc_proxydetect_action="block".
         { "hub_runtime.lua", enabled = true },  -- using report import; API-toggleable (#261)
+        { "etc_backup.lua", enabled = true },  -- #480 automatic encrypted backups (engine = core/backup.lua). Enabled by default but INERT until a passphrase is set (etc_backup_passphrase / env) - nags the owner until then. onStart/onTimer/onLogin only, so chain position is not load-bearing. See docs/BACKUP.md.
         { "bot_regchat.lua", enabled = true },  -- API-toggleable (#261)
         { "bot_session_chat.lua", enabled = true },  -- API-toggleable (#261)
         "bot_pm2ops.lua",

@@ -78,7 +78,10 @@ that environment:
     wrapper); plain Lua `string.*` byte methods are not directly
     reachable
   - luadch core: `hub`, `cfg`, `util`, `util_http`, `adc`, `adclib`,
-    `signal`, `out`, `unicode`, `sysinfo`
+    `signal`, `out`, `unicode`, `sysinfo`, `backup` (the automatic-backup
+    engine, #480; `+backup` driver `etc_backup` calls `backup.run`/
+    `.readiness`/`.list`) - and more; the list above is illustrative, so
+    treat `SANDBOX_GLOBALS` as the authority
   - Optional libs (may be `false` if not built): `ssl` (with `.x509`
     pre-attached), `socket`, `basexx`, `zlib_stream`, `dkjson`
 - **Notably absent** (a malicious plugin cannot reach these):
@@ -277,6 +280,7 @@ claimed.
 |---|---|---|
 | `onStart` | `function()` | Plugin loaded at hub startup or `+restartscripts` |
 | `onExit` | `function()` | Plugin unloaded at hub shutdown or `+restartscripts` |
+| `onShutdown` | `function()` | Hub is shutting down (fired once, distinct from `onExit`'s per-plugin unload) |
 | `onError` | `function( msg )` | Lua error in another listener (do not raise here - infinite loop) |
 | `onTimer` | `function()` | Fires roughly once per second |
 | `onConnect` | `function( user )` | User passed identify state, before login completes |
@@ -294,6 +298,7 @@ claimed.
 | `onSearchResult` | `function( user, targetuser, adccmd )` | Incoming DRES / FRES search result |
 | `onReg` | `function( nick )` | A user was successfully registered. `nick` is the firstnick |
 | `onDelreg` | `function( nick )` | A user was successfully delregistered. `nick` is the firstnick |
+| `onAudit` | `function( event )` | An audit record was emitted (via `audit.fire`); `event` is the structured audit object. Backs `etc_auditlog` + the HTTP `/v1/events` stream (#84) |
 | `onFailedAuth` | `function( nick, ip, cid, reason )` | Authentication failed at any stage during login |
 
 > **Rate-limit interaction:** per-user rate limits fire before the
@@ -359,10 +364,13 @@ local regs, regs_by_nick, regs_by_cid = hub.getregusers()
 ```
 
 > `hub.getusers()` returns three tables of decreasing strictness.
-> The first table is documented as "no-bot, normal state" but
-> currently contains bots due to [#179](https://github.com/luadch-ng/luadch/issues/179).
-> Plugins should defensively filter via `if not user:isbot() then`
-> until that issue is fixed.
+> The first (`_nobot_normalstatesids`) is **normal-state humans only** -
+> bots are inserted into the second/third tables only, never the first
+> (a single-assignment `for _, u in pairs( hub.getusers() )` therefore
+> iterates humans-only). Use it for per-human iteration; reach for the
+> second/third table when you deliberately need bots or in-handshake
+> connections. ([#179](https://github.com/luadch-ng/luadch/issues/179),
+> which had bots leaking into the first table, is fixed.)
 
 #### Escaping
 
@@ -866,12 +874,16 @@ returning `PROCESSED` blocks plugins later in the list. For
 "catch-all" plugins like `etc_unknown_command.lua`, place them at
 the tail of `cfg.scripts`.
 
-### 10.5 Bots in user iteration
+### 10.5 Picking the right `getusers()` table
 
-`hub.getusers()`'s first return is documented as "no-bot, normal
-state" but currently contains bots due to a known
-[issue](https://github.com/luadch-ng/luadch/issues/179). Filter
-defensively with `if not user:isbot() then` for any per-human iteration.
+`hub.getusers()` returns three tables (see §5.1). The first
+(`_nobot_normalstatesids`) is normal-state **humans only** - bots go into
+the second/third tables, never the first - so a single-assignment
+`for _, u in pairs( hub.getusers() )` iterates humans-only. Use the second
+table when you deliberately need bots too. (The old
+[#179](https://github.com/luadch-ng/luadch/issues/179) bot-leak into the
+first table is fixed; the `if not user:isbot() then` guard is no longer
+needed for the first table, only harmless.)
 
 ### 10.6 Forbidden post-login INF fields
 
