@@ -23,6 +23,19 @@ services:
       # the mounted scripts/ on every container start. See .env.example
       # for the full explanation. Default ON (1).
       LUADCH_AUTOSYNC_SCRIPTS: "${LUADCH_AUTOSYNC_SCRIPTS:-1}"
+      # Backup passphrase for the bundled etc_backup plugin (#480). The
+      # plugin ships enabled-but-inert; it activates once this is set AND
+      # etc_backup.lua is in cfg.scripts. Set the value in .env - it MUST
+      # be listed here to reach the container (an .env entry alone only
+      # does compose interpolation). Empty = unset (falls back to
+      # cfg.tbl). Also used by `--restore`. See docs/BACKUP.md.
+      LUADCH_ETC_BACKUP_PASSPHRASE: "${LUADCH_ETC_BACKUP_PASSPHRASE:-}"
+      # Opt-in blocklist / GeoIP plugin secrets (env-var-first, see
+      # core/secrets.lua). Only needed if you enable those plugins;
+      # uncomment the matching .env line too. See docs/BLOCKLIST.md.
+      # LUADCH_ETC_GEOIP_LICENSE_KEY: "${LUADCH_ETC_GEOIP_LICENSE_KEY:-}"
+      # LUADCH_ETC_PROXYDETECT_API_KEY: "${LUADCH_ETC_PROXYDETECT_API_KEY:-}"
+      # LUADCH_ETC_BLOCKLIST_FEEDS_ABUSEIPDB_KEY: "${LUADCH_ETC_BLOCKLIST_FEEDS_ABUSEIPDB_KEY:-}"
     ports:
       # ADC over TLS. The keyprint is logged on container start;
       # share the resulting adcs://host:5001/?kp=SHA256/<hash> URL
@@ -33,9 +46,14 @@ services:
       # Plain ADC (legacy clients / debug). Default OFF since v3.1.6;
       # uncomment AND add 5000 to tcp_ports in cfg/cfg.tbl to enable.
       # - "5000:5000"
+      # HTTP / JSON API (#82). Off by default (http_port = false). To
+      # enable: set http_port + an http_api_tokens entry in cfg/cfg.tbl,
+      # then expose the matching port here. See docs/HTTP_API.md.
+      # - "8080:8080"
     volumes:
       # Hub configuration. cfg/cfg.tbl is the main settings file;
-      # cfg/user.tbl is the (encrypted) user database.
+      # cfg/user.tbl is the (encrypted) user database. Encrypted backups
+      # also land here by default (cfg/backups/, #480) - no extra mount.
       - ./cfg:/opt/luadch/cfg
       # Plugin scripts. Seeded from the bundled set on first start;
       # drop-in additions or per-file overrides land here.
