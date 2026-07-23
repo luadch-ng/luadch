@@ -167,9 +167,17 @@ touch "${LUADCH_HOME}/log/error.log" "${LUADCH_HOME}/log/cmd.log"
 ( tail -F -n 0 "${LUADCH_HOME}/log/cmd.log"   1>&1 & ) 2>/dev/null
 
 # ---------------------------------------------------------------------------
-# 5. exec the hub
+# 5. exec the hub (or forward one-shot args, e.g. --restore)
 # ---------------------------------------------------------------------------
 # WORKDIR is /opt/luadch (set in Dockerfile); the hub anchors its
 # config / scripts / log paths to the binary's directory after Phase 6b
 # (#12), so `cd` is correct here.
-exec "${LUADCH_HOME}/luadch"
+#
+# "$@" forwards any args the operator passed to `docker compose run` /
+# `docker run` straight to the binary. With none (the normal `up`) it
+# expands to nothing, so a plain hub boot is unchanged; with e.g.
+# `--restore <file>` it runs the offline restore (#480 PR-B) in a one-shot
+# container against the same mounted volumes. The seed/log-forward setup
+# above is harmless for a restore (on a fresh DR host it even provides the
+# current bundled scripts/*.lua that the backup deliberately omits).
+exec "${LUADCH_HOME}/luadch" "$@"
