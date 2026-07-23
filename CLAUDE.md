@@ -323,6 +323,17 @@ master (frozen history - the live delta is always
   They now fall back to `user:firstnick()` - the `etc_trafficmanager` /
   upstream-`luadch/luadch#240` idiom; `bot_session_chat` re-keys its whole
   member/owner identity model to firstnick.
+- **#480 automatic-backup arc** - encrypted local backups + offline restore,
+  no cloud. `core/backup_archive` (LDBK1 = pure-Lua tar + AES-256-GCM,
+  PBKDF2-in-C, P0 #481) + `core/backup` engine + `etc_backup` scheduler
+  plugin (PR-A #482) + `./luadch --restore` as a standalone offline entry
+  (`core/restore` loaded by the C `run_restore` into a fresh Lua state,
+  PR-B #484). Manifest eval bounded by an instruction budget so a crafted
+  archive can't hang restore (#485); Docker restore UX + a `BACKUP.md`
+  operator guide with an rclone off-site walkthrough (#487); docs currency
+  pass (#489). Follow-up: the `adclib` `%zu`->`%I` diagnostic fix (#483,
+  same `lua_pushvfstring`-conversion bug class as the P0 `listdir` `%lu`
+  fix). Operator guide: [`docs/BACKUP.md`](docs/BACKUP.md).
 
 `dev` and `master` track closely; open work is the feature-arc backlog -
 `gh issue list --repo luadch-ng/luadch` (no open bugs). Durable pattern from

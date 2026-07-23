@@ -60,6 +60,7 @@ promoted to `master`, so pull requests go against **`dev`** - see
 - **Inbound webhook receiver + status-push heartbeat** ([#398](https://github.com/luadch-ng/luadch/issues/398) / [#395](https://github.com/luadch-ng/luadch/issues/395)) - HMAC-authed inbound webhooks (Discourse / GitHub) and an outbound status heartbeat
 - **`select`->`poll` event loop** ([#310](https://github.com/luadch-ng/luadch/issues/310)) - lifts the ~1024 concurrent-socket ceiling on POSIX
 - **ADC command aliases** ([#327](https://github.com/luadch-ng/luadch/issues/327)) - operator-defined `+alias`es
+- **Encrypted local backup + offline restore** ([#480](https://github.com/luadch-ng/luadch/issues/480)) - scheduled AES-256-GCM `.ldbk` archives of hub state via `+backup`, plus a standalone `./luadch --restore` that rebuilds a hub from an archive without booting it; see [`docs/BACKUP.md`](docs/BACKUP.md)
 
 See [`docs/SECURITY.md`](docs/SECURITY.md) for the full threat model
 and operator guidance.
