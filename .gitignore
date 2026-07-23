@@ -11,7 +11,11 @@ build_mingw/
 
 # CMake out-of-source build dir (Phase 5)
 build/
+build-win/
 CMakeUserPresets.json
+
+# luac default bytecode dump (stray output of `luac` run from repo root)
+/luac.out
 
 # Windows build artifacts
 *.exe
