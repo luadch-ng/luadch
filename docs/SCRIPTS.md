@@ -237,7 +237,7 @@ Optional countdown timer.
 
 **Commands:** `+restart [<message>]`
 
-**Config:** `cmd_restart_permission`, `cmd_restart_broadcast_countdown`
+**Config:** `cmd_restart_permission`, `cmd_restart_toggle_countdown`
 
 ### cmd_rules
 
@@ -246,7 +246,8 @@ placeholder substitution.
 
 **Commands:** `+rules`
 
-**Config:** `cmd_rules_target`
+**Config:** `cmd_rules_minlevel`, `cmd_rules_destination_main`,
+`cmd_rules_destination_pm`
 
 ### cmd_setpass
 
@@ -268,7 +269,7 @@ countdown timer.
 **Commands:** `+shutdown [<message>]`
 
 **Config:** `cmd_shutdown_permission`,
-`cmd_shutdown_broadcast_countdown`
+`cmd_shutdown_toggle_countdown`
 
 ### cmd_slots
 
@@ -303,7 +304,9 @@ users.
 
 **Commands:** `+topic <newtopic>` / `+topic default`
 
-**Config:** `cmd_topic_permission`, `hub_topic`
+**Config:** `cmd_topic_minlevel`, `cmd_topic_llevel`, `cmd_topic_report`,
+`cmd_topic_report_hubbot`, `cmd_topic_report_opchat` (the default topic is
+read from / reset to `hub_description`)
 
 ### cmd_upgrade
 
@@ -384,7 +387,7 @@ and registration date (password column is redacted since v3.1.6 / #95).
 Broadcast periodic banner messages to main chat at configurable
 intervals.
 
-**Config:** `etc_banner_activate`, `etc_banner_interval`
+**Config:** `etc_banner_activate`, `etc_banner_time`
 
 ### etc_blacklist
 
@@ -1122,7 +1125,8 @@ manual or scheduled cleanup.
 Send message-of-the-day to users on login. Supports placeholder
 substitution.
 
-**Config:** `etc_motd_activate`, `etc_motd_target`
+**Config:** `etc_motd_activate`, `etc_motd_permission`,
+`etc_motd_destination_main`, `etc_motd_destination_pm`
 
 ### etc_msgmanager
 
@@ -1283,7 +1287,7 @@ minute).
 Prepend level-based prefix to user descriptions (e.g. `[VIP]`,
 `[MOD]`). Configurable per level.
 
-**Config:** `usr_desc_prefix_activate`, `usr_desc_prefix_levels`,
+**Config:** `usr_desc_prefix_activate`, `usr_desc_prefix_permission`,
 `usr_desc_prefix_prefix_table`
 
 ### usr_hide_share
@@ -1301,8 +1305,8 @@ Prevents share-based discrimination.
 Enforce minimum / maximum hub count per level. Redirect or disconnect
 violators. Anti-multi-hub enforcement.
 
-**Config:** `usr_hubs_minmax_table`, `usr_hubs_permission`,
-`usr_hubs_redirect`
+**Config:** `max_user_hubs`, `max_reg_hubs`, `max_op_hubs`, `max_hubs`,
+`usr_hubs_godlevel`, `usr_hubs_redirect`
 
 ### usr_nick_length
 
@@ -1316,7 +1320,7 @@ byte codepoint-aware since v3.1.6).
 Prepend level-based prefix to user nicknames (e.g. `[Op]Bob`,
 `[VIP]Alice`). Configurable per level.
 
-**Config:** `usr_nick_prefix_activate`, `usr_nick_prefix_levels`,
+**Config:** `usr_nick_prefix_activate`, `usr_nick_prefix_permission`,
 `usr_nick_prefix_prefix_table`
 
 ### usr_share
@@ -1324,14 +1328,14 @@ Prepend level-based prefix to user nicknames (e.g. `[Op]Bob`,
 Enforce minimum / maximum share per user level. Redirect or disconnect
 violators with optional blocking.
 
-**Config:** `usr_share_minmax_table`, `usr_share_redirect`
+**Config:** `min_share`, `max_share`, `usr_share_redirect`
 
 ### usr_slots
 
 Enforce minimum / maximum upload slots per user level. Redirect or
 disconnect violators.
 
-**Config:** `usr_slots_minmax_table`, `usr_slots_redirect`
+**Config:** `min_slots`, `max_slots`, `usr_slots_redirect`
 
 ### usr_uptime
 
