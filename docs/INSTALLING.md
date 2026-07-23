@@ -268,15 +268,18 @@ Once running:
 ss -tln | grep -E ':500[01]'
 
 # hub responding to ADC handshake?
-printf 'HSUP ADBASE ADTIGR\n' | nc -q1 127.0.0.1 5000 | head
+# Default installs are TLS-only on 5001, so speak TLS:
+printf 'HSUP ADBASE ADTIGR\n' | openssl s_client -quiet -connect 127.0.0.1:5001 2>/dev/null | head
 # Expect: ISUP ... / ISID ... / IINF ...
+# Plain 5000 only exists if you enabled tcp_ports; then the nc form works:
+#   printf 'HSUP ADBASE ADTIGR\n' | nc -q1 127.0.0.1 5000 | head
 
 # active sessions (after first connect)
 grep -c "init.lua" /opt/luadch/log/*.log    # rough heartbeat
 ```
 
-Then point an ADC client (e.g. AirDC++) at `adcs://your.host:5001` (TLS)
-or `adc://your.host:5000` (plain) and log in as `dummy` / `test` for the
-first time. Read [CONFIGURATION.md](CONFIGURATION.md) for the
+Then point an ADC client (e.g. AirDC++) at `adcs://your.host:5001` (TLS,
+the default) - or `adc://your.host:5000` (plain) only if you enabled
+`tcp_ports` - and log in as `dummy` / `test` for the first time. Read [CONFIGURATION.md](CONFIGURATION.md) for the
 register-yourself / delete-dummy steps **before** opening the hub to
 real users.
