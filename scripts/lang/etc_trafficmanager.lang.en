@@ -23,6 +23,10 @@
     msg_reason = "Reason:",
     msg_blocked_by = "Blocked by:",
     msg_date = "Blocked date:",
+    msg_ab_level = "Blocked level",
+    msg_ab_zeroshare = "0 B share",
+    msg_ab_minshare = "Below minshare",
+    msg_ab_none = "(none)",
     msg_target_block = "[ TRAFFICMANAGER ]--> You were blocked by:  %s  |  reason:  %s",
     msg_target_unblock = "[ TRAFFICMANAGER ]--> You were unblocked by:  %s",
     ucmd_nick = "User firstnick:",
@@ -90,6 +94,7 @@
 
 %s
    Block users with 0 B share:  %s
+   Block users below minshare:  %s
 
 ===================================== TRAFFIC MANAGER ===
   ]],
@@ -117,6 +122,9 @@ Usage:
 
    Blocked levels:
 
+%s
+
+   Auto-blocked ( online ):
 %s
 ======================================================================== TRAFFIC MANAGER ===
   ]],

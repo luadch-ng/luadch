@@ -33,6 +33,24 @@
         the block list and accept the corresponding file-transfer
         permission.
 
+        v2.7:
+            - `show blocks` now also lists currently-online users who
+              are auto-blocked by share (0 B / below minshare) or by a
+              blocked level. These are runtime classifications computed
+              by need_block() on every event and are never persisted to
+              block_tbl, so `show blocks` (which only iterates block_tbl)
+              previously showed nothing for them - the operator saw an
+              empty list plus an empty etc_trafficmanager.tbl while the
+              users were in fact being blocked (luadch-ng/luadch#502,
+              reported by Sopor). The new section is online-only (share
+              is a per-session INF field; an offline user is not being
+              share-blocked) and skips nicks already in the manual
+              block_tbl list so each user appears in exactly one section.
+            - `show settings` now also reports the minshare-check toggle
+              (etc_trafficmanager_check_minshare); it previously showed
+              only the 0-B-share toggle, so a hub running minshare-only
+              gave no indication in settings that share-blocking was on.
+
         v2.5:
             - fix latent dispatch bug in add() / del() exports
               (closes #257). `( not scriptname ) or ( not scriptname == 1 )`
@@ -194,7 +212,7 @@
 --------------
 
 local scriptname = "etc_trafficmanager"
-local scriptversion = "2.6"
+local scriptversion = "2.7"
 
 local cmd = "trafficmanager"
 local cmd_b = "block"
@@ -255,6 +273,10 @@ local msg_unknown = lang.msg_unknown or "<UNKNOWN>"
 local msg_reason = lang.msg_reason or "Reason:"
 local msg_blocked_by = lang.msg_blocked_by or "Blocked by:"
 local msg_date = lang.msg_date or "Blocked date:"
+local msg_ab_level = lang.msg_ab_level or "Blocked level"
+local msg_ab_zeroshare = lang.msg_ab_zeroshare or "0 B share"
+local msg_ab_minshare = lang.msg_ab_minshare or "Below minshare"
+local msg_ab_none = lang.msg_ab_none or "(none)"
 local msg_target_block = lang.msg_target_block or "[ TRAFFICMANAGER ]--> You were blocked by:  %s  |  reason:  %s"
 local msg_target_unblock = lang.msg_target_unblock or "[ TRAFFICMANAGER ]--> You were unblocked by:  %s"
 local ucmd_nick = lang.ucmd_nick or "User firstnick:"
@@ -322,6 +344,7 @@ local opmsg = lang.opmsg or [[
 
 %s
    Block users with 0 B share:  %s
+   Block users below minshare:  %s
 
 ===================================== TRAFFIC MANAGER ===
   ]]
@@ -350,12 +373,16 @@ local msg_users = lang.msg_users or [[
    Blocked levels:
 
 %s
+
+   Auto-blocked ( online ):
+%s
 ======================================================================== TRAFFIC MANAGER ===
   ]]
 
 --// functions
 local onbmsg
 local get_blocklevels
+local get_autoblocked_online
 local get_bool
 local check_share
 local is_blocked
@@ -439,6 +466,52 @@ get_blocklevels = function()
     for _, level in pairs( tbl ) do
         msg = msg .. "\t" .. level .. "\t[ " .. levels[ level ] .. " ]\n"
     end
+    return msg
+end
+
+--// list currently online users that are auto-blocked by share or by
+--  a blocked level. These are runtime need_block() classifications
+--  that are never written to block_tbl, so `show blocks` (which only
+--  iterates block_tbl) would otherwise not surface them (#502). Nicks
+--  already present in block_tbl are skipped so each user appears in
+--  exactly one section (the manual list is the actionable one). Only
+--  online users are listed: share is a per-session INF field, so an
+--  offline user is not being share-blocked. hub.getusers() single-
+--  assignment yields the humans-only table, so bots are excluded.
+get_autoblocked_online = function()
+    local levels = cfg.get( "levels" ) or {}
+    local rows = {}
+    for sid, user in pairs( hub.getusers() ) do
+        local firstnick = user:firstnick()
+        if not is_blocked( firstnick ) then
+            local level = user:level()
+            local reason
+            if blocklevel_tbl[ level ] then
+                reason = msg_ab_level .. " [ " .. ( levels[ level ] or "Unreg" ) .. " ]"
+            elseif check_share( user ) then
+                --> distinguish the two share triggers for the operator.
+                --  check_share short-circuits on the 0-B case only when
+                --  sharecheck is on; a 0-B user under a minshare-only
+                --  config is correctly labelled "below minshare".
+                local share = user:share() or 0
+                if sharecheck and share == 0 then
+                    reason = msg_ab_zeroshare
+                else
+                    reason = msg_ab_minshare
+                end
+            end
+            if reason then
+                rows[ #rows + 1 ] = { nick = firstnick, reason = reason }
+            end
+        end
+    end
+    table.sort( rows, function( a, b ) return a.nick < b.nick end )
+    local msg = ""
+    for _, row in ipairs( rows ) do
+        msg = msg .. "\n   Nickname:  " .. row.nick .. "\n" ..
+                     "\t" .. msg_reason .. " " .. row.reason .. "\n"
+    end
+    if msg == "" then msg = "\n   " .. msg_ab_none .. "\n" end
     return msg
 end
 
@@ -903,7 +976,8 @@ onbmsg = function( user, command, parameters )
             get_bool( report_main ),
             get_bool( report_pm ),
             get_blocklevels(),
-            get_bool( sharecheck )
+            get_bool( sharecheck ),
+            get_bool( minsharecheck )
         )
         user:reply( msg, hub.getbot() )
         return PROCESSED
@@ -946,7 +1020,13 @@ onbmsg = function( user, command, parameters )
                          "\t" .. msg_date .. " " .. blockdate .. "\n" ..
                          "\t" .. msg_reason .. " " .. reason .. "\n"
         end
-        local msg_out = utf.format( msg_users, msg, get_blocklevels() )
+        --> arg order MUST match msg_users' %s order (manual, levels,
+        --  auto-blocked). The auto-blocked %s is LAST so a stale lang
+        --  file with the old two-%s msg_users degrades gracefully
+        --  (drops the auto section) instead of rendering it under the
+        --  "Blocked levels" header and losing the real level list -
+        --  lang files are add-only on upgrade, so drift is the norm.
+        local msg_out = utf.format( msg_users, msg, get_blocklevels(), get_autoblocked_online() )
         user:reply( msg_out, hub.getbot() )
         return PROCESSED
     end
