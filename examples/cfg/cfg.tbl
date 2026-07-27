@@ -1035,6 +1035,11 @@ return { -- the settings are a lua table, do not tough this!
     etc_lockdown_llevel = 60,  -- min level for the hubbot-PM report (integer)
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_forcetlstransfer.lua settings | force encrypted (ADCS) client-to-client transfers (#500). On each peer-connection setup (CTM / RCM / NAT-traversal) the hub reads the transfer protocol and, per mode, drops or warns on a plain (non-ADCS) setup. The hub can only REFUSE to broker a plain transfer, not upgrade it - a dropped setup fails that transfer (pushes users to enable forced TLS + forward their TLS port). All-or-nothing: no exemptions - an enabled hub forces TLS on EVERY transfer. Plugin ships DISABLED
+
+    etc_forcetlstransfer_mode = "warn",  -- "warn" (default, non-breaking) = let the plain transfer pass but notify both parties toward TLS; "block" = drop the plain setup + notify (enforces TLS - flip to this once your users have set up their TLS ports) (string, "warn"|"block")
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_geoip.lua settings | country / ASN blocking via MaxMind GeoLite2 (#78 Phase D2). Needs geoipupdate for the DB - see docs/BLOCKLIST.md
 
     etc_geoip_enabled = false,  -- master toggle; plugin loads either way but the onConnect check is inert when false (boolean)
@@ -1649,6 +1654,7 @@ return { -- the settings are a lua table, do not tough this!
         "etc_auditlog.lua",  -- #84 staff-action audit trail (JSONL + /v1/events audit type)
         { "etc_chatlog.lua", enabled = true },  -- API-toggleable (#261)
         "etc_trafficmanager.lua",  -- using report import -- must be above all other scripts who wants to use the block import
+        { "etc_forcetlstransfer.lua", enabled = true },  -- #500 force encrypted (ADCS) C2C transfers. Ships ENABLED in "warn" mode (non-breaking) - nudges users toward TLS transfers without cutting any off. All-or-nothing: acts on any plain (non-ADCS) CTM/RCM/NAT setup, no exemptions. Set etc_forcetlstransfer_mode="block" to enforce once users have set up their TLS ports, or disable here. Chain position is not load-bearing (any PROCESSED drops the setup).
         "cmd_delreg.lua",  -- using report, ban, block import
         "cmd_usercleaner.lua", -- using report import
         { "etc_records.lua", enabled = true },  -- API-toggleable (#261)
