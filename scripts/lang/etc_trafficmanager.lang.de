@@ -23,6 +23,10 @@
     msg_reason = "Grund:",
     msg_blocked_by = "Geblockt von:",
     msg_date = "Geblockt am:",
+    msg_ab_level = "Geblocktes Level",
+    msg_ab_zeroshare = "0 B Share",
+    msg_ab_minshare = "Unter Minshare",
+    msg_ab_none = "(keine)",
     msg_target_block = "[ TRAFFICMANAGER ]--> Du wurdest geblockt von:  %s  |  Grund:  %s",
     msg_target_unblock = "[ TRAFFICMANAGER ]--> Dein Block wurde aufgehoben von:  %s",
     ucmd_nick = "User firstnick:",
@@ -90,6 +94,7 @@
 
 %s
    Blocke User mit 0 B Share:  %s
+   Blocke User unter Minshare:  %s
 
 ===================================== TRAFFIC MANAGER ===
   ]],
@@ -117,6 +122,9 @@ Gebrauch:
 
    Geblockte Levels:
 
+%s
+
+   Auto-geblockt ( online ):
 %s
 ======================================================================== TRAFFIC MANAGER ===
   ]],
