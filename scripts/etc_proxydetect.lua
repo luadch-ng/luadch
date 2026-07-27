@@ -106,6 +106,13 @@
         - Phase F2 (closes #352): VPNAPI.io + IPQualityScore adapters
           (key kept out of the failure log via http_client `log_url`) +
           op-chat alert on a run of provider failures.
+    v0.03: by Aybo
+        - #504: the op-chat report + audit now carry the connect-time
+          nick as a fallback. The async verdict re-resolves the user by
+          SID; a connection that dropped before the reply landed (common
+          for short-lived hosting/proxy IPs) resolved to nil, so the
+          report rendered "The user ? with IP ...". The nick is now
+          captured at connect and threaded through as a fallback.
 
 ]]--
 
@@ -115,7 +122,7 @@
 --------------
 
 local scriptname = "etc_proxydetect"
-local scriptversion = "0.02"
+local scriptversion = "0.03"
 
 local cmd_status = "proxydetect"
 
@@ -555,16 +562,24 @@ end
 -- left by the time an async lookup returned) - we still audit / report
 -- / cache / store-push for observability + future pre-handshake blocks;
 -- we only KICK when the user is still live.
-local function apply_positive( user, ip, family, types, matched, cached )
+local function apply_positive( user, ip, family, types, matched, cached, last_nick )
     local matched_str = table_concat( matched, "," )
+    -- `user` is nil when the connection dropped before the async verdict
+    -- returned (the SID re-resolve found nobody). `last_nick` is the nick
+    -- captured at connect time, used as a fallback so the report + audit
+    -- still name who was flagged instead of rendering "?" (#504). Stored
+    -- in `meta.nick` too so log consumers have an always-present nick even
+    -- when the audit target snapshot is absent (the dropped-user case);
+    -- it intentionally overlaps the target snapshot for a live user.
+    local nick = ( user and user:nick( ) ) or last_nick or "?"
     if audit then
         audit.fire( audit.build( "proxydetect.block", scriptname, user, kick_reason,
             { ip = ip, provider = adapter.source, types = matched_str,
-              action = action, cached = cached and true or false } ) )
+              action = action, cached = cached and true or false, nick = nick } ) )
     end
     if report then
         report.send( report_activate, report_hubbot, report_opchat, report_llevel,
-            utf_format( msg_report, user and user:nick( ) or "?", ip, matched_str,
+            utf_format( msg_report, nick, ip, matched_str,
                 adapter.source, action ) )
     end
     if action == "block" then
@@ -636,7 +651,7 @@ end
 
 -- The async response handler. Re-resolves the user from the SID (never
 -- the closed-over listener object) and guards SID reuse via the CID.
-local function handle_response( res, ip, family, sid, cid )
+local function handle_response( res, ip, family, sid, cid, nick )
     inflight[ ip ] = nil
     if res.status ~= 200 then
         return apply_failure( sid, cid, ip, "HTTP status " .. tostring( res.status ) )
@@ -668,7 +683,7 @@ local function handle_response( res, ip, family, sid, cid )
 
     local u = hub_issidonline( sid )
     if u and u:cid( ) ~= cid then u = nil end    -- SID reused by another client
-    apply_positive( u, ip, family, types, matched, false )
+    apply_positive( u, ip, family, types, matched, false, nick )
 end
 
 
@@ -706,6 +721,11 @@ local check_proxydetect = function( user )
 
     inflight[ ip ] = true
     local sid, cid = user:sid( ), user:cid( )
+    -- Capture the nick now, while the user is live: the async callback
+    -- may re-resolve to nil if the connection drops first (#504). Empty
+    -- -> nil so the "?" fallback still applies for a nickless login.
+    local nick = user:nick( )
+    if nick == "" then nick = nil end
     local rq = adapter.build_request( ip, api_key )
     local ok, rerr = http_client.request{
         url          = rq.url,
@@ -715,7 +735,7 @@ local check_proxydetect = function( user )
         log_url      = rq.log_url,    -- key-free url for the failure log (vpnapi/ipqs put the key in the url)
         timeout      = query_timeout,
         max_response = 65536,    -- provider JSON is a few KiB; bound a misbehaving one
-        on_complete  = function( res ) handle_response( res, ip, family, sid, cid ) end,
+        on_complete  = function( res ) handle_response( res, ip, family, sid, cid, nick ) end,
         on_error     = function( err )
             inflight[ ip ] = nil
             apply_failure( sid, cid, ip, err )

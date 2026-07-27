@@ -427,6 +427,50 @@ do
 end
 
 ----------------------------------------------------------------------
+-- #504: connection left before the async verdict -> report + audit
+-- show the connect-time nick as a fallback, not "?". The three
+-- assertions below FAIL on v0.02 (report renders "The user ? ...";
+-- audit meta has no nick) and PASS on v0.03.
+----------------------------------------------------------------------
+do
+    load_plugin( { etc_proxydetect_action = "log_only" } )   -- report/audit path, no kick
+    local u = mkuser( 20, "1.2.3.4", "SID1", "CID1" )        -- nick = "uSID1"
+    connect( u )
+    _online[ "SID1" ] = nil                                   -- dropped before the reply
+    complete( 200, PROXY_JSON )
+    local rep = _reports[ #_reports ] or ""
+    truthy( "left-nick: report shows the connect-time nick", rep:find( "uSID1", 1, true ) ~= nil )
+    falsy(  "left-nick: report has no '?' placeholder",       rep:find( "user ? ", 1, true ) )
+    truthy( "left-nick: audit meta carries the nick",
+        _audit[ #_audit ] and _audit[ #_audit ].meta and _audit[ #_audit ].meta.nick == "uSID1" )
+end
+
+----------------------------------------------------------------------
+-- #504 guard: a LIVE user's report still uses the current nick (no
+-- regression), and a truly nickless connection that left falls back
+-- to "?" (the empty-nick -> nil guard at connect time).
+----------------------------------------------------------------------
+do
+    load_plugin( { etc_proxydetect_action = "log_only" } )
+    local u = mkuser( 20, "1.2.3.4", "SID1", "CID1" )
+    connect( u )
+    complete( 200, PROXY_JSON )                               -- still online
+    local rep = _reports[ #_reports ] or ""
+    truthy( "live-nick: report uses the live nick", rep:find( "uSID1", 1, true ) ~= nil )
+end
+do
+    load_plugin( { etc_proxydetect_action = "log_only" } )
+    -- a login that never set a nick (nick() == "")
+    local u = mkuser( 20, "1.2.3.4", "SID9", "CID9" )
+    u.nick = function( ) return "" end
+    connect( u )
+    _online[ "SID9" ] = nil                                   -- left before reply
+    complete( 200, PROXY_JSON )
+    local rep = _reports[ #_reports ] or ""
+    truthy( "nickless-left: falls back to '?'", rep:find( "user ? ", 1, true ) ~= nil )
+end
+
+----------------------------------------------------------------------
 -- v6 -> /128 store push
 ----------------------------------------------------------------------
 do
