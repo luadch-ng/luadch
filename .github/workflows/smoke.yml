@@ -165,6 +165,12 @@ jobs:
       - name: Run etc_clientblocker unit test
         run: lua5.4 tests/unit/etc_clientblocker_test.lua
 
+      # #502 etc_trafficmanager: `show blocks` lists online users
+      # auto-blocked by share/level (runtime, not in block_tbl) +
+      # `show settings` minshare-check line. Stubbed hub.getusers/cfg.
+      - name: Run etc_trafficmanager unit test
+        run: lua5.4 tests/unit/etc_trafficmanager_test.lua
+
       # Coverage completeness: these two unit tests existed but were never
       # wired into CI. Both pass; registering them keeps tests/README's
       # "the whole tests/unit set runs in CI" statement true.
@@ -537,6 +543,10 @@ jobs:
       - name: Run etc_clientblocker unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_clientblocker_test.lua
+
+      - name: Run etc_trafficmanager unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/etc_trafficmanager_test.lua
 
       - name: Run etc_blocklist unit test
         shell: msys2 {0}
