@@ -1,15 +1,22 @@
 name: Smoke
 
-# Run the Phase 6a smoke-test harness on every push and PR. Builds the
-# hub, installs into a staging tree, then runs tests/smoke/run.py which
-# starts the hub on offset test ports and exercises the protocol path
-# (plain + TLS handshake + plugin-load log scan).
+# Run the smoke-test harness on every PR (any base) plus pushes to dev.
+# Builds the hub, installs into a staging tree, then runs
+# tests/smoke/run.py which starts the hub on offset test ports and
+# exercises the protocol path (plain + TLS handshake + plugin-load scan).
 #
-# Separate from release.yml because the triggers differ: smoke runs
-# everywhere, release runs only on tag pushes and release branches.
+# Trigger scoping (CI-trim): a feature branch's push is NOT smoked - its
+# PR already is - and neither is the master push, because the dev->master
+# promotion PR and any security-backport PR already smoke via
+# pull_request. So master only ever goes green through a PR, never a
+# re-test of content dev already validated, and no coverage is lost:
+# every master-bound change lands via a PR (workflow §8). The dev push
+# stays smoked so the :dev image maps to a green run. release.yml has its
+# own tag/release-branch triggers.
 
 on:
   push:
+    branches: [dev]
   pull_request:
   workflow_dispatch:
 
