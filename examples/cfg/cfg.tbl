@@ -1035,6 +1035,11 @@ return { -- the settings are a lua table, do not tough this!
     etc_lockdown_llevel = 60,  -- min level for the hubbot-PM report (integer)
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_forcetlstransfer.lua settings | force encrypted (ADCS) client-to-client transfers (#500). On each peer-connection setup (CTM / RCM / NAT-traversal) the hub reads the transfer protocol and, per mode, drops or warns on a plain (non-ADCS) setup. The hub can only REFUSE to broker a plain transfer, not upgrade it - a dropped setup fails that transfer (pushes users to enable forced TLS + forward their TLS port). All-or-nothing: no exemptions - an enabled hub forces TLS on EVERY transfer. Plugin ships DISABLED
+
+    etc_forcetlstransfer_mode = "block",  -- "block" (default) = drop the plain setup + notify both parties (enforces TLS); "warn" = let the plain transfer pass but notify (a softer roll-out that breaks nothing) (string, "warn"|"block")
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_geoip.lua settings | country / ASN blocking via MaxMind GeoLite2 (#78 Phase D2). Needs geoipupdate for the DB - see docs/BLOCKLIST.md
 
     etc_geoip_enabled = false,  -- master toggle; plugin loads either way but the onConnect check is inert when false (boolean)
@@ -1649,6 +1654,7 @@ return { -- the settings are a lua table, do not tough this!
         "etc_auditlog.lua",  -- #84 staff-action audit trail (JSONL + /v1/events audit type)
         { "etc_chatlog.lua", enabled = true },  -- API-toggleable (#261)
         "etc_trafficmanager.lua",  -- using report import -- must be above all other scripts who wants to use the block import
+        { "etc_forcetlstransfer.lua", enabled = false },  -- #500 force encrypted (ADCS) C2C transfers. OFF by default. All-or-nothing: drops/warns on any plain (non-ADCS) CTM/RCM/NAT setup, no exemptions. Listens on the peer-connection-setup events like etc_trafficmanager; chain position is not load-bearing (any PROCESSED drops the setup). Enable here + set etc_forcetlstransfer_mode="block".
         "cmd_delreg.lua",  -- using report, ban, block import
         "cmd_usercleaner.lua", -- using report import
         { "etc_records.lua", enabled = true },  -- API-toggleable (#261)

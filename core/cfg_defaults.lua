@@ -4746,6 +4746,17 @@ local defaults = {
             return types_number( value, nil, true )
         end
     },
+    -- #500: etc_forcetlstransfer.lua force-ADCS C2C-transfer gate. On each
+    -- peer-connection setup event it reads the transfer protocol and, per
+    -- mode, drops ( block ) or warns on a plain ( non-ADCS ) setup. All-or-
+    -- nothing: no level / whitelist exemption - an enabled hub forces TLS
+    -- on every transfer. Plugin off by default in examples/cfg.
+    etc_forcetlstransfer_mode = { "block",
+        function( value )
+            if not types_utf8( value, nil, true ) then return false end
+            return value == "warn" or value == "block"
+        end
+    },
     -- #78 Phase B: `+blocklist` admin plugin (etc_blocklist.lua).
     -- Operator-facing chat command + JSONL export/import. The
     -- engine in core/blocklist.lua is independent; these keys
