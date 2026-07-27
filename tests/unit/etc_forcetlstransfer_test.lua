@@ -217,6 +217,20 @@ do
         L.onConnectToMe( bad, mkuser( "6.0.1.2" ), mkcmd( "ADC/1.0" ) ), "PROCESSED" )
 end
 
+do
+    -- shipped default: with no mode key set, the plugin defaults to "warn"
+    -- ( the non-breaking default ) - a plain setup passes but still notifies
+    reset_cfg( )
+    _cfg.etc_forcetlstransfer_mode = nil
+    _G._listeners = { }
+    local p = assert( loadfile( "scripts/etc_forcetlstransfer.lua" ) )( )
+    local L = _G._listeners
+    local u = mkuser( "7.0.0.1" )
+    eq( "default (no mode set) = warn: plain passes",
+        L.onConnectToMe( u, mkuser( "7.0.0.2" ), mkcmd( "ADC/1.0" ) ), nil )
+    eq( "default (no mode set) = warn: still notifies", u._replies, 1 )
+end
+
 ----------------------------------------------------------------------
 io.write( string.format( "\netc_forcetlstransfer: %d passed, %d failed\n", _pass, _fail ) )
 os.exit( _fail == 0 and 0 or 1 )

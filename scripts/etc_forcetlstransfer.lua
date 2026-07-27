@@ -18,12 +18,14 @@
         ( ECTM / ERCM ) fire the same onConnectToMe / onRevConnectToMe
         listeners, so one handler per event covers D and E.
 
-        Modes ( etc_forcetlstransfer_mode, default "block" ):
-          - "block" ( default ): drop the plain setup ( return PROCESSED )
-            and notify both parties ( sender + target ). Enforces TLS
-            immediately.
-          - "warn": let the plain setup pass but notify both parties - a
-            softer roll-out that breaks nothing while users switch.
+        Modes ( etc_forcetlstransfer_mode, default "warn" ):
+          - "warn" ( default ): let the plain setup pass but notify both
+            parties ( sender + target ). Non-breaking - the shipped default,
+            so a fresh hub nudges users toward TLS without cutting off any
+            transfer.
+          - "block": drop the plain setup ( return PROCESSED ) + notify.
+            Enforces TLS immediately - flip to this once your users have set
+            up their TLS ports.
 
         No exemptions - all-or-nothing. When the plugin is loaded, EVERY
         plain transfer is acted on ( no level or IP escape hatch ): either
@@ -39,10 +41,11 @@
         Notes:
           - CCPM ( client-to-client PM ) always uses ADCS, so it is never
             blocked here ( unlike etc_trafficmanager's level block ).
-          - Any mode other than "warn" fails CLOSED ( blocks ), and the
-            block decision is locked in before the best-effort notify, so
-            neither a misconfig nor a notify error can silently disable
-            enforcement.
+          - Only an explicit "warn" lets a plain setup pass; any other
+            value ( "block" or a typo ) blocks, and the decision is locked
+            in before the best-effort notify. So a mistyped mode over-
+            enforces rather than silently passing - an operator who set
+            "block" cannot lose enforcement to a typo or a notify error.
           - Listener order: this handler returns PROCESSED / nil only, but
             the firelistener chain lets the FIRST non-nil return win. Keep
             this ahead of any plugin that returns a truthy non-PROCESSED
@@ -50,8 +53,9 @@
             bundled etc_trafficmanager returns only PROCESSED / nil, so the
             default plugin set is safe in any order.
 
-        Off by default: add { "etc_forcetlstransfer.lua", enabled = false }
-        to cfg.scripts to load it.
+        Ships ENABLED in "warn" mode ( non-breaking ) in examples/cfg, so a
+        fresh hub encourages TLS transfers out of the box. Escalate to
+        "block" to enforce, or drop the cfg.scripts entry to disable.
 
 ]]--
 
@@ -69,10 +73,11 @@ local lang, lang_err = cfg.loadlanguage( scriptlang, scriptname )
 lang = lang or { }
 if lang_err then hub.debug( lang_err ) end
 
-local mode             = cfg.get( "etc_forcetlstransfer_mode" ) or "block"
--- Fail-closed: only an explicit "warn" lets a plain setup pass; anything
--- else ( incl. an unexpected value ) blocks, so a misconfigured mode can
--- never silently disable enforcement.
+local mode             = cfg.get( "etc_forcetlstransfer_mode" ) or "warn"
+-- Only an explicit "warn" lets a plain setup pass; any other value
+-- ( "block" or a typo ) blocks. So a mistyped mode over-enforces rather
+-- than silently passing - an operator who set "block" can't lose it to a
+-- typo. Default is "warn" ( the shipped, non-breaking default ).
 local blocking         = ( mode ~= "warn" )
 
 --// table lookups
