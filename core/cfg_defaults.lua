@@ -4706,6 +4706,46 @@ local defaults = {
             return types_number( value, nil, true )
         end
     },
+    -- #501: etc_lockdown.lua transient maintenance-mode gate. The
+    -- lockdown state itself is RUNTIME ( the `+lockdown` command,
+    -- persisted to scripts/data/etc_lockdown.tbl ); these keys only tune
+    -- the plugin. The plugin ships disabled in examples/cfg.
+    etc_lockdown_command_minlevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
+    etc_lockdown_default_retry = { 120,
+        function( value )
+            if not types_number( value, nil, true ) then return false end
+            return value >= 1 and value <= 86400
+        end
+    },
+    etc_lockdown_exempt_whitelist = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_lockdown_report = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_lockdown_report_hubbot = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_lockdown_report_opchat = { true,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+    etc_lockdown_llevel = { 60,
+        function( value )
+            return types_number( value, nil, true )
+        end
+    },
     -- #78 Phase B: `+blocklist` admin plugin (etc_blocklist.lua).
     -- Operator-facing chat command + JSONL export/import. The
     -- engine in core/blocklist.lua is independent; these keys

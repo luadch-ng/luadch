@@ -1024,6 +1024,17 @@ return { -- the settings are a lua table, do not tough this!
     etc_whitelist_import_min_level = 100,  -- min level to run `+whitelist import <path>` - same threat model as blocklist (JSONL may carry master-added rows); default 100 = master-only (integer)
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// etc_lockdown.lua settings | transient maintenance-mode gate (#501). Admit only users >= a chosen level, kick + refuse the rest, until you run `+lockdown off`. Lockdown state is RUNTIME (the command, persisted to scripts/data/etc_lockdown.tbl) - these keys only tune the plugin. Plugin ships DISABLED (enable it in the scripts list below)
+
+    etc_lockdown_command_minlevel = 60,  -- min level to run `+lockdown <level> [minutes] [reason] | off | status` (integer)
+    etc_lockdown_default_retry = 120,  -- IQUI TL in seconds sent to a refused login when the lockdown has NO time set, so clients keep re-knocking until you lift it; a timed lockdown uses its own remaining time instead (integer 1..86400)
+    etc_lockdown_exempt_whitelist = true,  -- admit whitelisted IPs (core/whitelist - hublist pingers etc.) despite the lockdown, so the hub stays visible on hublists (essential under reg_only). A deliberate, plugin-scoped exemption from this manual gate (boolean)
+    etc_lockdown_report = true,  -- on enable / disable / auto-expire, fire etc_report.send with the state change so staff see it live (boolean)
+    etc_lockdown_report_hubbot = false,  -- send the report as a hubbot PM to operators at or above etc_lockdown_llevel (boolean)
+    etc_lockdown_report_opchat = true,  -- send the report into op-chat (boolean)
+    etc_lockdown_llevel = 60,  -- min level for the hubbot-PM report (integer)
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// etc_geoip.lua settings | country / ASN blocking via MaxMind GeoLite2 (#78 Phase D2). Needs geoipupdate for the DB - see docs/BLOCKLIST.md
 
     etc_geoip_enabled = false,  -- master toggle; plugin loads either way but the onConnect check is inert when false (boolean)
@@ -1581,6 +1592,7 @@ return { -- the settings are a lua table, do not tough this!
         "usr_nick_length.lua",
         "hub_inf_manager.lua",
         { "etc_clientblocker.lua", enabled = true },  -- #81 client AP/VE blocklist. API-toggleable (#261). Must sit AFTER hub_inf_manager so structural BINF rejects (forbidden flags / identity spoofing) happen first; client-policy kicks then run on already-validated INFs.
+        { "etc_lockdown.lua", enabled = false },  -- #501 transient maintenance-mode gate: admit only users >= <level>, kick + refuse the rest until `+lockdown off`. OFF by default. onConnect veto placed early in the access cluster so a locked-out login short-circuits before the heavier automated blockers (geoip / proxydetect); transparent to staff/exempt (returns nil), so chain position is not load-bearing for correctness. Enable here + use `+lockdown <level> [minutes] [reason]`.
         { "etc_blocklist.lua", enabled = true },  -- #78 Phase B `+blocklist` admin CLI for the unified pre-handshake IP/CIDR blocklist (engine = core/blocklist.lua, Phase A). API-toggleable (#261). Manages MANUAL entries; Phase D/E/F plugins (geoip / external feeds / proxydetect) will push auto-feed entries into the same store.
         { "etc_whitelist.lua", enabled = true },  -- #78 allowlist, Phase B `+whitelist` admin CLI for the global IP/CIDR allowlist (engine = core/whitelist.lua). API-toggleable (#261). Exempts trusted IPs (hublist pingers, seeded on first run) from the automated blockers; a manual +ban still wins. Chain position not load-bearing (consulted by the blockers, not a listener itself).
         { "etc_geoip.lua", enabled = false },  -- #78 Phase D2 country / ASN blocking via MaxMind GeoLite2. OFF by default (needs a geoipupdate-managed DB - see docs/BLOCKLIST.md). Per-connection post-handshake lookup; must sit AFTER hub_inf_manager like etc_clientblocker. Enable here + set etc_geoip_enabled=true + populate etc_geoip_blocked_countries.
