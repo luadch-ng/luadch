@@ -16,9 +16,11 @@
 
         ADC overloads the CTM / RCM commands for BOTH file-transfer
         connection setup AND CCPM (encrypted client-to-client PM)
-        channel setup. The onConnectToMe / onRevConnectToMe listeners
-        below block CTM / RCM for blocked levels to stop file
-        transfers, but the wire-level commands look identical for
+        channel setup. The onConnectToMe / onRevConnectToMe /
+        onNatTraversal / onNatTraversalReply listeners below block
+        CTM / RCM and the DNAT / DRNT NAT-traversal fallback for
+        blocked levels to stop file transfers, but the wire-level
+        commands look identical for
         CCPM - so blocking a level via `etc_trafficmanager_blockedlevels`
         (or via individual `+trafficmanager block <nick>`) ALSO
         disables CCPM for those users. They can still chat through
@@ -32,6 +34,20 @@
         want CCPM available for a level must remove that level from
         the block list and accept the corresponding file-transfer
         permission.
+
+        v2.8:
+            - also block the NAT-traversal fallback (DNAT / DRNT, via the
+              new onNatTraversal / onNatTraversalReply listeners), not
+              only CTM / RCM. A blocked user could still establish a
+              file-transfer OR CCPM connection whenever a DIRECT
+              connection was impossible - exactly passive / CGNAT peers,
+              whose clients fall back to NAT traversal - because that
+              path was never hooked (reported by Sopor: CCPM succeeds on
+              passive users despite both being blocked, with no common
+              hub). The two new listeners mirror the CTM / RCM block
+              logic (masterlevel gate + need_block on user and target;
+              need_block tolerates a nil target). Closes the passive /
+              CGNAT bypass for both transfers and CCPM.
 
         v2.7:
             - `show blocks` now also lists currently-online users who
@@ -212,7 +228,7 @@
 --------------
 
 local scriptname = "etc_trafficmanager"
-local scriptversion = "2.7"
+local scriptversion = "2.8"
 
 local cmd = "trafficmanager"
 local cmd_b = "block"
@@ -1105,6 +1121,33 @@ hub.setlistener( "onConnectToMe", {},
 
 --// block RCM
 hub.setlistener( "onRevConnectToMe", {},
+    function( user, target, adccmd )
+        if user:level() < masterlevel then
+            if need_block( user ) then return PROCESSED end
+            if need_block( target ) then return PROCESSED end
+        end
+        return nil
+    end
+)
+
+--// block NAT traversal (DNAT) - the passive / CGNAT C2C fallback.
+-- CTM / RCM above only cover the direct-connection setup; when a direct
+-- connection is impossible (both peers passive / behind CGNAT) clients
+-- fall back to NAT traversal, which would otherwise let a blocked user
+-- still establish a file-transfer OR CCPM connection. Mirrors the CTM /
+-- RCM logic; need_block tolerates a nil target.
+hub.setlistener( "onNatTraversal", {},
+    function( user, target, adccmd )
+        if user:level() < masterlevel then
+            if need_block( user ) then return PROCESSED end
+            if need_block( target ) then return PROCESSED end
+        end
+        return nil
+    end
+)
+
+--// block NAT traversal reply (DRNT)
+hub.setlistener( "onNatTraversalReply", {},
     function( user, target, adccmd )
         if user:level() < masterlevel then
             if need_block( user ) then return PROCESSED end
