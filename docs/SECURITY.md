@@ -293,6 +293,25 @@ local chat log (DC++ keeps one by default).
   `+setpass nick <NICK> <PASS>` still receives it via PM - they need
   it to log in.
 
+**Opt-in reversal - `show_reguser_password` (default false).** Operators
+repeatedly reported a workflow the redaction breaks: a user forgets their
+password and asks an op for it, and many users cannot self-reset. The cfg
+key `show_reguser_password` (shared by `cmd_accinfo` and `cmd_usersearch`,
+default false) restores the pre-redaction behaviour when set true -
+`+accinfo` / `+accinfoop` and `+usersearch` then show the stored password
+instead of `<REDACTED>`. This is a deliberate operator tradeoff: enabling
+it puts the cleartext-equivalent password back into chat/PM and thus into
+client-side (and any hub-side) chat logs, exactly the exposure the
+redaction closed. Two bounds still hold regardless: the per-user hierarchy
+gate (an op only sees passwords of users it may already inspect; a
+`+usersearch` row otherwise shows `<Not allowed to view>`), and the HTTP
+API, which never exposes the password field. `+usersearch` is a BULK view
+- a broad query can list many passwords in one reply - so it is the
+higher-exposure of the two. The default stays redacted; a single shared
+key (not a per-plugin pair) is deliberate so the two paths cannot drift,
+and it is the supported escape hatch for operators who would otherwise
+hand-edit the plugin source.
+
 **`+reg` auto-generated password: delivered by design, not a defect.**
 `+reg` generates the password with `util.generatepass()` and it must
 reach the new user for their first login. In a base DC hub the only

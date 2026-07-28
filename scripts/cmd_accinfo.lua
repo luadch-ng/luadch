@@ -5,6 +5,18 @@
         - this script adds a command "accinfo" get infos about a reguser
         - usage: [+!#]accinfo sid|nick <SID>|<NICK> / [+!#]accinfoop sid|nick <SID>|<NICK>
 
+        v0.37: by Aybo
+            - add the `show_reguser_password` cfg toggle (shared with
+              cmd_usersearch, default false). When an operator sets it
+              true, +accinfo / +accinfoop show the reguser's stored
+              password again instead of "<REDACTED>" - the pre-v0.32
+              behaviour, now opt-in. Default keeps the #95 redaction
+              (no password copied into client-side chat logs); the
+              per-user hierarchy gate and the password-free HTTP surface
+              are unchanged. Requested by hub operators who need to tell
+              a user their forgotten password (many older users cannot
+              self-reset). See docs/SECURITY.md for the tradeoff.
+
         v0.36:
             - permanent-ban awareness on the HTTP surface (#444): the
               GET /v1/registered/{nick} `ban` object now carries
@@ -172,7 +184,7 @@
 --------------
 
 local scriptname = "cmd_accinfo"
-local scriptversion = "0.36"
+local scriptversion = "0.37"
 
 local cmd = "accinfo"
 local cmd2 = "accinfoop"
@@ -192,6 +204,7 @@ local use_keyprint = cfg.get( "use_keyprint" )
 local keyprint_type = cfg.get( "keyprint_type" )
 local keyprint_hash = cfg.get( "keyprint_hash" )
 local advanced_rc = cfg.get( "cmd_accinfo_advanced_rc" )
+local show_password = cfg.get( "show_reguser_password" )
 local msgmanager_activate = cfg.get( "etc_msgmanager_activate" )
 local trafficmanager_activate = cfg.get( "etc_trafficmanager_activate" )
 local ban = hub.import( "cmd_ban")
@@ -467,6 +480,17 @@ local get_bantime = function( remaining )
     end
 end
 
+-- password cell for +accinfo / +accinfoop: the real stored password
+-- when the operator has enabled show_reguser_password, else "<REDACTED>".
+-- One tested definition for the toggle/redaction decision (#95 reversal,
+-- exposed as the `_password_cell` seam). The hierarchy gate that decides
+-- WHETHER this user may be inspected sits in the callers, not here.
+local password_cell = function( pw )
+    if not show_password then return msg_redacted end
+    if pw == nil or pw == "" then return msg_unknown end
+    return pw
+end
+
 local onbmsg = function( user, command, parameters )
     local level = user:level()
     if level < 10 then
@@ -505,7 +529,7 @@ local onbmsg = function( user, command, parameters )
     local accinfo = utf.format(
         msg_accinfo2,
         target.nick or msg_unknown,
-        msg_redacted,
+        password_cell( target.password ),
         targetlevel or msg_unknown,
         targetlevelname or msg_unknown,
         target.by or msg_unknown,
@@ -567,7 +591,7 @@ hub.setlistener( "onBroadcast", {},
             local accinfo = utf.format(
                 msg_accinfo,
                 target.nick or msg_unknown,
-                msg_redacted,
+                password_cell( target.password ),
                 targetlevel or msg_unknown,
                 targetlevelname or msg_unknown,
                 target.by or msg_unknown,
@@ -765,3 +789,7 @@ hub.setlistener( "onStart", {},
 )
 
 hub.debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
+
+return {
+    _password_cell = password_cell,    -- unit-test seam (reguser-password toggle)
+}
