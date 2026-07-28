@@ -61,6 +61,8 @@ promoted to `master`, so pull requests go against **`dev`** - see
 - **`select`->`poll` event loop** ([#310](https://github.com/luadch-ng/luadch/issues/310)) - lifts the ~1024 concurrent-socket ceiling on POSIX
 - **ADC command aliases** ([#327](https://github.com/luadch-ng/luadch/issues/327)) - operator-defined `+alias`es
 - **Encrypted local backup + offline restore** ([#480](https://github.com/luadch-ng/luadch/issues/480)) - scheduled AES-256-GCM `.ldbk` archives of hub state via `+backup`, plus a standalone `./luadch --restore` that rebuilds a hub from an archive without booting it; see [`docs/BACKUP.md`](docs/BACKUP.md)
+- **Force TLS on client-to-client transfers** ([#500](https://github.com/luadch-ng/luadch/issues/500)) - `etc_forcetlstransfer` refuses to broker a plaintext direct transfer on an ADCS hub, so file transfers are TLS too; ships in a non-breaking warn mode
+- **Maintenance-mode lockdown** ([#501](https://github.com/luadch-ng/luadch/issues/501)) - `+lockdown` temporarily admits only users at or above a chosen level (with a timed auto-lift) to drain a hub for maintenance
 
 See [`docs/SECURITY.md`](docs/SECURITY.md) for the full threat model
 and operator guidance.

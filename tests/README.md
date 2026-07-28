@@ -6,8 +6,8 @@ and loads all bundled plugins without errors; and a pure-Lua **unit**
 suite for modules that can be exercised standalone.
 
 The smoke harness started as Phase 6 modernisation work and is now the
-permanent regression floor: it runs on every push and PR, and both layers
-run in CI on Linux AND Windows (`.github/workflows/smoke.yml`). Authoring
+permanent regression floor: it runs on pushes to `dev` and on every PR,
+and both layers run in CI on Linux AND Windows (`.github/workflows/smoke.yml`). Authoring
 guidance (unit-harness contract, the regression-fail-pre-fix recipe, smoke
 gotchas) lives in [`../docs/DEVELOPMENT.md`](../docs/DEVELOPMENT.md) §4.
 

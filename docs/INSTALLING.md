@@ -134,8 +134,8 @@ sudo journalctl -u luadch --since today
 
 ### Network / firewall
 
-- TCP **5000** — plain ADC (`adc://`)
-- TCP **5001** — TLS ADC (`adcs://`)
+- TCP **5001** - TLS ADC (`adcs://`), the default listener.
+- TCP **5000** - plain ADC (`adc://`), bound **only if you enable `tcp_ports`**. Fresh installs are TLS-only (`tcp_ports = {}`), so 5000 is not listening by default.
 
 Open whichever you actually use. For a public hub, you almost certainly
 only want TLS:

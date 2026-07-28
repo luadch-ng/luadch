@@ -26,7 +26,7 @@ After a fresh install, before opening the hub to real users:
    ```
    Pin the cert deterministically: hand users the `adcs://host:port/?kp=SHA256/<keyprint>` URL. DC++ clients trust the keyprint, not a CA chain - no Let's Encrypt or paid cert needed (see [`docs/SECURITY.md`](SECURITY.md) §6).
 
-   To regenerate later, delete `certs/servercert.pem` and `certs/serverkey.pem` and restart the hub. The bundled `certs/make_cert.{sh,bat}` scripts are still around for manual regeneration outside the hub process (e.g. for cron-based rotation).
+   To regenerate later, delete `certs/servercert.pem` and `certs/serverkey.pem` and restart the hub. The `examples/certs/make_cert.{sh,bat}` scripts are still around for manual regeneration outside the hub process (e.g. for cron-based rotation).
 
 2. **Connect with an ADC client** (AirDC++, EiskaltDC++, …):
    - Address: `adcs://127.0.0.1:5001/?kp=SHA256/<keyprint from step 1>`

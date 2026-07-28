@@ -1,8 +1,8 @@
 # Running luadch in Docker
 
 The official image is built from this repo's [`docker/Dockerfile`](../docker/Dockerfile)
-and published to GitHub Container Registry on every release tag and
-master push:
+and published to GitHub Container Registry on every release tag, on
+`master` push, and on `dev` push:
 
 | Tag pattern | Source |
 |---|---|
@@ -11,6 +11,7 @@ master push:
 | `ghcr.io/luadch-ng/luadch:vX`     | latest minor in `vX` line |
 | `ghcr.io/luadch-ng/luadch:latest` | latest released `vX.Y.Z` |
 | `ghcr.io/luadch-ng/luadch:master` | bleeding-edge (post-merge, pre-release) |
+| `ghcr.io/luadch-ng/luadch:dev`    | rolling `dev` branch - next-merge candidate, the testhub image |
 
 Available platforms: `linux/amd64`, `linux/arm64`.
 
