@@ -275,7 +275,9 @@ Shipped feature arcs so far (closed trackers, details in the issues): HTTP
 API #82, audit log #84, real HBRI #214, registered-users API family #236,
 subsystem managers #249, client blocker #81, aliases #327, unified blocklist
 + in-hub GeoIP #78/#79/#352, global whitelist/allowlist (#78 deferred item),
-status-push heartbeat #395, inbound webhook receiver #398.
+status-push heartbeat #395, inbound webhook receiver #398, automatic
+encrypted backup + offline restore #480, maintenance-mode lockdown gate
+#501, force-ADCS transfer gate #500.
 
 **Unified blocklist arc [#78](https://github.com/luadch-ng/luadch/issues/78)
 COMPLETE + on master (2026-07-10); #78 + #79 + #352 closed.** All precursors
@@ -334,6 +336,19 @@ master (frozen history - the live delta is always
   pass (#489). Follow-up: the `adclib` `%zu`->`%I` diagnostic fix (#483,
   same `lua_pushvfstring`-conversion bug class as the P0 `listdir` `%lu`
   fix). Operator guide: [`docs/BACKUP.md`](docs/BACKUP.md).
+- **maintenance + transfer-security plugins, and a trafficmanager /
+  proxydetect batch (2026-07-27)** - `etc_lockdown` #501 (transient
+  maintenance-mode access gate: `onConnect` veto + kick-below-level, timed
+  auto-expiry, self-lockout guard, whitelist-exempt pingers; ships disabled)
+  and `etc_forcetlstransfer` #500 (force-ADCS C2C transfers by dropping a
+  plaintext CTM/RCM/NAT setup at `adccmd[8]`; all-or-nothing, ships ENABLED in
+  `warn` + PM-both-parties, operator escalates to `block`); plus
+  `etc_trafficmanager` show-blocks now lists auto-blocked ONLINE users
+  (#502/#503, + a v2.2.1 drop-in for the 3.1.x operator) and `etc_proxydetect`
+  reports the connect-time nick, not "?" (#504/#505). CI: `smoke.yml` `push:`
+  scoped to `[dev]` so feature/master pushes are not re-smoked - their PRs are
+  (#511). All live-validated on `:dev` via the devclient harness, no
+  Sopor-testhub wait (Sopor runs 3.1.x, engages at the official 3.2.0 release).
 
 `dev` and `master` track closely; open work is the feature-arc backlog -
 `gh issue list --repo luadch-ng/luadch` (no open bugs). Durable pattern from
