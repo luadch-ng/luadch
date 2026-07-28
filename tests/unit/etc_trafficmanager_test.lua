@@ -29,6 +29,11 @@
     this file against `git show origin/dev:scripts/etc_trafficmanager.lua`
     (9 failures pre-fix, 0 post-fix).
 
+    v2.8 NAT-traversal section (below): the two "onNatTraversal /
+    onNatTraversalReply registered" checks FAIL on the pre-v2.8 plugin
+    (the listeners are unregistered; the guarded block/pass assertions
+    are then skipped) and PASS patched - 2 more RED-pre-fix checks.
+
 ]]--
 
 local GiB = 1024 * 1024 * 1024
@@ -307,6 +312,44 @@ do
         local L = assert( loadfile( "scripts/lang/etc_trafficmanager.lang." .. lc ) )( )
         eq( "lang " .. lc .. ": msg_users has 3 %s", pct( L.msg_users ), 3 )
         eq( "lang " .. lc .. ": opmsg has 8 %s",     pct( L.opmsg ),     8 )
+    end
+end
+
+----------------------------------------------------------------------
+-- NAT-traversal blocking (CCPM / transfer bypass, reported by Sopor):
+-- a blocked user's C2C setup must be dropped on the DNAT / DRNT
+-- fallback too, not only on CTM / RCM. Passive / CGNAT peers fall back
+-- to NAT traversal, which pre-fix slipped through unblocked.
+-- RED pre-fix: onNatTraversal / onNatTraversalReply are unregistered
+-- (the two "registered" checks fail; the guarded calls are skipped).
+----------------------------------------------------------------------
+
+do
+    local blocked = stub_user{ firstnick = "nat_blk", level = 10,  share = 0 }    -- auto-blocked level
+    local clean   = stub_user{ firstnick = "nat_cln", level = 20,  share = 10 * GiB }  -- 10 GiB, above min_share[20]=5 GiB
+    local owner   = stub_user{ firstnick = "nat_own", level = 100, share = 0 }    -- >= masterlevel, exempt
+
+    -- parity control: CTM / RCM already drop a blocked user's setup
+    eq( "CTM blocks a blocked user", _registered.onConnectToMe( blocked, clean, { } ), 1 )
+    eq( "RCM blocks a blocked user", _registered.onRevConnectToMe( blocked, clean, { } ), 1 )
+
+    -- the fix: NAT traversal must mirror CTM / RCM
+    eq( "onNatTraversal registered",      _registered.onNatTraversal ~= nil, true )
+    eq( "onNatTraversalReply registered", _registered.onNatTraversalReply ~= nil, true )
+
+    local nat = _registered.onNatTraversal
+    local rnt = _registered.onNatTraversalReply
+    if nat then
+        eq( "NAT: blocked user   -> PROCESSED",           nat( blocked, clean,   { } ), 1 )
+        eq( "NAT: blocked target -> PROCESSED",           nat( clean,   blocked, { } ), 1 )
+        eq( "NAT: nobody blocked -> nil",                 nat( clean,   clean,   { } ), nil )
+        eq( "NAT: blocked user + nil target -> PROCESSED", nat( blocked, nil, { } ), 1 )
+        eq( "NAT: clean user + nil target -> nil",         nat( clean,   nil, { } ), nil )
+        eq( "NAT: op (>= masterlevel) exempt -> nil",      nat( owner,   blocked, { } ), nil )
+    end
+    if rnt then
+        eq( "RNT: blocked user   -> PROCESSED", rnt( blocked, clean, { } ), 1 )
+        eq( "RNT: nobody blocked -> nil",       rnt( clean,   clean, { } ), nil )
     end
 end
 
