@@ -756,7 +756,7 @@ luadch supports plain ADC and TLS-wrapped ADCS in parallel. Default
 TLS configuration in [`core/cfg_defaults.lua`](../core/cfg_defaults.lua):
 
 - Protocol: TLS 1.3 (`tlsv1_3`)
-- Cipher list: `"HIGH"`
+- Cipher list: `"HIGH+kEDH:HIGH+kEECDH:HIGH:!PSK:!SRP:!3DES:!aNULL"` (excludes PSK / SRP / 3DES / anonymous suites)
 - Disabled: SSLv2, SSLv3
 - Peer-cert verify: off (correct for the server-side ADC role -
   clients are unauthenticated at the TLS layer; auth happens at the
@@ -910,4 +910,4 @@ world-readable `master.key` because the operator skipped §4).
 | Phase 7b - 7g | Each finding either fixed or filed with a documented disposition | [`docs/phases/PHASE_7_FINDINGS.md`](phases/PHASE_7_FINDINGS.md) §5 |
 
 A future phase may re-audit. Until then, this file plus
-`PHASE_7_FINDINGS.md` is the security baseline for v3.0.x.
+`PHASE_7_FINDINGS.md` is the security baseline for the 3.x line.

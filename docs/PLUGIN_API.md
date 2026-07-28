@@ -78,7 +78,8 @@ that environment:
     wrapper); plain Lua `string.*` byte methods are not directly
     reachable
   - luadch core: `hub`, `cfg`, `util`, `util_http`, `adc`, `adclib`,
-    `signal`, `out`, `unicode`, `sysinfo`, `backup` (the automatic-backup
+    `signal`, `out`, `unicode`, `sysinfo`, `audit`, `secrets`, `hmac`,
+    `whitelist`, `blocklist`, `backup` (the automatic-backup
     engine, #480; `+backup` driver `etc_backup` calls `backup.run`/
     `.readiness`/`.list`) - and more; the list above is illustrative, so
     treat `SANDBOX_GLOBALS` as the authority
@@ -796,12 +797,13 @@ is exhaustive, not a sample. A plugin's public API is whatever its
 final `return { ... }` exports under a **bare name**, reached via
 `hub.import( "<plugin>" )`. Exports whose name begins with `_` are
 internal unit-test or migration seams (the repo convention for "not
-API") and are omitted on purpose; twelve plugins - `bot_session_chat`,
+API") and are omitted on purpose; the following plugins - `bot_session_chat`,
 `cmd_disconnect`, `cmd_gag`, `cmd_myinf`, `cmd_myip`, `cmd_redirect`,
-`cmd_sslinfo`, `cmd_userinfo`, `etc_blocklist`, `etc_whitelist`,
-`hub_runtime`, `usr_hide_share` - export **only** such seams and so appear
-nowhere below. Absence from this table therefore means a plugin exports
-nothing public, not that the doc is behind.
+`cmd_sslinfo`, `cmd_userinfo`, `etc_backup`, `etc_blocklist`,
+`etc_forcetlstransfer`, `etc_lockdown`, `etc_whitelist`, `hub_runtime`,
+`usr_hide_share` - export **only** such seams and so appear nowhere below.
+Absence from this table therefore means a plugin exports nothing public,
+not that the doc is behind.
 
 | Plugin | Import | Public exports |
 |---|---|---|

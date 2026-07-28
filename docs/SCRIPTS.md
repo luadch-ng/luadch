@@ -347,9 +347,13 @@ expiry and exception lists.
 
 **Commands:** `+usercleaner showall|showexpired|showghosts|delexpired|delghosts|addexception|delexception|delexceptionall|showexceptions|setdays`
 
-**Config:** `cmd_usercleaner_permission`, `cmd_usercleaner_days`,
-`cmd_usercleaner_nick_protection`,
-`cmd_usercleaner_level_protection`
+**Config:** `cmd_usercleaner_activate`, `cmd_usercleaner_permission`,
+`cmd_usercleaner_protected_levels`, `cmd_usercleaner_report`,
+`cmd_usercleaner_report_opchat`, `cmd_usercleaner_report_hubbot`,
+`cmd_usercleaner_report_llevel` (the inactivity-day threshold and the
+nick exception list are runtime state in `cmd_usercleaner_settings.tbl`
+/ `cmd_usercleaner_exceptions.tbl`, managed via `+usercleaner setdays` /
+`addexception`, not cfg keys)
 
 ### cmd_userinfo
 
@@ -1138,10 +1142,8 @@ or abuse prevention.
 
 **Config:** `etc_msgmanager_activate`, `etc_msgmanager_permission`,
 `etc_msgmanager_permission_main`, `etc_msgmanager_permission_pm`,
-`etc_msgmanager_blocked_levels_main`,
-`etc_msgmanager_blocked_levels_pm`, `etc_msgmanager_report`,
-`etc_msgmanager_report_hubbot`, `etc_msgmanager_report_opchat`,
-`etc_msgmanager_llevel`
+`etc_msgmanager_report`, `etc_msgmanager_report_hubbot`,
+`etc_msgmanager_report_opchat`, `etc_msgmanager_llevel`
 
 ### etc_onfailedauth
 
@@ -1157,8 +1159,10 @@ Reset capability for admins.
 
 **Commands:** `+records` / `+records reset`
 
-**Config:** `etc_records_permission`, `etc_records_report`,
-`etc_records_report_hubbot`, `etc_records_report_opchat`
+**Config:** `etc_records_min_level`, `etc_records_min_level_reset`,
+`etc_records_whereto_main`, `etc_records_whereto_pm`,
+`etc_records_sendMain`, `etc_records_sendPM`, `etc_records_reportlvl`,
+`etc_records_delay`
 
 ### etc_report
 
@@ -1175,7 +1179,7 @@ spam or abuse control.
 
 **Config:** `etc_trafficmanager_activate`,
 `etc_trafficmanager_permission`,
-`etc_trafficmanager_blocked_levels`,
+`etc_trafficmanager_blocklevel_tbl`,
 `etc_trafficmanager_check_minshare`,
 `etc_trafficmanager_flag_blocked`, `etc_trafficmanager_report`,
 `etc_trafficmanager_report_hubbot`,
@@ -1184,7 +1188,7 @@ spam or abuse control.
 > **CCPM side effect:** ADC uses the same `CTM` / `RCM` commands for
 > file-transfer connection setup AND for CCPM (encrypted client-to-
 > client PM) channel setup. The plugin blocks both at the hub level
-> for blocked users, so adding a level to `etc_trafficmanager_blocked_levels`
+> for blocked users, so adding a level to `etc_trafficmanager_blocklevel_tbl`
 > ALSO disables CCPM for that level. Affected users can still chat
 > through the hub via regular `EMSG` / `DMSG`; only the direct
 > end-to-end encrypted channel is unreachable. There is no clean
@@ -1239,6 +1243,59 @@ from the sender - put a reverse proxy with TLS in front. Full setup
 [`docs/WEBHOOKS.md`](WEBHOOKS.md).
 
 **Config:** `etc_webhook_activate` + `cfg/webhooks.tbl`
+
+### etc_backup
+
+Automatic encrypted local backups of the hub's restore-critical state
+(`cfg/`, `scripts/data/`, `user.tbl`, the keys), sealed as a
+password-protected `.ldbk` archive (LDBK1 = tar + AES-256-GCM, PBKDF2
+key derivation) and rotated on a schedule. No cloud - archives are
+written locally; off-site copying (rclone, ...) is the operator's
+choice. Restore is a standalone OFFLINE step - `./luadch --restore
+<file>` - not a chat command. Full setup, passphrase / master-key
+handling, Docker and off-site walkthrough in
+[`docs/BACKUP.md`](BACKUP.md).
+
+**Commands:** `+backup now|list|status`
+
+**Config:** `etc_backup_enabled`, `etc_backup_dir`, `etc_backup_keep`,
+`etc_backup_daily_at`, `etc_backup_interval_hours`,
+`etc_backup_include_master_key`, `etc_backup_passphrase`,
+`etc_backup_oplevel`, `etc_backup_notify_level`
+
+### etc_forcetlstransfer
+
+Force TLS-encrypted client-to-client transfers (force ADCS). On an
+`adcs://` hub the client<->hub link is encrypted, but a peer can still
+negotiate a plaintext DIRECT transfer; this plugin refuses to broker a
+plaintext transfer setup (`CTM` / `RevCTM` / NAT-traversal + its reply),
+forcing `ADCS/`. All-or-nothing - no level or whitelist exemption.
+Ships ENABLED in `warn` mode (PMs both parties a client-setup hint and
+lets the transfer through); set `etc_forcetlstransfer_mode = "block"` to
+actually drop plaintext setups (which needs each user's own TLS transfer
+port reachable).
+
+**Config:** `etc_forcetlstransfer_mode` (`warn` | `block`)
+
+### etc_lockdown
+
+Transient maintenance-mode access gate: temporarily admit only users at
+or above a given level so the hub can be drained for maintenance without
+a permanent `reg_only` config change. While active, logins below the
+level are refused (with a reconnect countdown) and online users below it
+are kicked; an optional timer auto-lifts it, or `+lockdown off` does.
+Whitelisted IPs (hublist pingers) stay admitted when
+`etc_lockdown_exempt_whitelist` is true, so the hub stays visible on
+hublists during a lockdown. State survives `+reload` / restart
+(`scripts/data/etc_lockdown.tbl`). Ships disabled.
+
+**Commands:** `+lockdown <level> [minutes] [reason]` / `+lockdown off` /
+`+lockdown status`
+
+**Config:** `etc_lockdown_command_minlevel`, `etc_lockdown_default_retry`,
+`etc_lockdown_exempt_whitelist`, `etc_lockdown_report`,
+`etc_lockdown_report_hubbot`, `etc_lockdown_report_opchat`,
+`etc_lockdown_llevel`
 
 ---
 
