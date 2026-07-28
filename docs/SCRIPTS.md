@@ -71,8 +71,8 @@ description and timestamps.
 **Commands:** `+accinfo sid|nick|cid <target>` / `+accinfoop sid|nick|cid <target>`
 
 **Config:** `cmd_accinfo_permission`, `cmd_accinfo_advanced_rc`,
-`etc_msgmanager_activate`, `etc_trafficmanager_activate`,
-`etc_trafficmanager_flag_blocked`
+`show_reguser_password`, `etc_msgmanager_activate`,
+`etc_trafficmanager_activate`, `etc_trafficmanager_flag_blocked`
 
 ### cmd_ascii
 
@@ -375,12 +375,14 @@ Useful for administration.
 
 ### cmd_usersearch
 
-Search registered users by partial nick match. Results include share
-and registration date (password column is redacted since v3.1.6 / #95).
+Search registered users by partial nick match. Results include level
+and registration date (the password column is redacted by default,
+#95; set `show_reguser_password = true` to show it).
 
 **Commands:** `+usersearch <searchstring>`
 
-**Config:** `cmd_usersearch_permission`, `cmd_usersearch_advanced_rc`
+**Config:** `cmd_usersearch_minlevel`, `cmd_usersearch_max_limit`,
+`show_reguser_password`
 
 ---
 

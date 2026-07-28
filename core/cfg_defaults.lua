@@ -1022,6 +1022,19 @@ local defaults = {
         end
     },
 
+    -- Shared by cmd_accinfo (+accinfo / +accinfoop) and cmd_usersearch:
+    -- when true, those commands echo a registered user's stored password
+    -- in their chat/PM reply instead of "<REDACTED>". Default false keeps
+    -- passwords out of client-side chat logs (#95); enabling it is an
+    -- operator tradeoff (see docs/SECURITY.md). The per-user hierarchy
+    -- gate still applies (an op only sees passwords of users it may
+    -- already inspect), and the HTTP API never exposes passwords.
+    show_reguser_password = { false,
+        function( value )
+            return types_boolean( value, nil, true )
+        end
+    },
+
     ---------------------------------------------------------------------------------------------------------------------------------
     --// cmd_ascii.lua settings
 
