@@ -629,6 +629,8 @@ return { -- the settings are a lua table, do not tough this!
 
     cmd_accinfo_advanced_rc = false,  -- warning: this feature adds a complete list of all regusers to the rightclick, this could brings problems in bigger (60+) hubs! (boolean)
 
+    show_reguser_password = false,  -- shared by cmd_accinfo + cmd_usersearch: show a reguser's stored password in +accinfo / +usersearch instead of "<REDACTED>"? default false keeps passwords out of chat logs (#95); enabling it is an operator tradeoff, see docs/SECURITY.md (boolean)
+
     ---------------------------------------------------------------------------------------------------------------------------------
     --// cmd_reload.lua settings | this script adds a command to refresh the cfg.tbl ans scripts if there was changed
 

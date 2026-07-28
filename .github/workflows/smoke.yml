@@ -394,6 +394,9 @@ jobs:
       - name: Run bot_session_chat nick-prefix unit test
         run: lua5.4 tests/unit/bot_session_chat_prefix_test.lua
 
+      - name: Run reguser-password toggle unit test
+        run: lua5.4 tests/unit/reguser_password_toggle_test.lua
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -702,6 +705,10 @@ jobs:
       - name: Run bot_session_chat nick-prefix unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/bot_session_chat_prefix_test.lua
+
+      - name: Run reguser-password toggle unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/reguser_password_toggle_test.lua
 
       - name: Configure
         shell: msys2 {0}

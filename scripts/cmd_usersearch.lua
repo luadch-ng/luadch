@@ -4,6 +4,16 @@
 
         usage: [+!#]usersearch <searchstring>
 
+        v1.6: by Aybo
+            - honour the `show_reguser_password` cfg toggle (shared with
+              cmd_accinfo, default false). When true, a permitted result
+              row shows the reguser's stored password instead of
+              "<REDACTED>"; permission-denied rows still show
+              "<Not allowed to view>", and the level gate is unchanged.
+              Opt-in reversal of the v1.5 #95 redaction. Note this is a
+              BULK view - a broad search can list many passwords in one
+              reply - so weigh it before enabling; see docs/SECURITY.md.
+
         v1.5: by Aybo
             - redact the password column in result rows. Permission-denied
               results still get the existing "<Not allowed to view>" string;
@@ -70,7 +80,7 @@
 --------------
 
 local scriptname = "cmd_usersearch"
-local scriptversion = "1.5"
+local scriptversion = "1.6"
 
 local cmd = "usersearch"
 
@@ -83,6 +93,7 @@ local prefix_table = cfg.get( "usr_nick_prefix_prefix_table" )
 local activate = cfg.get( "usr_nick_prefix_activate" )
 local minlevel = cfg.get( "cmd_usersearch_minlevel" )
 local max_limit = cfg.get( "cmd_usersearch_max_limit" )
+local show_password = cfg.get( "show_reguser_password" )
 local scriptlang = cfg.get( "language" )
 
 --// msgs
@@ -116,6 +127,16 @@ local msg_seconds = lang.msg_seconds or " seconds"
 ----------
 --[CODE]--
 ----------
+
+-- password cell for a permitted result row: the real stored password
+-- when show_reguser_password is on, else "<REDACTED>". One tested
+-- definition (#95 reversal, `_password_cell` seam). The per-row
+-- permission gate (may this user be shown at all) sits in the caller.
+local password_cell = function( pw )
+    if not show_password then return msg_redacted end
+    if pw == nil or pw == "" then return msg_unknown end
+    return pw
+end
 
 local get_lastlogout = function( profile )
     local lastlogout
@@ -168,7 +189,7 @@ local onbmsg = function( user, command, parameters )
                         msg_result,
                         u.nick,
                         u.level or msg_unknown,
-                        ( ( user_level == 100 ) or ( user_level > ( u.level or 0 ) ) ) and msg_redacted or msg_no_allowed,
+                        ( ( user_level == 100 ) or ( user_level > ( u.level or 0 ) ) ) and password_cell( u.password ) or msg_no_allowed,
                         u.by or msg_unknown,
                         u.date or msg_unknown,
                         get_lastlogout( u ) )
@@ -213,3 +234,7 @@ hub.setlistener( "onStart", {},
 )
 
 hub.debug( "** Loaded " .. scriptname .. " " .. scriptversion .. " **" )
+
+return {
+    _password_cell = password_cell,    -- unit-test seam (reguser-password toggle)
+}
