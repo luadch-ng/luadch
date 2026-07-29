@@ -48,6 +48,9 @@ jobs:
       - name: Run iostream unit test
         run: lua5.4 tests/unit/iostream_test.lua
 
+      - name: Run adc parse header unit test
+        run: lua5.4 tests/unit/adc_parse_header_test.lua
+
       # Phase 8 S5 BLOM bloom filter (pure Lua, same rationale as
       # the iostream test).
       - name: Run bloom unit test
@@ -497,6 +500,10 @@ jobs:
       - name: Run iostream unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/iostream_test.lua
+
+      - name: Run adc parse header unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/adc_parse_header_test.lua
 
       - name: Run bloom unit test
         shell: msys2 {0}
