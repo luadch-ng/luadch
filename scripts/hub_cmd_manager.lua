@@ -1,8 +1,17 @@
 --[[
 
-        hub_cmd_manager.lua v0.02 by blastbeat
+        hub_cmd_manager.lua v0.03 by blastbeat
 
         - this script mangages permissions for certain adc commands
+
+        v0.03:
+            - gate NAT-traversal (DNAT / DRNT) too, closing a CTM / RCM
+              level-gate bypass: passive / CGNAT peers fall back to NAT
+              traversal, which slipped through the CTM / RCM gates.
+              DNAT (onNatTraversal) is the NAT-traversal stand-in for the
+              CTM a passive uploader cannot send, so it is gated by
+              ctmlevel; DRNT (onNatTraversalReply) is the RCM-role reply
+              from the original RCM sender, gated by rcmlevel.
 
         v0.02: by blastbeat (20170226)
             - added blacklist and onIncoming hook
@@ -10,7 +19,7 @@
 ]]--
 
 local scriptname = "hub_cmd_manager"
-local scriptversion = "0.02"
+local scriptversion = "0.03"
 
 --// min levels to use a command //--
 
@@ -73,6 +82,24 @@ hub.setlistener( "onConnectToMe", { },
 )
 
 hub.setlistener( "onRevConnectToMe", { },
+    function( user )
+        if user:level( ) < rcmlevel then
+            return PROCESSED
+        end
+        return nil
+    end
+)
+
+hub.setlistener( "onNatTraversal", { },
+    function( user )
+        if user:level( ) < ctmlevel then
+            return PROCESSED
+        end
+        return nil
+    end
+)
+
+hub.setlistener( "onNatTraversalReply", { },
     function( user )
         if user:level( ) < rcmlevel then
             return PROCESSED
