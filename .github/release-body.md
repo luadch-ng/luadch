@@ -1,6 +1,6 @@
-# Luadch v3.1.14
+# Luadch v3.1.15
 
-**Maintenance patch** on the `release/3.1.x` line. One fix: a **Windows-only** hub-crash once the hub holds ~64 concurrent sockets. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.13. **Linux operators are unaffected** (no functional change).
+**Security patch** on the `release/3.1.x` line. One fix: a **remote, unauthenticated hub-crash on all platforms** - a single malformed ADC frame from an unauthenticated peer takes the whole hub down. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.14. **All operators should upgrade.**
 
 ## ⚠️ Before upgrading
 
@@ -12,52 +12,47 @@ tar -czf "luadch-backup-$(date +%F).tar.gz" cfg scripts certs secrets
 
 ## Why upgrade
 
-**Windows operators should upgrade**, especially busier hubs. Before this fix, a Windows hub crashed with `bad argument #1 to 'socket_select' (too many sockets)` and dropped every user once it held about **64 concurrent sockets** - a ceiling a moderately busy hub reaches organically (it can also be pushed there by a distributed connect flood; a single IP stays capped by `ratelimit_perip_max_conns`). Reported on Windows Server 2008 R2 running 3.1.13, but it affects any Windows version.
-
-**Linux is unaffected** - its glibc select ceiling is already 1024, so this release makes no functional change on Linux beyond one informational boot-log line.
+**Every operator should upgrade.** Before this fix, a single malformed ADC frame sent by an unauthenticated peer - no login, no registration - crashed the entire hub, dropping every connected user with no reconnect until a manual restart. It is trivially remote-triggerable and reproducible against any hub on any platform (Linux, Windows, ARM), independent of configuration.
 
 ## Bugfixes
 
-### [#416](https://github.com/luadch-ng/luadch/issues/416) (Sopor) - Windows hub-crash at ~64 concurrent sockets
+### remote, unauthenticated hub-crash on a malformed ADC header ([#526](https://github.com/luadch-ng/luadch/pull/526))
 
-The symptom in the log, immediately followed by the hub dropping every user:
+In `core/adc.lua`'s `parse()`, a 2-field-header message class (F / D / E, `header.len == 2`) carrying the fourcc plus only **one** header field passed the length gate:
 
-```
-/core/server.lua:...: bad argument #1 to 'socket_select' (too many sockets)
-```
-
-The hub event loop (`core/server.lua`'s `tick()`) calls `socket.select` over **every** connected socket at once. On Windows, luasocket's `select.c` hard-caps that at `FD_SETSIZE`:
-
-```c
-#ifdef _WIN32
-    if (n >= FD_SETSIZE)
-        luaL_argerror(L, tab, "too many sockets");
+```lua
+if eol < len then   -- accepts eol == len, i.e. fourcc + one field short
 ```
 
-The bundled Windows build never defined `FD_SETSIZE`, so it inherited the Winsock default of **64** (`luasocket/CMakeLists.txt` set only `WINVER`). Once the hub held ~64 sockets (logged-in users + v4/v6 listeners + HBRI + HTTP), the unguarded `select` raised and the main loop died.
+and reached the header-validation loop, which read the missing `buffer[3]` as `nil` and passed it to `_regex.sid` / `_regex.feature`:
 
-**Fix:** define `FD_SETSIZE=1024` for the Windows luasocket build (`socket` module + `luasocket_static`) - parity with the Linux glibc `fd_set`. On Windows `fd_set` is a `SOCKET` array sized by this macro, so raising it genuinely enlarges the set. This is **Windows-only**: on Linux, glibc's `fd_set` is a fixed 1024-bit buffer that redefining `FD_SETSIZE` would overflow.
+```lua
+sid     = function( str ) return string_match( str, _sid ) end   -- string_match(nil,...) -> throws
+feature = function( str ) for i = 1, #str, 5 do ... end          -- #nil -> throws
+```
 
-Watching **more than ~1024** concurrent sockets needs replacing `select()` with `poll()` on both platforms, tracked in [#310](https://github.com/luadch-ng/luadch/issues/310) on the 3.2.x line. `max_users` (default 3000) counts logged-in users, not sockets, and is not reached on either platform before this ~1024 socket ceiling.
+The throw is **uncaught** all the way up the receive path (`server.tick` -> `readbuffer` -> `dispatch` -> `incoming` -> `adc.parse`, no `pcall`), so a single frame such as `FSCH AAAA` sent **before login** terminates the hub process.
 
-The hub now logs its compile-time select capacity (`socket._SETSIZE`) once at boot (`hub.loop`, to `event.log`) so you can confirm the raised cap. The identical fix is on the 3.2.x line (`master`, PR [#417](https://github.com/luadch-ng/luadch/pull/417)) with a smoke regression that provably fails pre-fix on the Windows CI leg.
+The positional-parameter loop already carried a `param == nil` guard (Phase 8a F-PRS-7); the identical header-loop path was left unguarded - the asymmetry that made it reachable.
+
+**Fix:** require the fourcc plus `len` header params (`eol >= len + 1`) and add the same `param == nil` guard to the header loop. No valid frame is affected (the minimum valid frame already has `eol == len + 1`).
+
+**Live-validated:** a fresh `ghcr.io/luadch-ng/luadch:3.1.14` container **exits** on one pre-login `FSCH AAAA`; an image built from this fix **survives** `FSCH` / `DCTM` / `ECTM` / `DMSG AAAA` and still logs in. The 3.2.x line (`master`, PR [#525](https://github.com/luadch-ng/luadch/pull/525)) carries the identical fix plus a RED->GREEN unit regression on both smoke legs; 3.1.x has no unit-test harness, so the code here is identical and reviewer-verified, validated RED->GREEN against the 3.1.x `adc.lua` and live on the built image.
 
 ## Build / runtime
 
-No toolchain changes. Same Lua 5.4.8, same LuaSec 1.3.2, same LuaSocket 3.1.0, same build toolchain as v3.1.13. The Windows build simply compiles luasocket with `-DFD_SETSIZE=1024`.
-
-The `linux-aarch64` artifact continues with the Bullseye-container pipeline (glibc 2.31 baseline, works on Pi OS Bullseye / Bookworm / DietPi v9.x).
+No toolchain changes. Same Lua 5.4.8, same LuaSec 1.3.2, same LuaSocket 3.1.0, same build toolchain as v3.1.14. The `linux-aarch64` artifact continues with the Bullseye-container pipeline (glibc 2.31 baseline, works on Pi OS Bullseye / Bookworm / DietPi v9.x).
 
 ## Upgrade
 
 ```sh
-# Windows (the platform this fix targets)
-# Download luadch-v3.1.14-windows-x86_64.zip, extract, copy cfg+data over, restart.
-
-# Linux x86_64 / aarch64 (no functional change; upgrade at leisure)
-wget https://github.com/luadch-ng/luadch/releases/download/v3.1.14/luadch-v3.1.14-linux-x86_64.tar.gz
-tar xzf luadch-v3.1.14-linux-x86_64.tar.gz
+# Linux x86_64 / aarch64
+wget https://github.com/luadch-ng/luadch/releases/download/v3.1.15/luadch-v3.1.15-linux-x86_64.tar.gz
+tar xzf luadch-v3.1.15-linux-x86_64.tar.gz
 # move your cfg/, scripts/data/, etc into the new tree, restart hub
+
+# Windows
+# Download luadch-v3.1.15-windows-x86_64.zip, extract, copy cfg+data over, restart.
 ```
 
 3.2.x is the active development line on `master`; security backports continue to land on `release/3.1.x` per [`CLAUDE.md` §8](https://github.com/luadch-ng/luadch/blob/master/CLAUDE.md#8-release-lines-and-support-policy).

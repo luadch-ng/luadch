@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The upstream project (`luadch/luadch`) is a separate codebase; its release
 history is at https://github.com/luadch/luadch/releases.
 
+## [v3.1.15] - 2026-07-29
+
+Maintenance patch release on the `release/3.1.x` line. One security bugfix: a remotely-triggerable, unauthenticated hub-crash on all platforms. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.14. All operators should upgrade.
+
+### Bugfixes
+
+- [#526](https://github.com/luadch-ng/luadch/pull/526) - **remote hub-crash: a single malformed ADC frame from an unauthenticated peer takes the whole hub down.** In `core/adc.lua`'s `parse()`, a 2-field-header message class (F/D/E, `header.len == 2`) carrying the fourcc plus only one header field passed the length gate `if eol < len` (which accepts `eol == len`, one field short) and reached the header-validation loop. That loop read the missing `buffer[3]` as `nil` and passed it to `_regex.sid` / `_regex.feature`, which throw (`string.match(nil, ...)` / `#nil`). The throw is uncaught all the way up the receive path (`server.tick` -> `readbuffer` -> `dispatch` -> `incoming` -> `adc.parse`, no `pcall`), so a single frame such as `FSCH AAAA` sent before login terminates the hub process - a remote, unauthenticated denial of service reproducible against any hub regardless of config. The positional-parameter loop already carried a `param == nil` guard (Phase 8a F-PRS-7); the identical header-loop path was left unguarded - the asymmetry that made it reachable. Fix: require the fourcc plus `len` header params (`eol >= len + 1`) and add the same `param == nil` guard to the header loop. Live-validated: a fresh `ghcr.io/luadch-ng/luadch:3.1.14` container exits on one pre-login `FSCH AAAA`; a build from the fix survives `FSCH`/`DCTM`/`ECTM`/`DMSG AAAA` and still logs in. The 3.2.x master fix ([PR #525](https://github.com/luadch-ng/luadch/pull/525)) carries a RED->GREEN unit regression on both smoke legs; 3.1.x has no unit-test harness, so the code here is identical and reviewer-verified, validated RED->GREEN against the 3.1.x `adc.lua` and live on the built image.
+
+### Notes
+
+- **No breaking changes, no cfg / lang-file edits required.** Drop-in upgrade from v3.1.14.
+- **All operators should upgrade** - the crash is a remote, unauthenticated denial of service (one malformed frame, no login required), reproducible against any hub on any platform, and takes the whole hub down: every user dropped, no reconnects until a manual restart.
+
+[v3.1.15]: https://github.com/luadch-ng/luadch/releases/tag/v3.1.15
+
+
 ## [v3.1.14] - 2026-07-13
 
 Maintenance patch release on the `release/3.1.x` line. One bugfix: a Windows-only hub-crash once the hub holds ~64 concurrent sockets. No breaking changes; no cfg / lang-file changes; drop-in upgrade from v3.1.13. Linux operators are unaffected (no functional change - the boot log gains one informational line).
