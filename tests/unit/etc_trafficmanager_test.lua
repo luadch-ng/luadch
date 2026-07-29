@@ -34,6 +34,11 @@
     (the listeners are unregistered; the guarded block/pass assertions
     are then skipped) and PASS patched - 2 more RED-pre-fix checks.
 
+    nil-scriptname section (below): external add() with scriptname=nil
+    must degrade to msg_unknown, not the literal "nil". 3 checks FAIL on
+    the pre-fix plugin (dead `tostring(nil) or msg_unknown` fallback) and
+    PASS patched.
+
 ]]--
 
 local GiB = 1024 * 1024 * 1024
@@ -46,6 +51,7 @@ local _registered = { }        -- event/listener name -> fn
 local _hubcmds = { }           -- cmd name -> handler (onbmsg)
 local _online = { }            -- sid -> stub user (hub.getusers)
 local _block_seed = nil        -- what util.loadtable returns for block_tbl
+local _last_report = nil       -- last op-report message captured from etc_report.send
 
 ----------------------------------------------------------------------
 -- stub sandbox globals the plugin reads at file scope + runtime
@@ -72,7 +78,9 @@ _G.hub = {
             }
         end
         if name == "etc_report" then
-            return { send = function( ) end }
+            -- capture the formatted op-report (last positional arg) so a
+            -- test can assert on the "User: ... | reason: ..." text.
+            return { send = function( _, _, _, _, msg ) _last_report = msg end }
         end
         return nil    -- cmd_help / etc_usercommands absent in the test
     end,
@@ -211,7 +219,7 @@ end
 
 _block_seed = { manual_guy = { "admin", "manual reason", "20260101000000" } }
 _online = { }
-assert( loadfile( "scripts/etc_trafficmanager.lua" ) )( )
+local tm = assert( loadfile( "scripts/etc_trafficmanager.lua" ) )( )
 assert( _registered.onStart, "onStart not registered" )
 _registered.onStart( )
 local onbmsg = _hubcmds.trafficmanager
@@ -351,6 +359,28 @@ do
         eq( "RNT: blocked user   -> PROCESSED", rnt( blocked, clean, { } ), 1 )
         eq( "RNT: nobody blocked -> nil",       rnt( clean,   clean, { } ), nil )
     end
+end
+
+----------------------------------------------------------------------
+-- external add() with a nil scriptname must degrade to msg_unknown,
+-- NOT leak the literal string "nil" into the op report / block_tbl.
+-- An operator's script (usr_upload_speed) called add(nick, nil, reason);
+-- pre-fix `tostring( scriptname ) or msg_unknown` never fell back because
+-- tostring(nil) is the truthy string "nil", so the report showed
+-- "User:  nil" and appended "blocked by scriptname: nil".
+-- RED pre-fix: the three assertions below FAIL (report shows "nil");
+-- PASS patched (report shows msg_unknown = "<UNKNOWN>"). Target offline
+-- so add() takes the plain external path (no target reply / desc flag).
+----------------------------------------------------------------------
+
+do
+    _online = { }                                   -- ScriptProbe is offline
+    _last_report = nil
+    tm.add( "ScriptProbe", nil, "unit reason" )     -- external path, scriptname = nil
+    local r = _last_report or ""
+    eq( "nil-scriptname add: report User is not literal 'nil'", contains( r, "User:  nil" ), false )
+    eq( "nil-scriptname add: no 'scriptname: nil' appended",    contains( r, "scriptname: nil" ), false )
+    eq( "nil-scriptname add: degrades to msg_unknown",          contains( r, "User:  <UNKNOWN>" ), true )
 end
 
 ----------------------------------------------------------------------

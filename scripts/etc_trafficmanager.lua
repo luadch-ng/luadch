@@ -35,6 +35,16 @@
         the block list and accept the corresponding file-transfer
         permission.
 
+        v2.9:
+            - fix a nil-scriptname leak in the external add() / del()
+              API: a caller passing scriptname (or reason) = nil produced
+              a literal "nil" in the op report and block_tbl, because
+              tostring( nil ) is the truthy string "nil" so the intended
+              `... or msg_unknown` fallback never fired. Guarded with
+              `~= nil` before tostring at all three sites. Correct callers
+              (non-nil scriptname/reason) are unaffected. Reported by an
+              operator whose usr_upload_speed passed scriptname = nil.
+
         v2.8:
             - also block the NAT-traversal fallback (DNAT / DRNT, via the
               new onNatTraversal / onNatTraversalReply listeners), not
@@ -228,7 +238,7 @@
 --------------
 
 local scriptname = "etc_trafficmanager"
-local scriptversion = "2.8"
+local scriptversion = "2.9"
 
 local cmd = "trafficmanager"
 local cmd_b = "block"
@@ -712,10 +722,15 @@ add = function( firstnick, scriptname, reason, user )
     --  external-string path was unreachable.
     if ( not scriptname ) or ( scriptname ~= 1 ) then
         otherScript = true --> external block
-        scriptname = tostring( scriptname ) or msg_unknown
+        -- Guard `~= nil` BEFORE tostring: an external caller may pass a
+        -- nil scriptname/reason, and `tostring( nil )` is the truthy
+        -- string "nil", so a bare `tostring( x ) or msg_unknown` fallback
+        -- never fires and leaks a literal "nil" into the op report /
+        -- block_tbl (reported by an operator whose script passed nil).
+        scriptname = scriptname ~= nil and tostring( scriptname ) or msg_unknown
     end
     --> set reason msg
-    reason = tostring( reason ) or msg_unknown
+    reason = reason ~= nil and tostring( reason ) or msg_unknown
     if otherScript then reason = reason .. "  |  blocked by scriptname: " .. scriptname end
     --> Resolve target. The `firstnick` argument may be an unprefixed
     --  registered nick (e.g. from cmd_ban export) or a prefixed
@@ -837,7 +852,8 @@ del = function( firstnick, scriptname, user )
     --  nil) -> external. See add() for the #257 fix rationale.
     if ( not scriptname ) or ( scriptname ~= 1 ) then
         otherScript = true --> external unblock
-        scriptname = tostring( scriptname ) or msg_unknown
+        -- `~= nil` guard before tostring, same nil-leak fix as add().
+        scriptname = scriptname ~= nil and tostring( scriptname ) or msg_unknown
     end
     --> Resolve target (same dual-input handling as add(); closes
     --  upstream luadch/luadch#240).
