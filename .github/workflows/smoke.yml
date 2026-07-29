@@ -178,6 +178,12 @@ jobs:
       - name: Run etc_trafficmanager unit test
         run: lua5.4 tests/unit/etc_trafficmanager_test.lua
 
+      # hub_cmd_manager: C2C level gates. v0.03 NAT-traversal fix -
+      # onNatTraversal/onNatTraversalReply gate DNAT/DRNT by rcm/ctm
+      # level, closing a passive/CGNAT bypass of the CTM/RCM gate.
+      - name: Run hub_cmd_manager unit test
+        run: lua5.4 tests/unit/hub_cmd_manager_test.lua
+
       # #501 etc_lockdown: transient maintenance-mode gate. Stubbed
       # hub.getusers / whitelist + a controllable os.time. Covers the
       # minutes-vs-reason parser, onConnect veto (ISTA 226 + TL), kick-
@@ -571,6 +577,10 @@ jobs:
       - name: Run etc_trafficmanager unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/etc_trafficmanager_test.lua
+
+      - name: Run hub_cmd_manager unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/hub_cmd_manager_test.lua
 
       - name: Run etc_lockdown unit test
         shell: msys2 {0}
