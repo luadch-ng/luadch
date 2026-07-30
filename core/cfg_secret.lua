@@ -124,17 +124,24 @@ local function _read_file( path )
     return content
 end
 
-local function _write_file( path, content )
-    local f, err = io_open( path, "wb" )
-    if not f then return false, err end
-    f:write( content )
-    f:close( )
-    return true
+-- Pure classifier for a POSIX octal mode string (as printed by
+-- `stat -c '%a'`). A secret file is secure iff group and other have
+-- NO access, i.e. the last two octal digits are "00". Owner bits are
+-- unrestricted, so 600, 400 and 700 all pass - 400 (read-only) is in
+-- fact MORE hardened than 600. The old exact-"600" test wrongly
+-- refused a correctly-locked-down 400 key and told the operator to
+-- LOOSEN it. An unrecognisable/short form is treated as secure so a
+-- weird stat output never blocks boot on a false alarm.
+local function _mode_is_secure( mode )
+    if type( mode ) ~= "string" or #mode < 3 then
+        return true
+    end
+    return string_sub( mode, -2 ) == "00"
 end
 
 -- POSIX permissions check on the master key file. Returns:
---   true            -- OK (Linux 0600, or any Windows path)
---   false, message  -- mode wrong on POSIX; caller must abort
+--   true            -- OK (owner-only mode on POSIX, or any Windows path)
+--   false, message  -- group/other has access on POSIX; caller must abort
 -- We shell out to stat(1) because the standalone Lua interpreter has
 -- no native syscall surface; lua-posix would be a new dep.
 --
@@ -152,8 +159,8 @@ local function _check_master_key_perms( path )
     if not p then return true end    -- best-effort; can't check
     local mode = p:read "*l"
     p:close( )
-    if mode and mode ~= "" and mode ~= "600" then
-        return false, "master.key has insecure mode " .. mode .. " (expected 600); refuse to start. fix with: chmod 600 " .. path
+    if mode and mode ~= "" and not _mode_is_secure( mode ) then
+        return false, "master.key has insecure mode " .. mode .. " (group/other must have no access); refuse to start. fix with: chmod 600 " .. path
     end
     return true
 end
@@ -164,6 +171,30 @@ local function _chmod_600( path )
     if _is_windows( ) then return end
     local escaped = "'" .. tostring( path ):gsub( "'", "'\\''" ) .. "'"
     os.execute( "chmod 600 " .. escaped )
+end
+
+-- Atomic secret write: tmp -> chmod 600 -> rename. Mirrors
+-- cert_bootstrap._write_secret / cfg_users saveusers. The real
+-- master.key path appears in one atomic step already at mode 600
+-- (rename preserves the tmp's perms), so a watcher of master.key
+-- never sees a group-readable version - unlike a plain io.open +
+-- chmod-after, which under the daemon umask (027) leaves the fresh
+-- key group-readable until the chmod lands. Also survives a power
+-- loss mid-write without leaving a half-written keyfile.
+local function _write_secret( path, content )
+    local tmp = path .. ".tmp"
+    local f, err = io_open( tmp, "wb" )
+    if not f then return false, err end
+    f:write( content )
+    f:close( )
+    _chmod_600( tmp )       -- restrict BEFORE it becomes the real key
+    os.remove( path )       -- Windows: rename won't overwrite an existing file
+    local ok, rerr = os.rename( tmp, path )
+    if not ok then
+        os.remove( tmp )
+        return false, rerr or "rename failed"
+    end
+    return true
 end
 
 local function init( )
@@ -247,11 +278,10 @@ local function init( )
         local mok, mkdir = pcall( use, "makedir" )
         if mok and type( mkdir ) == "function" then pcall( mkdir, key_dir ) end
     end
-    local ok, werr = _write_file( _key_path, key )
+    local ok, werr = _write_secret( _key_path, key )
     if not ok then
         error( "cfg_secret: cannot write master.key to " .. _key_path .. ": " .. tostring( werr ), 0 )
     end
-    _chmod_600( _key_path )
     _key = key
 end
 
@@ -279,6 +309,9 @@ local function seal( plaintext )
         return nil, "cfg_secret: not initialized"
     end
     local nonce = adclib_random_bytes( NONCE_SIZE )
+    if type( nonce ) ~= "string" or #nonce ~= NONCE_SIZE then
+        return nil, "cfg_secret: RNG failed (nonce)"
+    end
     local ok, ct_with_tag = pcall( adclib_aes_gcm_seal, _key, nonce, plaintext )
     if not ok then
         return nil, "cfg_secret: seal failed: " .. tostring( ct_with_tag )
@@ -314,4 +347,7 @@ return {
     is_active = is_active,
     should_encrypt_writes = should_encrypt_writes,
     is_blob = is_blob,
+
+    -- exposed for unit testing only (see tests/unit/cfg_secret_perms_test.lua)
+    _mode_is_secure = _mode_is_secure,
 }
