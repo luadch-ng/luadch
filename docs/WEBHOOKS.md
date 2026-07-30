@@ -229,7 +229,8 @@ TLS is terminated by the proxy; the hub speaks plain HTTP on loopback.
 | Symptom | Cause / fix |
 |---|---|
 | Log: `endpoint '<name>' has no secret ... skipped` | No secret resolved - set the env var, cfg key, or inline `secret`. |
-| Sender shows **401** | Signature mismatch. The secret differs between sender and hub, or `signature_header` / `signature_prefix` is wrong for that sender. |
+| Sender shows **401**, body `{code:"unauthorized"}` | Signature mismatch on a registered route. The secret differs between sender and hub, or `signature_header` / `signature_prefix` is wrong for that sender. |
+| Sender shows **401**, body `{code:"E_UNAUTHENTICATED"}` | The route is not registered (wrong `<name>` in the URL, endpoint has no resolvable secret, or `etc_webhook` disabled). The router 401s an unknown path (it presents no bearer token) rather than leaking which paths exist - fix the path / secret / plugin toggle, not the signature. |
 | Sender shows **415** | The sender isn't using `Content-Type: application/json`. |
 | **200 but no chat message** | The event isn't in your `events` filter, a `conditions` filter dropped it, there's no `templates` entry for it, or the rendered text is empty. A ping is a 200-with-no-announce by design. |
 | Sender shows **413** | The delivery body exceeds the 64 KiB cap. |

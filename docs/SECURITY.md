@@ -97,8 +97,9 @@ An `admin`-scope HTTP API token can do everything `+masteruser` can
 do, including:
 
 - Read its own and every other admin token's audit-log bodies via
-  `GET /v1/log/api`. Bodies for routes that opt into the §6.8
-  redact mechanism (`audit_redact_body = true` - currently the two
+  `GET /v1/log/api`. Bodies for routes that opt into the
+  [`HTTP_API.md`](HTTP_API.md) §8 redact mechanism
+  (`audit_redact_body = true` - currently the two
   password endpoints) log as `[redacted]` even to admin readers,
   but everything else is plaintext.
 - Issue `POST /v1/restart` / `POST /v1/shutdown` / `POST /v1/reload`.
@@ -776,7 +777,7 @@ TLS configuration in [`core/cfg_defaults.lua`](../core/cfg_defaults.lua):
 
 - Protocol: TLS 1.3 (`tlsv1_3`)
 - Cipher list: `"HIGH+kEDH:HIGH+kEECDH:HIGH:!PSK:!SRP:!3DES:!aNULL"` (excludes PSK / SRP / 3DES / anonymous suites)
-- Disabled: SSLv2, SSLv3
+- Disabled: SSLv2, SSLv3, TLS 1.0, TLS 1.1, and renegotiation (`options = { "no_sslv2", "no_sslv3", "no_tlsv1", "no_tlsv1_1", "no_renegotiation" }`)
 - Peer-cert verify: off (correct for the server-side ADC role -
   clients are unauthenticated at the TLS layer; auth happens at the
   ADC HPAS layer)

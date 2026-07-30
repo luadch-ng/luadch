@@ -527,7 +527,7 @@ differs. `actor.sid = "<http>"` for events fired via the HTTP API
 (`target`, `reason`, `meta`, `display_nick`) are dropped when
 empty so the on-disk shape stays compact.
 
-**Action vocabulary (25 names across 20 plugins):**
+**Action vocabulary:**
 `ban.add`, `ban.remove`, `ban.clear`, `ban.history.clear`,
 `gag.add`, `gag.remove`, `user.kick`, `user.redirect`,
 `user.mass.kick`, `reg.add`, `reg.remove`, `reg.update`,
