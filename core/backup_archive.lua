@@ -63,7 +63,6 @@ local error        = use "error"
 local pcall        = use "pcall"
 local tostring     = use "tostring"
 local tonumber     = use "tonumber"
-local load         = use "load"
 local pairs        = use "pairs"
 local ipairs       = use "ipairs"
 
@@ -80,10 +79,6 @@ local string_match  = string.match
 local table        = use "table"
 local table_concat = table.concat
 local table_sort   = table.sort
-
--- debug.sethook is used ONLY to bound the manifest-eval work (see
--- _manifest_parse); the standard way to cap untrusted Lua execution.
-local debug_sethook = ( use "debug" ).sethook
 
 --// extern libs //--
 
@@ -124,7 +119,6 @@ local MAX_NAME           = 100      -- ustar name field (no prefix-split yet)
 
 local MANIFEST_NAME      = "MANIFEST"
 local MANIFEST_MAX_BYTES = 65536    -- a real manifest is a handful of scalars
-local MANIFEST_MAX_INSTR = 200000   -- eval work ceiling (real parse ~dozens)
 local MODE_0644          = 420      -- rw-r--r-- (caller passes per-file modes)
 
 local ZERO_BLOCK         = string_rep( "\0", TAR_BLOCK )
@@ -320,7 +314,8 @@ end
 
 -- Serialise the flat metadata table (scalars + a string->string `kinds`
 -- map) to a deterministic `return { ... }` Lua chunk. %q keeps arbitrary
--- paths / versions safe to load back.
+-- paths / versions safe to decode back (via _manifest_parse's recogniser,
+-- which never executes the chunk).
 local function _manifest_serialize( meta )
     local keys = { }
     for k in pairs( meta ) do keys[ #keys + 1 ] = k end
@@ -347,28 +342,140 @@ local function _manifest_serialize( meta )
     return table_concat( lines, "\n" )
 end
 
--- Parse a manifest chunk in a sandboxed empty environment (text only, no
--- globals) - same protection as util.loadtable_string, PLUS a work bound.
--- The empty _ENV blocks code execution, but a crafted manifest (a foreign
--- archive whose passphrase the operator holds) could still `while true do end`
--- and hang the offline restore. An instruction-count hook aborts any chunk
--- that runs past a budget far above a real table construction; because the
--- env is empty the chunk cannot reach a long-running C call that would slip
--- the hook, so the count bound is sufficient (DEVELOPMENT.md §5: bound the
--- WORK, not just the depth).
+-- Parse a manifest WITHOUT executing it. _manifest_serialize emits a fixed
+-- grammar - `return { [<qstr>] = <scalar>, ..., kinds = { [<qstr>] = <qstr>,
+-- ... } }` - so this small hand-written recogniser rebuilds the table and
+-- rejects anything outside that grammar. A crafted manifest (a foreign
+-- archive whose passphrase the operator holds) can neither execute code nor
+-- run unbounded work: the scan is linear over the already size-capped input
+-- and every path advances `pos` or returns.
+--
+-- Replaces a load()+instruction-count-hook approach. The count hook did NOT
+-- tick inside a C-library call, and Lua's per-state string metatable is
+-- reachable from any chunk regardless of an empty _ENV, so `("x"):rep(2^30)`
+-- slipped the bound (a single huge alloc). A recogniser that never runs the
+-- input closes that class for good.
 local function _manifest_parse( str )
     if type( str ) ~= "string" or #str > MANIFEST_MAX_BYTES then
         return nil, "manifest: missing or too large"
     end
-    local fn, err = load( str, "backup_manifest", "t", { } )
-    if not fn then return nil, "manifest: " .. tostring( err ) end
-    debug_sethook( function( ) error( "manifest: instruction budget exceeded", 0 ) end, "", MANIFEST_MAX_INSTR )
-    local ok, tbl = pcall( fn )
-    debug_sethook( )   -- always clear the hook, success or not
-    if not ok or type( tbl ) ~= "table" then
-        return nil, "manifest: invalid table"
+    local n = #str
+    local pos = 1
+
+    local function skip_ws( )
+        pos = pos + #string_match( str, "^[ \t\r\n]*", pos )
     end
-    return tbl
+    local function accept( lit )
+        if string_sub( str, pos, pos + #lit - 1 ) == lit then
+            pos = pos + #lit
+            return true
+        end
+        return false
+    end
+    -- Decode one %q-quoted string at str[pos] (must start with `"`).
+    -- %q escapes: \" \\ , LF as backslash+LF, other control bytes as \ddd.
+    local function qstring( )
+        if string_sub( str, pos, pos ) ~= '"' then return nil end
+        pos = pos + 1
+        local out = { }
+        while pos <= n do
+            local ch = string_sub( str, pos, pos )
+            if ch == '"' then
+                pos = pos + 1
+                return table_concat( out )
+            elseif ch == '\\' then
+                local e = string_sub( str, pos + 1, pos + 1 )
+                if e == '"' or e == '\\' then
+                    out[ #out + 1 ] = e
+                    pos = pos + 2
+                elseif e == '\n' then
+                    out[ #out + 1 ] = '\n'
+                    pos = pos + 2
+                else
+                    local dec = string_match( str, "^\\(%d%d?%d?)", pos )
+                    if not dec then return nil end    -- unknown escape
+                    local b = tonumber( dec )
+                    if b > 255 then return nil end
+                    out[ #out + 1 ] = string_char( b )
+                    pos = pos + 1 + #dec
+                end
+            else
+                out[ #out + 1 ] = ch
+                pos = pos + 1
+            end
+        end
+        return nil    -- unterminated
+    end
+
+    skip_ws( )
+    if not accept( "return" ) then return nil, "manifest: expected 'return'" end
+    skip_ws( )
+    if not accept( "{" ) then return nil, "manifest: expected '{'" end
+
+    local result = { }
+    while true do
+        skip_ws( )
+        if accept( "}" ) then break end
+
+        -- key: [<qstr>]  OR  the bareword `kinds` (serializer's one exception)
+        local is_kinds = false
+        local key
+        if accept( "[" ) then
+            skip_ws( )
+            key = qstring( ); if key == nil then return nil, "manifest: bad key" end
+            skip_ws( ); if not accept( "]" ) then return nil, "manifest: expected ']'" end
+        elseif accept( "kinds" ) then
+            is_kinds = true
+        else
+            return nil, "manifest: unexpected token"
+        end
+
+        skip_ws( ); if not accept( "=" ) then return nil, "manifest: expected '='" end
+        skip_ws( )
+
+        if is_kinds then
+            if not accept( "{" ) then return nil, "manifest: expected kinds table" end
+            local kinds = { }
+            while true do
+                skip_ws( )
+                if accept( "}" ) then break end
+                if not accept( "[" ) then return nil, "manifest: bad kinds key" end
+                skip_ws( )
+                local kk = qstring( ); if kk == nil then return nil, "manifest: bad kinds key" end
+                skip_ws( ); if not accept( "]" ) then return nil, "manifest: expected ']'" end
+                skip_ws( ); if not accept( "=" ) then return nil, "manifest: expected '='" end
+                skip_ws( )
+                local vv = qstring( ); if vv == nil then return nil, "manifest: kinds value must be a string" end
+                kinds[ kk ] = vv
+                skip_ws( ); accept( "," )
+            end
+            result.kinds = kinds
+        elseif string_sub( str, pos, pos ) == '"' then
+            local v = qstring( ); if v == nil then return nil, "manifest: bad string value" end
+            result[ key ] = v
+        else
+            -- number or boolean bareword. `+`/`e`/`.` are allowed so
+            -- tostring's scientific form (e.g. "1e+20") round-trips;
+            -- anything tonumber rejects (and non true/false) is refused,
+            -- so an expression like `1+1` is never evaluated.
+            local word = string_match( str, "^[%w%.%+%-]+", pos )
+            if not word then return nil, "manifest: bad value" end
+            pos = pos + #word
+            if word == "true" then result[ key ] = true
+            elseif word == "false" then result[ key ] = false
+            else
+                local num = tonumber( word )
+                if num == nil then return nil, "manifest: bad value" end
+                result[ key ] = num
+            end
+        end
+
+        skip_ws( ); accept( "," )    -- comma optional (trailing allowed)
+    end
+
+    skip_ws( )
+    if pos <= n then return nil, "manifest: trailing data" end
+    return result
 end
 
 ----------------------------------// PACK / UNPACK //--
