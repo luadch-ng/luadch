@@ -103,6 +103,20 @@ int utf8ToWc(const char* str, wchar_t& c) {
                         return -bytes;
                 }
 
+                // Reject overlong 2- and 3-byte encodings (e.g. C0 80 for
+                // NUL): a code point encoded in more bytes than its canonical
+                // minimum is invalid UTF-8, and left unrejected it desyncs
+                // sanitizeUtf8 (source advances by `bytes`, target by fewer).
+                // The check is bounded to 2/3 bytes on purpose: the 4-byte
+                // minimum 0x10000 does not fit a 16-bit wchar_t (Windows),
+                // where forcing it would over-reject valid 4-byte UTF-8.
+                // 4-byte overlong is exotic and the append below stops any
+                // desync crash on every platform regardless.
+                if ((bytes == 2 && c < 0x80) || (bytes == 3 && c < 0x800)) {
+                        c = 0xfffd;
+                        return -bytes;
+                }
+
                 return bytes;
         } else if ((c0 & 0x80) == 0) {             // 0xxx xxxx
                 c = static_cast<unsigned char>(str[0]);
@@ -145,7 +159,12 @@ std::string sanitizeUtf8(const std::string& str) noexcept {
                 wchar_t c = 0;
                 int x = utf8ToWc(str.c_str() + i, c);
                 if (x < 0) {
-                        tgt.insert(i, abs(x), '_');
+                        // append at the target's end, not at source index i:
+                        // i tracks the SOURCE position and can exceed
+                        // tgt.length() once any byte re-encodes shorter than it
+                        // decoded, making insert(i,...) throw std::out_of_range
+                        // across this noexcept boundary (std::terminate).
+                        tgt.append(abs(x), '_');
                 } else {
                         wcToUtf8(c, tgt);
                 }
@@ -171,7 +190,14 @@ bool validateUtf8(const std::string& str) noexcept {
 int sanitize_utf8(lua_State* L)
 {
     size_t length;
-    std::string buf = luaL_checklstring(L, 1, &length);
+    // length-aware: the const char* form stops at the first NUL and
+    // discards the fetched length, so an embedded NUL would smuggle
+    // unvalidated post-NUL bytes past this gate (F-C-3, as hash_* note).
+    // Fetch the pointer in its own statement: argument-evaluation order
+    // is unspecified, so reading `length` in the same expression that
+    // sets it would be UB (garbage length -> bad_alloc).
+    const char* raw = luaL_checklstring(L, 1, &length);
+    std::string buf(raw, length);
     std::string result = sanitizeUtf8(buf);
     lua_pushlstring(L, result.c_str(), result.length());
     return 1;
@@ -180,7 +206,11 @@ int sanitize_utf8(lua_State* L)
 int is_valid_utf8(lua_State* L)
 {
     size_t length;
-    std::string buf = luaL_checklstring(L, 1, &length);
+    // length-aware: see sanitize_utf8 (incl. the eval-order note). isutf8
+    // is the incoming-data gate (hub.lua incoming path); a NUL-truncated
+    // validation would pass a line whose post-NUL bytes were never checked.
+    const char* raw = luaL_checklstring(L, 1, &length);
+    std::string buf(raw, length);
     validateUtf8(buf) ? lua_pushboolean(L, 1) : lua_pushboolean(L, 0);
     return 1;
 }
@@ -417,7 +447,12 @@ int aes_gcm_open(lua_State* L)
 
 int escape(lua_State* L)
 {
-    std::string s = (std::string) luaL_optstring(L, 1, "");
+    // length-aware: luaL_optstring stops at the first NUL, silently
+    // dropping the rest of the value; optlstring keeps embedded NULs.
+    // Separate statement: see sanitize_utf8's eval-order note.
+    size_t s_len;
+    const char* raw = luaL_optlstring(L, 1, "", &s_len);
+    std::string s(raw, s_len);
     std::string out = "";
     out.reserve(out.length() + static_cast<size_t>(s.length()*1.1));
     std::string::const_iterator send = s.end();
@@ -447,6 +482,11 @@ int gen_self_signed_cert(lua_State* L)
 {
     ERR_clear_error();    // start with empty per-thread OpenSSL error queue
 
+    // luaL_checkstring (not the length-aware form) is correct here: cn is
+    // handed to X509_NAME_add_entry_by_txt below with len -1, i.e. OpenSSL
+    // reads it as a NUL-terminated C-string, so any embedded NUL truncates
+    // downstream regardless. cn is also operator-supplied (hub hostname),
+    // not network input.
     const char* cn = luaL_checkstring(L, 1);
     lua_Integer days_in = luaL_checkinteger(L, 2);
 
@@ -677,7 +717,11 @@ int constant_time_eq(lua_State* L)
 // trailing backslash at end-of-string (also previously dropped).
 int unescape(lua_State* L)
 {
-    std::string s = (std::string) luaL_optstring(L, 1, "");
+    // length-aware: see escape() - keep embedded NULs instead of
+    // truncating the value at the first one (incl. the eval-order note).
+    size_t s_len;
+    const char* raw = luaL_optlstring(L, 1, "", &s_len);
+    std::string s(raw, s_len);
     std::string out = "";
     out.reserve(out.length() + static_cast<size_t>(s.length()*1.1));
     std::string::const_iterator send = s.end();

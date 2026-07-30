@@ -1012,14 +1012,20 @@ parse = function( data )
 
     local len = header.len
 
-    if eol < len then
+    -- Need the fourcc plus `len` header params, i.e. eol >= len + 1.
+    -- `eol < len` accepted eol == len (fourcc + one short) for the
+    -- 2-field classes (F/D/E), letting the loop below read a nil param.
+    if eol < len + 1 then
         out_put( "adc.lua: function 'parse': adc message to short" )
         return nil
     end
 
     for i, regex in ipairs( header ) do
         local param = buffer[ i + 1 ]
-        if not regex( param ) then
+        -- param == nil guard mirrors the positional loop (F-PRS-7): the
+        -- header validators (_regex.sid / _regex.feature) throw on nil,
+        -- and that throw is uncaught up to the main loop.
+        if param == nil or not regex( param ) then
             out_put( "adc.lua: function 'parse': invalid value in header '", fourcc, "': ", param )
             return nil
         end

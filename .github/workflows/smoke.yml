@@ -48,6 +48,9 @@ jobs:
       - name: Run iostream unit test
         run: lua5.4 tests/unit/iostream_test.lua
 
+      - name: Run adc parse header unit test
+        run: lua5.4 tests/unit/adc_parse_header_test.lua
+
       # Phase 8 S5 BLOM bloom filter (pure Lua, same rationale as
       # the iostream test).
       - name: Run bloom unit test
@@ -431,6 +434,15 @@ jobs:
           cd build/install/luadch
           LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/adclib_hashpas_test.lua
 
+      # adclib UTF-8 handling: overlong-encoding rejection + sanitize_utf8
+      # append-not-insert (no std::terminate) + length-aware lstring ctors
+      # (no NUL truncation). Same install-tree + bundled-liblua requirement,
+      # so Linux-only.
+      - name: Run adclib_utf8 unit test
+        run: |
+          cd build/install/luadch
+          LD_LIBRARY_PATH=. lua5.4 ../../../tests/unit/adclib_utf8_test.lua
+
       # zlib_stream.gunzip() C round-trip (GeoIP auto-update precursor).
       # Same install-tree + bundled-liblua requirement as adclib above, so
       # Linux-only (msys2 lua segfaults loading our C modules).
@@ -497,6 +509,10 @@ jobs:
       - name: Run iostream unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/iostream_test.lua
+
+      - name: Run adc parse header unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/adc_parse_header_test.lua
 
       - name: Run bloom unit test
         shell: msys2 {0}
