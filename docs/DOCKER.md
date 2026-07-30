@@ -83,7 +83,7 @@ walk-through.
 
 ## Mount layout
 
-The compose file sets up six bind mounts:
+The compose file sets up five bind mounts:
 
 | Host path | Container path | Purpose |
 |---|---|---|
@@ -125,7 +125,7 @@ Full guide: [`docs/BACKUP.md`](BACKUP.md). The Docker essentials:
   environment:
     - LUADCH_ETC_BACKUP_PASSPHRASE=${LUADCH_ETC_BACKUP_PASSPHRASE}
   ```
-  Restart the container. `!backup status` should show "ready".
+  Restart the container. `+backup status` should show "ready".
 - **Where they land:** `./cfg/backups/` on the host (default `etc_backup_dir =
   "cfg/backups"`, inside the already-mounted `./cfg`). No extra volume needed.
 - **Off-site:** the hub only writes locally - mirror `./cfg/backups/` to a
@@ -332,7 +332,7 @@ For `vX.Y.Z` releases pin the tag in `docker-compose.yml` so you don't
 get unexpected jumps:
 
 ```yaml
-image: ghcr.io/luadch-ng/luadch:v3.1.3
+image: ghcr.io/luadch-ng/luadch:v3.1.15
 ```
 
 ### What gets updated automatically

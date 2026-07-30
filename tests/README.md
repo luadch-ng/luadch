@@ -114,9 +114,10 @@ Windows leg (msys2 `lua5.4`, the versioned `lua54` package - the unversioned
 `lua` rolled to Lua 5.5 and broke the suite, #388) before the build+smoke
 step. When you add a unit test you MUST add a step for it to both legs, or
 it is silent non-coverage. (The exceptions are the C-module tests -
-`adclib_unescape_test.lua` and `zlib_stream_test.lua` - which need the built
-C module and so run on the Linux leg only, after install, with
-`LD_LIBRARY_PATH=.`.)
+`adclib_unescape_test.lua`, `adclib_hashpas_test.lua`,
+`adclib_utf8_test.lua`, `zlib_stream_test.lua`, and
+`backup_archive_crypto_test.lua` - which need the built C module and so run
+on the Linux leg only, after install, with `LD_LIBRARY_PATH=.`.)
 
 The unit-test authoring contract + the regression-fail-pre-fix recipe are
 in [`../docs/DEVELOPMENT.md`](../docs/DEVELOPMENT.md) §4.

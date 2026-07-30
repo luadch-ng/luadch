@@ -4,7 +4,7 @@ luadch blocks unwanted connections in two complementary layers:
 
 | Layer | Fires | Handles | Managed by |
 |---|---|---|---|
-| **Pre-handshake IP/CIDR blocklist** | TCP accept, before ADC/TLS | known-bad IPs and CIDR ranges (manual + future feeds) | `+blocklist` ([`SCRIPTS.md`](SCRIPTS.md) etc_blocklist) |
+| **Pre-handshake IP/CIDR blocklist** | TCP accept, before ADC/TLS | known-bad IPs and CIDR ranges (manual + external feeds) | `+blocklist` ([`SCRIPTS.md`](SCRIPTS.md) etc_blocklist) |
 | **Post-handshake bans** | after login | nick / CID / short-term IP bans | `+ban` (cmd_ban) |
 | **GeoIP policy** | on connect, post-handshake | country / ASN policy | `etc_geoip` (this doc) |
 | **Allowlist (whitelist)** | consulted first by every automated blocker | trusted IPs / CIDRs (hublist pingers) exempted | `+whitelist` ([`SCRIPTS.md`](SCRIPTS.md) etc_whitelist) |
@@ -37,8 +37,10 @@ either logs or kicks connections matching your policy.
   after the handshake. It adds nothing to the pre-handshake accept path
   and never bloats the IP blocklist with the thousands of CIDRs a single
   country spans.
-- **Operators are exempt by default** (`etc_geoip_check_levels`) so a
-  wrong country code cannot lock your staff out.
+- **Operators are exempt by default** (`etc_geoip_check_levels` exempts
+  levels 55-80) so a wrong country code cannot lock your staff out. Note
+  the default still geo-checks level 100 (HUBOWNER) - flip `[100]=false`
+  to exempt it too (e.g. to test from a blocked region).
 - **The hub runs fine without a database.** A missing / outdated `.mmdb`
   logs one warning and leaves the checks inert.
 
@@ -204,7 +206,7 @@ snapshot is available read-only at `GET /v1/geoip`.
 | `etc_geoip_blocked_countries` | `{ }` | ISO-3166-1 alpha-2 codes (case-insensitive) |
 | `etc_geoip_blocked_asns` | `{ }` | AS numbers (needs the ASN DB) |
 | `etc_geoip_action` | `"log_only"` | `"log_only"` or `"block"` |
-| `etc_geoip_check_levels` | ops exempt | which user levels are checked |
+| `etc_geoip_check_levels` | levels 55-80 exempt (100 still checked) | which user levels are checked |
 | `etc_geoip_recheck_interval_sec` | `3600` | how often the `.mmdb` is re-read (picks up geoipupdate writes) |
 | `etc_geoip_kick_reason` | "Your region is not permitted..." | kick message (block mode); operator policy text, set it here |
 | `etc_geoip_oplevel` | `80` | min level for `+geoip` |

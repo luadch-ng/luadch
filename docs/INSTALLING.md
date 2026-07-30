@@ -65,8 +65,8 @@ Tighten their permissions so other local users on the host cannot read
 them:
 
 ```sh
-sudo chmod 600 /opt/luadch/cfg/user.tbl
-sudo chmod 600 /opt/luadch/cfg/cfg.tbl     # contains the dummy default password
+sudo chmod 600 /opt/luadch/cfg/user.tbl    # accounts (incl. the dummy default password)
+sudo chmod 600 /opt/luadch/cfg/cfg.tbl     # may hold bot passwords / API tokens / passphrases
 ```
 
 The `log/` directory must be writable by the service user:

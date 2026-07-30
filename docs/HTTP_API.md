@@ -75,7 +75,7 @@ Caps in the framer:
 
 The current S3 framer is a single-shot stage (`done = true` after
 the header parse; subsequent `push` returns `nil` and discards
-trailing bytes - `core/iostream.lua:469-481`). Phase 1 adds a new
+trailing bytes - `core/iostream.lua` `newhttpstage`). Phase 1 adds a new
 post-header state for collecting body bytes, plus a richer emit
 shape. The state machine becomes:
 
@@ -391,7 +391,7 @@ hub.http_register( method, path, scope, handler, meta )
 | `path` | string | URL path including version prefix, e.g. `"/v1/bans"`. Path variables in `{name}` form, e.g. `"/v1/bans/{id}"` |
 | `scope` | string | `"read"`, `"admin"`, or `"none"`. `"none"` skips the router's bearer-token gate - use ONLY when the endpoint does its OWN authentication (e.g. an HMAC-signed webhook receiver, `etc_webhook`); see the §4.4 scope table |
 | `handler` | function | `function(req) -> result` (see §6 + §7) |
-| `meta` | table or nil | Optional metadata - `{plugin=, description=, request_schema=, response_schema=, audit_redact_body=}`. `plugin` is the source plugin name, for `/v1/endpoints` + `/v1/plugins` attribution. Surfaced via `/v1/endpoints` (except `audit_redact_body`, which is router-internal). Used by WebUI for form rendering. `audit_redact_body = true` opts the route into §6.8 audit-body redaction (used by password endpoints) |
+| `meta` | table or nil | Optional metadata - `{plugin=, description=, request_schema=, response_schema=, audit_redact_body=}`. `plugin` is the source plugin name, for `/v1/endpoints` + `/v1/plugins` attribution. Surfaced via `/v1/endpoints` (except `audit_redact_body`, which is router-internal). Used by WebUI for form rendering. `audit_redact_body = true` opts the route into §8 audit-body redaction (used by password endpoints) |
 
 #### 5.1.1 Higher-level helper: `util_http.http_register_user_action`
 
@@ -1019,7 +1019,6 @@ when the named plugin is loaded; 404 `E_NOT_CONFIGURED` otherwise).
 | GET | `/v1/users/{sid}` | read | full INF + session metadata |
 | GET | `/v1/endpoints` | read | live route registry (scope-filtered) |
 | GET | `/v1/log/api` | admin | tail of this API's own audit log; query `?lines=N` (default 200, max 1000); response `{lines, returned, total_lines}` matches sibling tail endpoints |
-| GET | `/v1/log/audit` | admin | tail of today's staff-action audit log (`log/audit-YYYY-MM-DD.jsonl`, #84); query `?lines=N` (default 200, max 1000); response `{lines, returned, total_lines}` matches sibling tail endpoints; multi-day reads are filesystem-side (`jq` / `cat`) by design |
 | GET | `/v1/plugins` | read | list plugins in `cfg.scripts` + runtime state [^http-plugins-1] |
 | PUT | `/v1/plugins/{name}/enabled` | admin | toggle a manageable plugin's enabled flag [^http-plugins-2] |
 | GET | `/v1/config` | read | full cfg snapshot; sensitive keys masked as `<redacted>` [^http-config-1] |
@@ -1030,7 +1029,7 @@ when the named plugin is loaded; 404 `E_NOT_CONFIGURED` otherwise).
 
 [^http-plugins-1]: Returns 200 with `data: {plugins: [...]}`. Each entry: `{name, filename, version, manageable, enabled, loaded, order_index, listeners[], http_routes[]}`. The `enabled` / `manageable` / `order_index` fields reflect the LIVE `cfg.scripts` table (so a PUT-driven mutation is immediately visible on the next GET, without requiring a reload); `loaded` / `version` / `listeners` / `http_routes` reflect what is actually running in memory (those flip after `POST /v1/reload`). `manageable: true` means the cfg.scripts entry is in table-form `{ "name.lua", enabled = bool }` (operator opted-in for API toggling); `manageable: false` means string-form (operator-protected). `version` is extracted via source-grep of `local scriptversion = "..."` at load time; plugins can opt-in to override via `return { _version = "..." }`. Plugins not in cfg.scripts are not listed (no directory scan).
 
-[^http-config-1]: #262. Returns 200 with `data: {config: {key: value, ...}}` containing every key registered in `core/cfg_defaults.lua`. Keys on the denylist (`http_api_tokens`, `master_key_path`) are replaced with the literal string `"<redacted>"`; the actual value is never sent over the wire. No pagination - the cfg snapshot is bounded (~200 keys, ~10-30 KiB JSON). Values are returned in their native types (strings as JSON strings, integers as JSON numbers, booleans, arrays, tables) - whatever `dkjson.encode` produces. Adding a new sensitive key to the denylist is a one-line append in `core/http_router.lua`'s `_config_denylist`.
+[^http-config-1]: #262. Returns 200 with `data: {config: {key: value, ...}}` containing every key registered in `core/cfg_defaults.lua`. Keys on the denylist (`http_api_tokens`, `master_key_path`) are replaced with the literal string `"<redacted>"`; the actual value is never sent over the wire. No pagination - the cfg snapshot is bounded (~200 keys, ~10-30 KiB JSON). Values are returned in their native types (strings as JSON strings, integers as JSON numbers, booleans, arrays, tables) - whatever `dkjson.encode` produces. Redaction is driven by the secrets registry: any key for which `secrets.is_secret_key(key)` is true (see `core/secrets.lua`, populated via `secrets.register(...)`) is masked. Marking a new key sensitive means registering it there, not editing a denylist.
 
 [^http-config-2]: #262. Body `{value: <any JSON type>}`, required. Path variable `{key}` is the bare cfg key name. Mutates via `cfg.set` (validator check + atomic write to `cfg.tbl`). Response carries `apply_status` from a small lookup table in `core/http_router.lua`: `live` (effect on `cfg.set` - default for the ~200 keys not in either bucket); `reload_required` (needs `POST /v1/reload` to apply; currently `scripts`, `language`, plus the path-pointer keys `user_path` / `script_path` / `scripts_cfg_path` / `scripts_lang_path` / `core_lang_path`); `restart_required` (needs full hub restart; currently `tcp_ports`, `ssl_ports`, `tcp_ports_ipv6`, `ssl_ports_ipv6`, `http_port`, `hub_listen`, `master_key_path`, `log_path`, `ssl_params`, `use_ssl`). Returns 403 `E_FORBIDDEN` if `{key}` is on the denylist (sensitive credentials rotate via direct cfg.tbl edit + restart); 404 `E_NOT_FOUND` if the key is not registered in `cfg_defaults.lua`; 400 `E_BAD_INPUT` if body is missing the `value` field OR the validator rejected the value (the validator's err_msg is surfaced in the response). The change is NOT auto-reload-triggered - the operator chains `POST /v1/reload` for reload-required keys, or restarts the hub for restart-required keys. Per-key validator schemas are NOT exposed (the validator closures aren't designed to be introspectable); deferred to a future `GET /v1/config/{key}/schema` endpoint if a real need emerges.
 
@@ -1197,6 +1196,9 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 |---|---|---|---|
 | GET | `/v1/log/error?lines=N` | admin | `cmd_errors` - **migrated (Phase 3 PR-3)** [^http-log-error-1] |
 | GET | `/v1/log/cmd?lines=N` | admin | `etc_cmdlog` - **migrated (Phase 3 PR-4)** [^http-log-cmd-1] |
+| GET | `/v1/log/audit?lines=N` | admin | `etc_auditlog` (#84) [^http-log-audit-1] |
+
+[^http-log-audit-1]: Registered by the `etc_auditlog` plugin, NOT hub-intrinsic - returns 404 `E_NOT_CONFIGURED` when that plugin is disabled. Tail of today's staff-action audit log (`log/audit-YYYY-MM-DD.jsonl`); query `?lines=N` (default 200, max 1000); response `{lines, returned, total_lines}` matches sibling tail endpoints; multi-day reads are filesystem-side (`jq` / `cat`) by design.
 
 [^http-log-error-1]: Query `?lines=N` (default 200, max 1000 per §6.4 tail-style cap). Non-numeric or out-of-range values are clamped to the default, not rejected. Returns 200 with `data: {lines:[...], returned, total_lines}`. `total_lines` is the file's full line count (operators can spot "the last 200 of 1500" at a glance). Missing log file returns 200 with `lines: []` and `total_lines: 0` (matches the ADC path's "No errors." semantic without surfacing a 404 for a file that has not been written yet). The ADC-side `cmd_errors_permission` level table does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
 | DELETE | `/v1/log/{name}` | admin | `etc_log_cleaner` - `{name}` ∈ `error`, `cmd` - **migrated (Phase 3 PR-5)** [^http-log-clean-1] |
@@ -1264,6 +1266,14 @@ is disabled in `cfg.scripts`, the endpoint returns 404
 
 [^http-trafficmgr-4]: No request body. Returns 200 with `data: {action: "unblocked", nick, by, removed: {by, reason, blocked_at}}` per §7.1.1; `removed` is the pre-DELETE entry snapshot for the operator's audit / undo flow. Returns **404 E_NOT_FOUND** if the nick is not manually-blocked (idempotent 200 would mask typos); the same error fires if the nick is only autoblocked by script permissions - the autoblock is a runtime classification, not a stored entry, and lifts only via cfg changes to `blocklevel_tbl` / share thresholds. Cascade on success: block_tbl -= entry, persist, opchat report.send, and if target online: target reply + description-flag removal via `cmd:setnp("DE", new_desc)` + sendtoall BINF. The ADC-side `etc_trafficmanager_masterlevel` gate does NOT apply on the HTTP path: the bearer token's `admin` scope IS the authorisation gate.
 
+#### Webhooks (inbound)
+
+| Method | Path | Scope | Plugin |
+|---|---|---|---|
+| POST | `/v1/webhook/<name>` | none | `etc_webhook` (#398) [^http-webhook-1] |
+
+[^http-webhook-1]: One route per operator-configured endpoint (`<name>` is the endpoint's configured path segment). Scope is `none` - the router does NOT gate it; the plugin authenticates each delivery itself via an HMAC-SHA256 signature over the raw body (see [`WEBHOOKS.md`](WEBHOOKS.md)). Signature mismatch returns **401** with the plugin's own `{code:"unauthorized"}` body; a body over the 64 KiB cap returns **413**; a non-JSON content type returns **415**. Registered only when `etc_webhook` is loaded and the endpoint has a resolvable secret - otherwise the path is absent and an unregistered path falls through to the router's generic 401/404.
+
 #### Shipped post-Phase-4 (#82 arc closed 2026-05-27)
 
 The four "future-scope" items below were shipped in a single day on
@@ -1280,8 +1290,8 @@ above:
   long-poll via deferred-response dispatch (NOT SSE). Listed in
   §10.1.
 - **Filter + sort** (#264 PR-A #270 + PR-B #271) - common helper
-  `core/http_filter.lua` wired into all 8 paginated list
-  endpoints. Per-endpoint allowlist documented in each footnote.
+  `core/http_filter.lua` wired into every paginated list
+  endpoint. Per-endpoint allowlist documented in each footnote.
 
 True SSE (`text/event-stream`) is still deliberately deferred -
 the long-poll handshake covers the WebUI use cases without the
@@ -1412,8 +1422,8 @@ closed; details in their respective PRs / docs.
   `GET /v1/events?since=&types=&wait=`. Polling + long-poll via
   the deferred-response dispatch handshake; NOT SSE.
 - **Filter + sort** - #264 PR-A (#270) + PR-B (#271): shared
-  helper `core/http_filter.lua` wired into all 8 paginated list
-  endpoints. Per-endpoint allowlist documented in each footnote.
+  helper `core/http_filter.lua` wired into every paginated list
+  endpoint. Per-endpoint allowlist documented in each footnote.
 
 ### Still deferred
 
