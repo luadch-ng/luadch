@@ -1,5 +1,0 @@
-return {
-
-    report_msg = "[ NICK PREFIX ]--> Benutzer: %s | IP: %s | wurde gekickt. Grund: %s",
-
-}

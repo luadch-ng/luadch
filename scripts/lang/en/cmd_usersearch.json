@@ -1,0 +1,21 @@
+{
+  "help_desc":"Search for user in reg list",
+  "help_title":"cmd_usersearch.lua",
+  "help_usage":"[+!#]usersearch <SEARCHSTRING>",
+  "msg_days":" days, ",
+  "msg_denied":"You are not allowed to use this command.",
+  "msg_hours":" hours, ",
+  "msg_max_limit":"\n\tMax limit for showing reached, use more specific search string",
+  "msg_minutes":" minutes, ",
+  "msg_no_allowed":"Not allowed to view",
+  "msg_no_matches":"No matches found",
+  "msg_online":"user is online",
+  "msg_redacted":"<REDACTED>",
+  "msg_result":"\n\tNick: %s\n\tLevel: %s\n\tPassword: %s\n\tRegged by: %s\n\tRegged since: %s\n\tLast seen: %s",
+  "msg_result_nick":"\n\tNick: %s",
+  "msg_seconds":" seconds",
+  "msg_unknown":"<UNKNOWN>",
+  "msg_years":" years, ",
+  "ucmd_menu":["Hub","etc","Usersearch"],
+  "ucmd_popup":"Search registered nick"
+}

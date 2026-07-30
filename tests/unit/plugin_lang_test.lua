@@ -33,7 +33,10 @@
 
     Method: enumerate the shipped plugins from `examples/cfg/cfg.tbl`'s
     `scripts` whitelist, and for each one that ships lang files, load both
-    the .en and .de table, scan the plugin source for every `lang.X`
+    the .en and .de table (the JSON `scripts/lang/<lng>/<name>.json` if
+    present, else the legacy flat Lua `scripts/lang/<name>.lang.<lng>` -
+    dual-format, mirroring the runtime loader since the #301 P3 per-language
+    subdir Weblate migration), scan the plugin source for every `lang.X`
     reference, then assert BOTH directions:
       - every X referenced by the source exists in .en and .de, and
       - every key defined in .en / .de is referenced by the source.
@@ -102,6 +105,36 @@ local function load_table( path )
     return t
 end
 
+-- Plugin lang files migrated to JSON in a per-language subdir (#301 P3):
+-- scripts/lang/<lng>/<name>.json. This test mirrors the dual-format runtime
+-- loader (core/cfg_lang.loadlanguage): prefer the JSON file, fall back to the
+-- legacy flat Lua table (scripts/lang/<name>.lang.<lng>), so it keeps passing
+-- whether a given plugin has migrated yet or not.
+local dkjson = assert( loadfile( "dkjson/dkjson.lua" ) )( )
+
+-- Resolve which lang file ships for (name, lng): the subdir .json first, else
+-- the legacy flat Lua table, else nil (plugin ships no lang for that language).
+local function lang_path( name, lng )
+    local json = LANG_DIR .. lng .. "/" .. name .. ".json"
+    if read_text( json ) then return json end
+    local lua = LANG_DIR .. name .. ".lang." .. lng
+    if read_text( lua ) then return lua end
+    return nil
+end
+
+-- Load a lang file in whichever format it is. JSON via the same bundled
+-- dkjson the hub uses; legacy tables via the sandboxed loader above.
+local function load_lang( path )
+    if path:sub( -5 ) == ".json" then
+        local s = read_text( path )
+        if not s then return nil, "cannot read" end
+        local t, _, err = dkjson.decode( s, 1, nil )
+        if err or type( t ) ~= "table" then return nil, err or "did not return a table" end
+        return t
+    end
+    return load_table( path )
+end
+
 -- Strip block comments `--[[ ... ]]` and line comments so a `lang.X` in a
 -- header changelog or an explanatory note cannot register as a lookup.
 local function strip_comments( s )
@@ -146,13 +179,15 @@ check( string.format( "cfg.scripts lists at least %d plugins (found %d)",
 local scanned, total_refs, reverse_checks = 0, 0, 0
 
 for _, name in ipairs( names ) do
-    local en_path = LANG_DIR .. name .. ".lang.en"
     -- Not every plugin ships lang files; those are simply out of scope
-    -- here (nothing to be inconsistent with).
-    if read_text( en_path ) then
+    -- here (nothing to be inconsistent with). Resolve either format.
+    local en_path = lang_path( name, "en" )
+    if en_path then
+        local de_path = lang_path( name, "de" )
         local source = read_text( PLUGIN_DIR .. name .. ".lua" )
-        local en, en_err = load_table( en_path )
-        local de, de_err = load_table( LANG_DIR .. name .. ".lang.de" )
+        local en, en_err = load_lang( en_path )
+        local de, de_err = nil, "no .lang.de"
+        if de_path then de, de_err = load_lang( de_path ) end
 
         check( name .. ": plugin source exists", source ~= nil )
         check( name .. ": .lang.en loads (" .. tostring( en_err ) .. ")", en ~= nil )

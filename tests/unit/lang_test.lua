@@ -2,10 +2,10 @@
 
     tests/unit/lang_test.lua
 
-    Coverage test for the bundled language tables (lang/de.json,
-    lang/en.json - migrated from .tbl to JSON in the #301 P3 Weblate
-    move; the runtime loads them via the dual-format
-    cfg_lang.loadlanguage). Verifies that
+    Coverage test for the bundled language tables (lang/de/hub.json,
+    lang/en/hub.json - migrated from .tbl to JSON and moved into a
+    per-language subdir in the #301 P3 Weblate move; the runtime loads
+    them via the dual-format cfg_lang.loadlanguage). Verifies that
 
       (a) every key required by core (see _REQUIRED below) exists in both
           tables - missing a key would silently fall through to the hardcoded
@@ -45,8 +45,9 @@ local function load_lang( path )
     return t
 end
 
-local de = load_lang( "lang/de.json" )
-local en = load_lang( "lang/en.json" )
+-- Per-language subdir layout (#301 P3): lang/<lng>/hub.json.
+local de = load_lang( "lang/de/hub.json" )
+local en = load_lang( "lang/en/hub.json" )
 
 -- Keys core/hub.lua reads via i18n.* (must exist in BOTH tables, else
 -- the runtime silently falls back to the hardcoded English literal).

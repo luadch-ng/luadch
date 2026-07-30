@@ -355,13 +355,13 @@ The container's entrypoint **auto-syncs the bundled top-level
 directory on every start. Bug-fixes we ship in plugin code reach
 your hub on the next image pull without manual action.
 
-In addition, **new bundled `scripts/lang/*.lang.*` files are
+In addition, **new bundled `scripts/lang/<lng>/*.json` files are
 add-only**: language files that don't exist on your mount get copied
-in, but existing translations are NEVER overwritten. This way a
-release that adds i18n to a previously English-only plugin reaches
-non-English operators without them having to chase down the new
-`.lang.de` / `.lang.fr` files manually, while any operator-customized
-translations stay intact.
+in (creating the language subdir as needed), but existing translations
+are NEVER overwritten. This way a release that adds i18n to a previously
+English-only plugin reaches non-English operators without them having to
+chase down the new `de/<name>.json` / `fr/<name>.json` files manually,
+while any operator-customized translations stay intact.
 
 What is **not** touched:
 
@@ -369,7 +369,7 @@ What is **not** touched:
 |---|---|
 | `cfg/cfg.tbl` | Your settings; new defaults are merged at runtime via the `cfg.get()` fallback path |
 | `cfg/user.tbl`, `cfg/user.tbl.bak` | User database |
-| `scripts/lang/*.lang.*` (existing) | Your translations / MOTD customizations stay; only NEW bundled language files are added |
+| `scripts/lang/<lng>/*.json` (existing) | Your translations / MOTD customizations stay; only NEW bundled language files are added |
 | `scripts/data/*.tbl` | Plugin runtime state (bans, regs, caches) |
 | `scripts/cfg/*.tbl` | Per-plugin operator settings |
 | `scripts/<your-custom>.lua` | Custom plugins keep their distinct filenames - the auto-sync only touches files that exist in the image's `/defaults/scripts/` |
@@ -381,7 +381,7 @@ The entrypoint logs each updated file:
 ```
 [entrypoint] auto-synced bundled script: cmd_nickchange.lua
 [entrypoint] auto-synced 1 bundled scripts from /defaults
-[entrypoint] auto-added new bundled lang file: usr_nick_length.lang.de
+[entrypoint] auto-added new bundled lang file: de/usr_nick_length.json
 [entrypoint] auto-added 1 new bundled lang files from /defaults
 ```
 
@@ -415,9 +415,9 @@ docker compose exec luadch sh -c '
 
 # Find: which bundled lang files are missing on your mount
 docker compose exec luadch sh -c '
-    for f in /defaults/scripts/lang/*.lang.*; do
-        n=$(basename "$f")
-        [ -e "/opt/luadch/scripts/lang/$n" ] || echo "missing: $n"
+    for f in /defaults/scripts/lang/*/*.json; do
+        rel=${f#/defaults/scripts/lang/}          # <lng>/<name>.json
+        [ -e "/opt/luadch/scripts/lang/$rel" ] || echo "missing: $rel"
     done
 '
 
@@ -431,7 +431,7 @@ The recommended pattern for plugin customization is to **add a custom
 filename** rather than editing a bundled file. With that pattern the
 auto-sync is harmless and you can leave it ON.
 
-### Updating `lang/*.lang.*` after a release that changed translations
+### Updating `scripts/lang/<lng>/*.json` after a release that changed translations
 
 Translation files (and other `scripts/<subdir>/` content) are never
 auto-synced because they typically contain operator-customized strings
@@ -446,12 +446,12 @@ matters:
 ```sh
 # Show your file vs the image's
 docker compose exec luadch \
-    diff /opt/luadch/scripts/lang/etc_motd.lang.en \
-         /defaults/scripts/lang/etc_motd.lang.en
+    diff /opt/luadch/scripts/lang/en/etc_motd.json \
+         /defaults/scripts/lang/en/etc_motd.json
 
 # Apply the image version (will overwrite your customizations!)
 docker compose exec luadch \
-    cp /defaults/scripts/lang/etc_motd.lang.en /opt/luadch/scripts/lang/
+    cp /defaults/scripts/lang/en/etc_motd.json /opt/luadch/scripts/lang/en/
 docker compose restart luadch
 ```
 

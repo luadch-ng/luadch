@@ -14,7 +14,7 @@
             - i18n the onFailedAuth reason (operator-facing, lands in
               cmd.log / blacklist scripts) and the ISTA 221 kill message
               (user-facing). Closes the i18n half of #48 for this script.
-              Both strings now route through scripts/lang/usr_nick_length.lang.{en,de}.
+              Both strings now route through scripts/lang/{en,de}/usr_nick_length.json.
 
 ]]--
 

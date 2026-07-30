@@ -13,7 +13,7 @@
 
         v0.12:
             - fix dead German translation: lookup was `lang.msg_minmax`
-              but the .lang.{de,en} files define the key as
+              but the de/en lang files define the key as
               `msg_sharelimits` (introduced in v0.06 with the new output
               msg). The wrong-named lookup always returned nil so the
               `or` fallback to the hardcoded English literal fired on
