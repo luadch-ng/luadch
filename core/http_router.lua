@@ -636,7 +636,12 @@ dispatch = function( framer_unit, source_ip )
     -- A path is "public" if it carries any scope="none" route (e.g.
     -- /health, the webhook receiver). Anonymous OPTIONS introspection
     -- is allowed on such a path; on an auth-gated path it is not (it
-    -- would leak path existence - see the OPTIONS block below).
+    -- would leak path existence - see the OPTIONS block below). This is
+    -- keyed on the concrete request path, and every scope="none" route
+    -- today is an EXACT template (no wildcard), so a public route can
+    -- never over-match an auth-gated concrete path. If a wildcard/
+    -- templated scope="none" route is ever added, revisit: it could
+    -- mark an auth-gated path public and expose its methods to anon.
     local path_has_public_route = false
     for m, paths in pairs( _routes ) do
         for _, r in pairs( paths ) do
