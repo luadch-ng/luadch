@@ -16,6 +16,129 @@ parts than a single cfg key.
 
 ---
 
+## Index
+
+Jump-links to every entry below, grouped by category. Purposes are the
+one-line summary from each entry; see the entry for commands and cfg keys.
+
+### Bot plugins
+
+| Plugin | Purpose |
+|---|---|
+| [bot_opchat](#bot_opchat) | Internal op-chat bot for operator coordination |
+| [bot_pm2ops](#bot_pm2ops) | Routes operator private messages to the opchat bot |
+| [bot_regchat](#bot_regchat) | Registered-user chat with optional message history |
+| [bot_session_chat](#bot_session_chat) | Temporary per-session chats for user collaboration |
+
+### Command plugins
+
+| Plugin | Purpose |
+|---|---|
+| [cmd_accinfo](#cmd_accinfo) | Display extended account details for registered users |
+| [cmd_ban](#cmd_ban) | Ban / unban users by nick, CID, or IP with optional duration and reason |
+| [cmd_delreg](#cmd_delreg) | Delete registrations by nick |
+| [cmd_disconnect](#cmd_disconnect) | Forcefully disconnect a user with optional reason message |
+| [cmd_errors](#cmd_errors) | Display the hub error log to users with sufficient permissions |
+| [cmd_gag](#cmd_gag) | Mute, kennylize (garble), or shadowmute users with optional duration |
+| [cmd_help](#cmd_help) | Central help registry for all operator commands |
+| [cmd_hubinfo](#cmd_hubinfo) | Display comprehensive hub information |
+| [cmd_hubstats](#cmd_hubstats) | Track hub statistics over time (user averages, share, registrations, bans) |
+| [cmd_mass](#cmd_mass) | Broadcast mass messages to all users or specific user levels |
+| [cmd_myinf](#cmd_myinf) | Display own or target user's raw INF command output (client information) |
+| [cmd_myip](#cmd_myip) | Display own or target user's IP address |
+| [cmd_nickchange](#cmd_nickchange) | Change registered user nicknames |
+| [cmd_redirect](#cmd_redirect) | Redirect users to an alternate hub URL based on level or manual command |
+| [cmd_reg](#cmd_reg) | Register new users or add / modify registration descriptions |
+| [cmd_reload](#cmd_reload) | Reload hub configuration, user database, and restart scripts without full hub restart |
+| [cmd_restart](#cmd_restart) | Gracefully restart the hub with optional broadcast message to users |
+| [cmd_rules](#cmd_rules) | Display hub rules to users (sent at login or on command) |
+| [cmd_setpass](#cmd_setpass) | Set or change passwords for registered users |
+| [cmd_shutdown](#cmd_shutdown) | Gracefully shut down the hub with optional broadcast message |
+| [cmd_slots](#cmd_slots) | Display list of all currently connected users with available upload slots |
+| [cmd_sslinfo](#cmd_sslinfo) | Display TLS / SSL connection information for user's client |
+| [cmd_talk](#cmd_talk) | Broadcast messages anonymously without nickname prefix |
+| [cmd_topic](#cmd_topic) | Set or reset the hub topic string |
+| [cmd_upgrade](#cmd_upgrade) | Set or change a registered user's level by SID or nick |
+| [cmd_uptime](#cmd_uptime) | Display hub uptime (session and cumulative since first start) |
+| [cmd_usercleaner](#cmd_usercleaner) | Show and remove inactive or never-used accounts |
+| [cmd_userinfo](#cmd_userinfo) | Display user information (nick, level, IP, features, share, slots) |
+| [cmd_userlist](#cmd_userlist) | List all registered users sorted by level or registration date |
+| [cmd_usersearch](#cmd_usersearch) | Search registered users by partial nick match |
+
+### Etc (utility) plugins
+
+| Plugin | Purpose |
+|---|---|
+| [etc_banner](#etc_banner) | Broadcast periodic banner messages to main chat at configurable intervals |
+| [etc_blacklist](#etc_blacklist) | Maintain and display the blacklist of delreg'd users to prevent re-registration |
+| [etc_chatlog](#etc_chatlog) | Log main chat messages with timestamps, user nicks, and message content |
+| [etc_cmdlog](#etc_cmdlog) | Audit log of all operator `+cmd` invocations (who, what, when) |
+| [etc_dhtblocker](#etc_dhtblocker) | Disconnect users with DHT (Distributed Hash Table) search enabled |
+| [etc_dummy_warning](#etc_dummy_warning) | Warn level-100 admin on login if the default "dummy" account is still registered |
+| [etc_hubcommands](#etc_hubcommands) | Internal registry module for `+cmd` handlers |
+| [etc_aliases](#etc_aliases) | Operator-defined command aliases |
+| [etc_auditlog](#etc_auditlog) | Persistent JSONL audit trail for staff actions |
+| [etc_blocklist](#etc_blocklist) | Operator-facing chat command for the unified pre-handshake IP/CIDR blocklist |
+| [etc_whitelist](#etc_whitelist) | Operator-facing chat command for the global IP/CIDR allowlist |
+| [etc_geoip](#etc_geoip) | Country / ASN policy blocking via a MaxMind GeoLite2 database |
+| [etc_blocklist_feeds](#etc_blocklist_feeds) | External IP/CIDR blocklist feed puller |
+| [etc_proxydetect](#etc_proxydetect) | Live proxy / VPN / Tor detection via an external provider API on connect |
+| [etc_status_push](#etc_status_push) | Periodically pushes the hub's public status to an external HTTP(S) endpoint |
+| [etc_prometheus](#etc_prometheus) | Prometheus text-exposition `/metrics` endpoint for the HTTP API |
+| [etc_regserver_announce](#etc_regserver_announce) | Announces this hub to an external ADC hublist regserver |
+| [etc_clientblocker](#etc_clientblocker) | Block clients by Lua-pattern match against the BINF `AP+VE` field |
+| [etc_keyprint](#etc_keyprint) | Automatically extract and cache hub certificate keyprint (SHA256) for client validation |
+| [etc_log_cleaner](#etc_log_cleaner) | Clean error.log and cmd.log files |
+| [etc_motd](#etc_motd) | Send message-of-the-day to users on login |
+| [etc_msgmanager](#etc_msgmanager) | Block main chat and / or PM for specific user levels |
+| [etc_onfailedauth](#etc_onfailedauth) | Send report when user fails authentication (bad password, IP ban, etc) |
+| [etc_records](#etc_records) | Track and display hub records (peak users, largest user share, etc) |
+| [etc_report](#etc_report) | Internal library for sending operator reports to hub bot and / or opchat |
+| [etc_trafficmanager](#etc_trafficmanager) | Block downloads, uploads, and searches for specific users |
+| [etc_unknown_command](#etc_unknown_command) | Reject mistyped or malformed commands in main chat with helpful error message |
+| [etc_usercommands](#etc_usercommands) | Internal registry module for client right-click context menus |
+| [etc_userlogininfo](#etc_userlogininfo) | Display detailed user connection info on login |
+| [etc_webhook](#etc_webhook) | Inbound webhook receiver: an external service POSTs an HMAC-signed JSON body, announced in chat as a named bot |
+| [etc_backup](#etc_backup) | Automatic encrypted local backups of the hub's restore-critical state, rotated on a schedule |
+| [etc_forcetlstransfer](#etc_forcetlstransfer) | Force TLS-encrypted client-to-client transfers (force ADCS) |
+| [etc_lockdown](#etc_lockdown) | Transient maintenance-mode access gate: temporarily admit only users at or above a given level |
+
+### Hub management plugins
+
+| Plugin | Purpose |
+|---|---|
+| [hub_bot_cleaner](#hub_bot_cleaner) | Remove unused bot accounts from user database on timer |
+| [hub_cmd_manager](#hub_cmd_manager) | Enforce permission levels on direct ADC commands (EMSG, DMSG, SCH, etc) |
+| [hub_inf_manager](#hub_inf_manager) | Validate user INF flags on connect and broadcast |
+| [hub_runtime](#hub_runtime) | Track cumulative hub runtime (survives restarts) and provide show / reset commands |
+| [hub_user_lastseen](#hub_user_lastseen) | Update `lastseen` timestamp in user database on periodic timer |
+
+### User restriction plugins
+
+| Plugin | Purpose |
+|---|---|
+| [usr_desc_prefix](#usr_desc_prefix) | Prepend level-based prefix to user descriptions (e.g. `[VIP]`, `[MOD]`) |
+| [usr_hide_share](#usr_hide_share) | Hide share size for specified user levels |
+| [usr_hubs](#usr_hubs) | Enforce minimum / maximum hub count per level |
+| [usr_nick_length](#usr_nick_length) | Enforce min / max nickname length on connect and INF updates |
+| [usr_nick_prefix](#usr_nick_prefix) | Prepend level-based prefix to user nicknames (e.g. `[Op]Bob`, `[VIP]Alice`) |
+| [usr_share](#usr_share) | Enforce minimum / maximum share per user level |
+| [usr_slots](#usr_slots) | Enforce minimum / maximum upload slots per user level |
+| [usr_uptime](#usr_uptime) | Track per-user session and cumulative online time |
+
+### Rate-limit configuration
+
+| Section | Purpose |
+|---|---|
+| [What it protects](#what-it-protects) | The buckets the limiter protects, with their limits and defaults |
+| [Op-level bypass](#op-level-bypass) | Users at or above this level skip all per-user checks |
+| [Tier overlay (per-userlevel limits)](#tier-overlay-per-userlevel-limits) | By default every non-op user uses the same scalar bucket settings |
+| [Default tuning rationale](#default-tuning-rationale) | Why each per-user bucket default is sized the way it is |
+| [Throttle behaviour - important plugin contract note](#throttle-behaviour---important-plugin-contract-note) | When a bucket is exhausted the dispatcher suppresses both the message fan-out and the plugin listener chain |
+| [Bucket disable](#bucket-disable) | To disable a single bucket, raise its limit very high |
+
+---
+
 ## Bot plugins
 
 ### bot_opchat
