@@ -37,9 +37,15 @@
     present, else the legacy flat Lua `scripts/lang/<name>.lang.<lng>` -
     dual-format, mirroring the runtime loader since the #301 P3 per-language
     subdir Weblate migration), scan the plugin source for every `lang.X`
-    reference, then assert BOTH directions:
-      - every X referenced by the source exists in .en and .de, and
-      - every key defined in .en / .de is referenced by the source.
+    reference, then assert:
+      - forward: every X the source reads exists in EN, the source of
+        truth (this is the usr_share / etc_cmdlog bug class);
+      - reverse: every EN key is read by the source (no dead key); and
+      - DE is translator-managed via Weblate, so it may be incomplete - it
+        gets NO missing-key check (an untranslated key falls back to EN),
+        only that it carries no ORPHAN key (every de key exists in en) and
+        that each string it DOES translate keeps en's placeholder
+        signature (same conversion types in the same order).
 
     Four traps this deliberately avoids:
       - Do NOT assert the value is a string. Plenty of legitimate keys are
@@ -143,6 +149,21 @@ local function strip_comments( s )
     return s
 end
 
+-- Ordered signature of printf conversions: the sequence of conversion-type
+-- letters (`%s`->"s", `%-20d`->"d") after removing the literal `%%`. Lua
+-- string.format fills arguments positionally, so a translated de string
+-- must keep en's exact TYPE and ORDER, not just the count - a word-order
+-- swap of `"%s ... %d"` into `"%d ... %s"` has the same count but crashes
+-- string.format at runtime.
+local function fmt_sig( s )
+    s = ( s:gsub( "%%%%", "" ) )
+    local out = { }
+    for spec in s:gmatch( "%%[%-+ #0-9.]*([%a])" ) do
+        out[ #out + 1 ] = spec
+    end
+    return table.concat( out )
+end
+
 local failures, checks = 0, 0
 local function check( label, ok )
     checks = checks + 1
@@ -191,20 +212,31 @@ for _, name in ipairs( names ) do
 
         check( name .. ": plugin source exists", source ~= nil )
         check( name .. ": .lang.en loads (" .. tostring( en_err ) .. ")", en ~= nil )
+        -- The de FILE is required to exist and load: a bundled plugin ships
+        -- en + de together (DEVELOPMENT.md "all-or-nothing"), and de is
+        -- authored, not created by Weblate. Its CONTENT may be partial (an
+        -- empty `{}` de file passes) - only its presence is enforced, so a
+        -- plugin author who forgot de is still caught.
         check( name .. ": .lang.de exists and loads (" .. tostring( de_err ) .. ")", de ~= nil )
 
         if source and en and de then
             scanned = scanned + 1
             local seen = { }
+            -- Forward: EN is the source of truth. A key the plugin reads
+            -- MUST exist in EN (the usr_share / etc_cmdlog bug class: source
+            -- reads lang.X, the file defines a differently-named key, the
+            -- `or "<english>"` fallback silently fires forever). DE is NOT
+            -- checked here - it is translator-managed (Weblate) and may be
+            -- incomplete; an untranslated key is absent and the runtime
+            -- falls back to EN, which the forward check already guarantees.
             for key in strip_comments( source ):gmatch( "lang%.%s*([%w_]+)" ) do
                 if not seen[ key ] then
                     seen[ key ] = true
                     total_refs = total_refs + 1
-                    check( name .. ": lang." .. key .. " defined in .lang.en", en[ key ] ~= nil )
-                    check( name .. ": lang." .. key .. " defined in .lang.de", de[ key ] ~= nil )
+                    check( name .. ": lang." .. key .. " defined in en (source)", en[ key ] ~= nil )
                 end
             end
-            -- Reverse direction. A key no plugin reads is invisible rot:
+            -- Reverse (dead EN key). A key no plugin reads is invisible rot:
             -- translators keep maintaining it, reviewers keep reading it as
             -- live, and nothing ever fires. The forward check above cannot
             -- see it, which is how 22 of them accumulated by #447 PR 6.
@@ -216,11 +248,21 @@ for _, name in ipairs( names ) do
             -- form, or it will report a live key as dead.
             for key in pairs( en ) do
                 reverse_checks = reverse_checks + 1
-                check( name .. ": .lang.en key '" .. key .. "' is read by the plugin", seen[ key ] == true )
+                check( name .. ": en key '" .. key .. "' is read by the plugin", seen[ key ] == true )
             end
-            for key in pairs( de ) do
+            -- DE is translator-managed: only require it has NO ORPHAN keys
+            -- (every de key must exist in en - a key the source dropped is
+            -- dead translation), and that every string it DOES translate
+            -- keeps en's placeholder signature - same conversion types in
+            -- the same order (a reordered or dropped %s breaks
+            -- string.format; Weblate flags this too, CI is the backstop).
+            for key, v in pairs( de ) do
                 reverse_checks = reverse_checks + 1
-                check( name .. ": .lang.de key '" .. key .. "' is read by the plugin", seen[ key ] == true )
+                check( name .. ": de key '" .. key .. "' exists in en (no orphan)", en[ key ] ~= nil )
+                if type( v ) == "string" and v ~= "" and type( en[ key ] ) == "string" then
+                    check( name .. ": de." .. key .. " placeholder signature matches en",
+                           fmt_sig( v ) == fmt_sig( en[ key ] ) )
+                end
             end
         end
     end

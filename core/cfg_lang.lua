@@ -29,6 +29,7 @@ local util_loadtable = util.loadtable
 local util_loadjsontable = util.loadjsontable
 
 local tostring = use "tostring"
+local pairs = use "pairs"
 
 -- Late-bound: see header comment.
 local out_error
@@ -37,10 +38,20 @@ local function bind_late()
     out_error = use("out").error
 end
 
--- Currently a no-op pass-through. The original cfg.lua had a commented
--- out per-key utf-8 validator; preserving the function shape here
--- means future validation can be re-added without touching callers.
+-- Drop keys whose value is an empty string. Weblate writes "" for an
+-- UNTRANSLATED string in a monolingual JSON file; without this an empty
+-- de value would shadow the English fallback, because every call site
+-- uses `lang.key or "<english>"` and in Lua "" is truthy (so "" or "x"
+-- is ""), which would show a blank line instead of the English text.
+-- Removing the key makes lang.key nil, so the fallback fires. No bundled
+-- lang string is legitimately empty (verified), and an empty user-facing
+-- string would be meaningless anyway. Nested tables (ucmd_menu*,
+-- month_name) are left untouched. Setting an existing field to nil during
+-- pairs() is allowed in Lua 5.4 (only ADDING keys mid-traversal is not).
 local function checklanguage( lang )
+    for k, v in pairs( lang ) do
+        if v == "" then lang[ k ] = nil end
+    end
     return lang
 end
 
