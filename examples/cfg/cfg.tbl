@@ -460,11 +460,6 @@ return { -- the settings are a lua table, do not tough this!
     etc_aliases_llevel = 60,  -- min level to get a report? (only for hubbot msg) (integer)
 
     ---------------------------------------------------------------------------------------------------------------------------------
-    --// cmd_ascii.lua settings | this script adds a command to send ascii pictures to main chat
-
-    cmd_ascii_minlevel = 20,  -- min level to send ascii pictures to main? (integer)
-
-    ---------------------------------------------------------------------------------------------------------------------------------
     --// cmd_disconnect.lua settings | this script adds a command to disconnect users from hub
 
     cmd_disconnect_minlevel = 60,  -- min level to use this cmd? (integer)
@@ -1641,7 +1636,6 @@ return { -- the settings are a lua table, do not tough this!
         "cmd_reload.lua",
         "cmd_restart.lua",
         "cmd_shutdown.lua",
-        "cmd_ascii.lua",
         "cmd_gag.lua",  -- using report import
         "cmd_sslinfo.lua",
         "etc_hubcommands.lua",

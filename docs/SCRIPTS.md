@@ -74,15 +74,6 @@ description and timestamps.
 `show_reguser_password`, `etc_msgmanager_activate`,
 `etc_trafficmanager_activate`, `etc_trafficmanager_flag_blocked`
 
-### cmd_ascii
-
-Send ASCII art pictures to main chat. List of available art defined
-in language files.
-
-**Commands:** `+ascii <artname>`
-
-**Config:** `cmd_ascii_minlevel`
-
 ### cmd_ban
 
 Ban / unban users by nick, CID, or IP with optional duration and

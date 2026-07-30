@@ -1036,15 +1036,6 @@ local defaults = {
     },
 
     ---------------------------------------------------------------------------------------------------------------------------------
-    --// cmd_ascii.lua settings
-
-    cmd_ascii_minlevel = { 20,
-        function( value )
-            return types_number( value, nil, true )
-        end
-    },
-
-    ---------------------------------------------------------------------------------------------------------------------------------
     --// cmd_slots.lua settings
 
     cmd_slots_minlevel = { 0,
@@ -4447,7 +4438,6 @@ local defaults = {
         "cmd_reload.lua",
         "cmd_restart.lua",
         "cmd_shutdown.lua",
-        "cmd_ascii.lua",
         "cmd_gag.lua",
         "cmd_sslinfo.lua",
         "etc_hubcommands.lua",
