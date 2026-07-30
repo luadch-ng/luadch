@@ -58,7 +58,7 @@ local _real = {
     type = type, load = load, table = table, pairs = pairs,
     pcall = pcall, select = select, ipairs = ipairs,
     tostring = tostring, tonumber = tonumber, loadfile = loadfile,
-    setmetatable = setmetatable,
+    setmetatable = setmetatable, getmetatable = getmetatable,
     io = _io_stub, math = math, string = string, os = os,
     package = package,
     adclib = _adclib_stub, unicode = _unicode_stub,

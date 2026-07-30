@@ -144,6 +144,20 @@ jobs:
       - name: Run plugin lang unit test
         run: lua5.4 tests/unit/plugin_lang_test.lua
 
+      # #301 P3: the sandboxed JSON table loader (util.loadjsontable) that
+      # backs the lang Lua->JSON / Weblate migration. Asserts valid JSON
+      # decodes (format specifiers intact), a MISSING file is silent (no
+      # error.log spam during the incremental migration), and a malformed
+      # / non-utf8 / non-object / unsafe-path file is a logged fault.
+      - name: Run util loadjsontable unit test
+        run: lua5.4 tests/unit/util_loadjsontable_test.lua
+
+      # #301 P3: cfg_lang.loadlanguage dual-format contract - JSON path is
+      # probed first, the legacy .tbl / .lang.X is the fallback, path shapes
+      # are correct for both core and plugin lang files.
+      - name: Run cfg_lang dual-format unit test
+        run: lua5.4 tests/unit/cfg_lang_dualformat_test.lua
+
       # #327 etc_aliases: HTTP API surface + reload-safety. Exercises
       # all four +addalias reject branches (bad_alias / conflict_command
       # / exists / no_target), GET sorting, DELETE happy + not_found,
@@ -576,6 +590,14 @@ jobs:
       - name: Run plugin lang unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/plugin_lang_test.lua
+
+      - name: Run util loadjsontable unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/util_loadjsontable_test.lua
+
+      - name: Run cfg_lang dual-format unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/cfg_lang_dualformat_test.lua
 
       - name: Run etc_aliases unit test
         shell: msys2 {0}
