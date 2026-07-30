@@ -3799,6 +3799,40 @@ def test_http_health_roundtrip(staging_dir: Path, proc=None):
                 f"OPTIONS /health: Allow must list {must_have}; resp={r!r}"
             )
 
+    # 11b. SECURITY (#533 oracle fix): OPTIONS introspection must NOT
+    # reveal the existence of an auth-gated path to an anonymous caller.
+    # /v1/endpoints is a registered read-scoped path; anonymous OPTIONS
+    # on it must 401 (like an anonymous GET would), NOT 204+Allow.
+    # Pre-fix the OPTIONS branch ran before auth and served 204+Allow to
+    # anyone, a path-existence + method oracle.
+    r = _http_roundtrip(b"OPTIONS /v1/endpoints HTTP/1.1\r\n\r\n")
+    if "401" not in status(r):
+        raise TestFailure(
+            f"OPTIONS /v1/endpoints anonymous: expected 401 (no path-existence "
+            f"oracle), got {status(r)!r}"
+        )
+    if "Allow:" in r:
+        raise TestFailure(
+            f"OPTIONS /v1/endpoints anonymous: must not leak Allow header; resp={r!r}"
+        )
+
+    # 11c. Authenticated OPTIONS on the same auth-gated path still
+    # introspects: 204 + Allow listing GET/HEAD/OPTIONS.
+    r = _http_roundtrip(
+        b"OPTIONS /v1/endpoints HTTP/1.1\r\n"
+        b"Authorization: Bearer " + bootstrap_token.encode("ascii") + b"\r\n"
+        b"\r\n"
+    )
+    if "204" not in status(r):
+        raise TestFailure(
+            f"OPTIONS /v1/endpoints authed: expected 204, got {status(r)!r}"
+        )
+    for must_have in ("GET", "HEAD", "OPTIONS"):
+        if must_have not in r:
+            raise TestFailure(
+                f"OPTIONS /v1/endpoints authed: Allow must list {must_have}; resp={r!r}"
+            )
+
     # 12. OPTIONS on an unknown path with auth -> 404 (anonymous
     # would get 401 first, but introspection does not bypass auth
     # for paths that simply do not exist).
