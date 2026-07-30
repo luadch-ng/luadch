@@ -77,6 +77,8 @@ eq( "700 owner rwx",       S._mode_is_secure( "700" ), true )
 eq( "500 owner rx",        S._mode_is_secure( "500" ), true )
 eq( "200 owner write",     S._mode_is_secure( "200" ), true )
 eq( "2600 setgid+ownerrw", S._mode_is_secure( "2600" ), true )
+eq( "4600 setuid+ownerrw", S._mode_is_secure( "4600" ), true )
+eq( "000 no access",       S._mode_is_secure( "000" ), true )
 
 -- group and/or other has access: all insecure
 eq( "640 group read",  S._mode_is_secure( "640" ), false )

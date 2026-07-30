@@ -16,9 +16,10 @@
 
 ]]--
 
-local _made   = { }   -- captured makedir calls
-local _writes = { }   -- captured "wb" file writes (paths)
-local _order  = { }   -- interleaved call order: "makedir:<dir>" / "write:<path>"
+local _made    = { }   -- captured makedir calls
+local _writes  = { }   -- captured "wb" file writes (paths)
+local _renames = { }   -- captured os.rename calls { from, to }
+local _order   = { }   -- interleaved order: "makedir:<dir>" / "write:<path>" / "rename:<from>-><to>"
 
 -- operator relocated the key into a not-yet-existing subdir
 local _cfg = { encrypt_usertbl = true, master_key_path = "cfg/keys/master.key" }
@@ -40,6 +41,14 @@ local _real = {
         -- paths are skipped (they are not what this test exercises)
         getenv = function( n ) if n == "COMSPEC" or n == "WINDIR" then return "x" end end,
         remove = function( ) return true end,
+        -- atomic key write: _write_secret writes master.key.tmp then
+        -- renames it into place. Capture the rename to assert the key
+        -- lands at the relocated path.
+        rename = function( from, to )
+            _order[ #_order + 1 ] = "rename:" .. from .. "->" .. to
+            _renames[ #_renames + 1 ] = { from = from, to = to }
+            return true
+        end,
         execute = function( ) return true end,
     },
     adclib = {
@@ -85,7 +94,13 @@ local mk_idx = order_index( "makedir:cfg/keys" )
 local wr_idx = first_write_index( )
 ok( "makedir runs BEFORE the master.key write", mk_idx and wr_idx and mk_idx < wr_idx )
 ok( "master.key was written", #_writes >= 1 )
-ok( "the key written is at the relocated path", _writes[ 1 ] == "cfg/keys/master.key" )
+-- atomic write: the key bytes go to master.key.tmp (same parent dir, so
+-- the makedir-before-write intent is preserved), then rename moves it
+-- to the final relocated path.
+ok( "the key written is the .tmp of the relocated path", _writes[ 1 ] == "cfg/keys/master.key.tmp" )
+ok( "the .tmp is renamed to the relocated key path",
+    _renames[ 1 ] and _renames[ 1 ].from == "cfg/keys/master.key.tmp"
+                  and _renames[ 1 ].to   == "cfg/keys/master.key" )
 
 io.write( string.format( "\n%d checks, %d failures\n", checks, failures ) )
 os.exit( failures == 0 and 0 or 1 )

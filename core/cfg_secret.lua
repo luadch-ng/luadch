@@ -131,7 +131,12 @@ end
 -- fact MORE hardened than 600. The old exact-"600" test wrongly
 -- refused a correctly-locked-down 400 key and told the operator to
 -- LOOSEN it. An unrecognisable/short form is treated as secure so a
--- weird stat output never blocks boot on a false alarm.
+-- weird stat output never blocks boot on a false alarm - and it is not
+-- an escape hatch: a <3-digit mode means the owner (hundreds) digit is
+-- 0, i.e. owner has no read bit, so init() never reaches this check for
+-- such a key (_read_file fails to open it and we regenerate). Any key
+-- that actually loads has owner-read, hence >= 3 digits. Do not reorder
+-- the read-before-check without revisiting this.
 local function _mode_is_secure( mode )
     if type( mode ) ~= "string" or #mode < 3 then
         return true
