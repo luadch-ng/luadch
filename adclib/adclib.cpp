@@ -334,6 +334,15 @@ int aes_gcm_seal(lua_State* L)
         return luaL_error(L, "aes_gcm_seal: nonce must be %d bytes, got %d",
                           AES_NONCE_SIZE, (int)nonce_len);
     }
+    // Defensive: EVP_EncryptUpdate and the luaL_prepbuffsize below take
+    // an int length; a plaintext past INT_MAX would wrap (int)pt_len
+    // negative, and pt_len + AES_TAG_SIZE could overflow. Bound to
+    // INT_MAX - AES_TAG_SIZE so both are safe. Mirrors the pbkdf2 /
+    // cert-fingerprint INT_MAX guards. Unreachable in practice
+    // (user.tbl / backups are KB-MB), belt-and-suspenders.
+    if (pt_len > (size_t)INT_MAX - AES_TAG_SIZE) {
+        return luaL_error(L, "aes_gcm_seal: plaintext too large");
+    }
 
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     if (!ctx) return luaL_error(L, "aes_gcm_seal: EVP_CIPHER_CTX_new failed");
@@ -400,6 +409,15 @@ int aes_gcm_open(lua_State* L)
         return 2;
     }
     size_t ct_len = blob_len - AES_TAG_SIZE;
+    // Defensive: EVP_DecryptUpdate takes an int length; a ciphertext
+    // past INT_MAX would wrap (int)ct_len negative. Mirrors the seal /
+    // pbkdf2 guards. Unreachable (blobs are KB-MB); soft-fails to
+    // (nil, err) like the too-short guard above.
+    if (ct_len > (size_t)INT_MAX) {
+        lua_pushnil(L);
+        lua_pushstring(L, "ciphertext too large");
+        return 2;
+    }
     const unsigned char* ct = blob;
     const unsigned char* tag = blob + ct_len;
 
