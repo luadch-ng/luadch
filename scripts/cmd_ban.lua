@@ -742,14 +742,8 @@ end
 -- changed in core hub.isnickonline, whose exact-current-nick semantics
 -- back availability checks ("is this nick free?") in cmd_reg /
 -- cmd_nickchange.
-local find_online_by_firstnick = function( firstnick )
-    for _, buser in pairs( hub.getusers() ) do
-        if buser:firstnick() == firstnick then
-            return buser
-        end
-    end
-    return nil
-end
+-- firstnick fallback -> the shared core helper (#537 dedup).
+local find_online_by_firstnick = hub.find_online_by_firstnick
 
 local http_find_online = function( target_type, target )
     if target_type == "sid" then return hub.issidonline( target ) end

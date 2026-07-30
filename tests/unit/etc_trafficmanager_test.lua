@@ -68,6 +68,14 @@ _G.hub = {
     escapefrom  = function( s ) return s end,
     isnickonline = function( ) return nil end,
     getusers    = function( ) return _online end,
+    -- Mirrors core/hub.lua's find_online_by_firstnick (#537): the plugin
+    -- now delegates to this shared hub helper instead of a local copy.
+    find_online_by_firstnick = function( firstnick )
+        for _, u in pairs( _online ) do
+            if u:firstnick( ) == firstnick then return u end
+        end
+        return nil
+    end,
     getregusers = function( ) return { }, { }, { } end,
     import = function( name )
         if name == "etc_hubcommands" then

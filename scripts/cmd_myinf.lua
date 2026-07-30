@@ -40,7 +40,6 @@ local hub_getbot = hub.getbot()
 local hub_debug = hub.debug
 local hub_import = hub.import
 local hub_isnickonline = hub.isnickonline
-local hub_getusers = hub.getusers
 local cfg_get = cfg.get
 local cfg_loadlanguage = cfg.loadlanguage
 local utf_match = utf.match
@@ -101,14 +100,8 @@ end
 -- luadch/luadch#240). Kept plugin-local rather than changed in core
 -- hub.isnickonline, whose exact-current-nick semantics back availability
 -- checks elsewhere.
-local find_online_by_firstnick = function( firstnick )
-    for _, buser in pairs( hub_getusers() ) do
-        if buser:firstnick() == firstnick then
-            return buser
-        end
-    end
-    return nil
-end
+-- firstnick fallback -> the shared core helper (#537 dedup).
+local find_online_by_firstnick = hub.find_online_by_firstnick
 
 local onbmsg = function( user, command, parameters )
     local user_level = user:level()

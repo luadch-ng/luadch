@@ -150,14 +150,8 @@ end
 -- luadch/luadch#240). Kept plugin-local rather than changed in core
 -- hub.isnickonline, whose exact-current-nick semantics back availability
 -- checks ("is this nick free?") in cmd_reg / cmd_nickchange.
-local find_online_by_firstnick = function( firstnick )
-    for _, buser in pairs( hub.getusers() ) do
-        if buser:firstnick() == firstnick then
-            return buser
-        end
-    end
-    return nil
-end
+-- firstnick fallback -> the shared core helper (#537 dedup).
+local find_online_by_firstnick = hub.find_online_by_firstnick
 
 local onbmsg = function( user, adccmd, parameters )
     local user_level = user:level()
