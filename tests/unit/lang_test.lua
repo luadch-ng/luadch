@@ -2,8 +2,10 @@
 
     tests/unit/lang_test.lua
 
-    Coverage test for the bundled language tables (lang/de.tbl,
-    lang/en.tbl). Verifies that
+    Coverage test for the bundled language tables (lang/de.json,
+    lang/en.json - migrated from .tbl to JSON in the #301 P3 Weblate
+    move; the runtime loads them via the dual-format
+    cfg_lang.loadlanguage). Verifies that
 
       (a) every key required by core (see _REQUIRED below) exists in both
           tables - missing a key would silently fall through to the hardcoded
@@ -22,22 +24,29 @@
 
 ]]--
 
-local function load_tbl( path )
-    local chunk, err = loadfile( path )
-    if not chunk then
-        io.stderr:write( "FATAL: cannot load " .. path .. ": " .. tostring( err ) .. "\n" )
+-- Core lang files are JSON now (#301 P3). Decode with the same bundled
+-- dkjson the runtime uses, so this test validates exactly what the hub
+-- will parse - not a re-implementation.
+local dkjson = assert( loadfile( "dkjson/dkjson.lua" ) )( )
+
+local function load_lang( path )
+    local f, ferr = io.open( path, "rb" )
+    if not f then
+        io.stderr:write( "FATAL: cannot open " .. path .. ": " .. tostring( ferr ) .. "\n" )
         os.exit( 1 )
     end
-    local ok, t = pcall( chunk )
-    if not ok or type( t ) ~= "table" then
-        io.stderr:write( "FATAL: " .. path .. " did not return a table: " .. tostring( t ) .. "\n" )
+    local s = f:read( "*a" )
+    f:close( )
+    local t, _, err = dkjson.decode( s or "", 1, nil )
+    if err or type( t ) ~= "table" then
+        io.stderr:write( "FATAL: " .. path .. " is not a valid JSON object: " .. tostring( err ) .. "\n" )
         os.exit( 1 )
     end
     return t
 end
 
-local de = load_tbl( "lang/de.tbl" )
-local en = load_tbl( "lang/en.tbl" )
+local de = load_lang( "lang/de.json" )
+local en = load_lang( "lang/en.json" )
 
 -- Keys core/hub.lua reads via i18n.* (must exist in BOTH tables, else
 -- the runtime silently falls back to the hardcoded English literal).
