@@ -620,7 +620,7 @@ end
 
 loadcfgprofile = function( profile, name )
     profile = tostring( profile or get "scripts_cfg_profile" )    -- default profile
-    ret, err = util_loadtable( get "scripts_cfg_path" .. tostring( name ) .. ".cfg." .. profile )
+    local ret, err = util_loadtable( get "scripts_cfg_path" .. tostring( name ) .. ".cfg." .. profile )
     _ = err and out_error( "cfg.lua: function 'loadcfgprofile': error while loading cfg profile: ", err )
     return ret, err
 end
