@@ -110,6 +110,14 @@ _G.hub = {
         return nil
     end,
     getusers     = function( ) return { ALICE = alice, BOB = bob, BOT1 = bot } end,
+    -- Mirrors core/hub.lua's find_online_by_firstnick (#537): the plugin
+    -- now delegates to this shared hub helper instead of a local copy.
+    find_online_by_firstnick = function( firstnick )
+        for _, u in pairs( { ALICE = alice, BOB = bob, BOT1 = bot } ) do
+            if u:firstnick( ) == firstnick then return u end
+        end
+        return nil
+    end,
     isnickonline = function( n ) return _online[ n ] end,
     import       = function( ) return nil end,
 }

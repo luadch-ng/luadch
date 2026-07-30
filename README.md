@@ -52,7 +52,7 @@ promoted to `master`, so pull requests go against **`dev`** - see
 ### 3.2.x feature era (Phase 8+, on `master`)
 
 - **HTTP / JSON API** ([#82](https://github.com/luadch-ng/luadch/issues/82)) - token-authed REST surface for users, bans, registered users, config, logs, and a live `/v1/events` stream; see [`docs/HTTP_API.md`](docs/HTTP_API.md)
-- **Audit log** ([#84](https://github.com/luadch-ng/luadch/issues/84)) - structured JSONL `onAudit` records across ~20 plugins, exposed via `etc_auditlog` + the HTTP event stream
+- **Audit log** ([#84](https://github.com/luadch-ng/luadch/issues/84)) - structured JSONL `onAudit` records across the hub's staff-action plugins, exposed via `etc_auditlog` + the HTTP event stream
 - **Unified pre-handshake blocklist + in-hub GeoIP** ([#78](https://github.com/luadch-ng/luadch/issues/78) / [#79](https://github.com/luadch-ng/luadch/issues/79)) - CIDR/IPv6 blocklist with provenance, stealth mode, external feeds (Tor / Spamhaus / AbuseIPDB), MaxMind GeoLite2 country/ASN, and live proxy/VPN detection ([#352](https://github.com/luadch-ng/luadch/issues/352)); operator guide in [`docs/BLOCKLIST.md`](docs/BLOCKLIST.md)
 - **Global allowlist / whitelist** (#78 allowlist) - trusted infrastructure (hublist pingers etc.) exempt from the *automated* blockers, never from a manual ban
 - **Client blocker** ([#81](https://github.com/luadch-ng/luadch/issues/81)) - version-range client filtering

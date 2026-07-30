@@ -132,21 +132,57 @@ eq( "manifest: bool field",    m_out.include_master_key, true )
 eq( "manifest: kinds map a",   m_out.kinds[ "__masterkey__" ], "masterkey" )
 eq( "manifest: kinds map b",   m_out.kinds[ "cfg/user.tbl" ],  "tree" )
 
--- #485: a crafted manifest must not hang the offline restore. Pre-fix this
--- spins forever (the eval had no work bound); post-fix the instruction-count
--- hook aborts it and _manifest_parse returns (nil, err). If this test ever
--- HANGS instead of failing fast, the bound regressed.
+-- %q round-trip: a value carrying every byte class %q escapes must survive
+-- the load()-free decoder intact - quote, backslash, LF (encoded as
+-- backslash+LF, which spans two physical lines and would break a line-based
+-- parser), CR (\13), a control byte followed by an ASCII digit (padded to
+-- \001), a high byte (0xFF, emitted literally by %q), and the
+-- manifest-structural bytes ] = [ { } , (literal inside the string, must not
+-- confuse the recogniser).
+local special = 'q"b\\s\nl\rr' .. string.char( 255 ) .. string.char( 1 ) .. '5]=[{},end'
+local sp_out = assert( A._manifest_parse( A._manifest_serialize( { note = special } ) ) )
+eq( "manifest: %q special/structural bytes round-trip", sp_out.note, special )
+
+-- Empty manifest and empty kinds map both parse to tables.
+eq( "manifest: empty -> table", type( A._manifest_parse( "return {}" ) ), "table" )
+local ek = assert( A._manifest_parse( A._manifest_serialize( { kinds = { } } ) ) )
+eq( "manifest: empty kinds -> table", type( ek.kinds ), "table" )
+
+-- Scientific-notation number (tostring of a large float) round-trips.
+local sci = assert( A._manifest_parse( A._manifest_serialize( { big = 1e20 } ) ) )
+eq( "manifest: sci-notation number round-trip", sci.big, 1e20 )
+
+-- #485 + F-DEP manifest hardening: a crafted manifest (foreign archive,
+-- operator-held passphrase) must neither execute code nor run unbounded work
+-- during the offline restore. The parser is a grammar recogniser that never
+-- runs the input, so every hostile case is refused as (nil, err), fast.
 do
-    local bad = A._manifest_parse( "return (function() while true do end end)()" )
-    ok( "manifest: infinite loop bounded -> nil", bad == nil )
-    -- an over-budget bounded loop is refused too, not silently accepted
-    local heavy = A._manifest_parse( "local x=0 for i=1,1e9 do x=x+1 end return {}" )
-    ok( "manifest: over-budget loop -> nil", heavy == nil )
-    -- oversized manifest rejected before load
-    local huge = A._manifest_parse( "return {}" .. string.rep( " ", 70000 ) )
-    ok( "manifest: oversized -> nil", huge == nil )
-    -- a normal manifest still parses after all that
-    ok( "manifest: normal still ok", type( A._manifest_parse( "return { a = 1 }" ) ) == "table" )
+    -- Deterministic proof the manifest is NOT evaluated: `1+1` would yield
+    -- {k=2} under the old load()-based parser; arithmetic is not part of the
+    -- grammar, so it is refused, not computed. (This is the pre-fix RED case.)
+    ok( "manifest: expression not evaluated -> nil",
+        A._manifest_parse( 'return { ["k"] = 1+1 }' ) == nil )
+    -- The exact bound-bypass that motivated the rewrite: the old instruction
+    -- count hook did not tick during the string.rep C call (reachable via the
+    -- always-present string metatable, empty _ENV notwithstanding), so this
+    -- allocated ~1 GiB. The recogniser refuses it - `(` is not a value token.
+    ok( "manifest: string-metatable rep bypass -> nil",
+        A._manifest_parse( 'return { ["k"] = ("x"):rep(2^30) }' ) == nil )
+    -- Loops / function bodies are not grammar either - refused, never run.
+    ok( "manifest: infinite loop -> nil",
+        A._manifest_parse( "return (function() while true do end end)()" ) == nil )
+    ok( "manifest: heavy loop -> nil",
+        A._manifest_parse( "local x=0 for i=1,1e9 do x=x+1 end return {}" ) == nil )
+    -- Oversized manifest rejected before any parsing.
+    ok( "manifest: oversized -> nil",
+        A._manifest_parse( "return {}" .. string.rep( " ", 70000 ) ) == nil )
+    -- Bareword scalar keys are not the serializer's shape (it emits ["k"]);
+    -- the strict recogniser refuses them.
+    ok( "manifest: bareword scalar key -> nil",
+        A._manifest_parse( "return { a = 1 }" ) == nil )
+    -- A real serializer-shaped manifest still parses after all that.
+    ok( "manifest: normal still ok",
+        type( A._manifest_parse( 'return { ["a"] = 1 }' ) ) == "table" )
 end
 
 ----------------------------------------------------------------------

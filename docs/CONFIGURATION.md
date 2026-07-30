@@ -26,7 +26,7 @@ After a fresh install, before opening the hub to real users:
    ```
    Pin the cert deterministically: hand users the `adcs://host:port/?kp=SHA256/<keyprint>` URL. DC++ clients trust the keyprint, not a CA chain - no Let's Encrypt or paid cert needed (see [`docs/SECURITY.md`](SECURITY.md) §6).
 
-   To regenerate later, delete `certs/servercert.pem` and `certs/serverkey.pem` and restart the hub. The `examples/certs/make_cert.{sh,bat}` scripts are still around for manual regeneration outside the hub process (e.g. for cron-based rotation).
+   To regenerate later, delete `certs/servercert.pem` and `certs/serverkey.pem` and restart the hub. The `certs/make_cert.{sh,bat}` scripts (installed alongside the cert material) are still around for manual regeneration outside the hub process (e.g. for cron-based rotation).
 
 2. **Connect with an ADC client** (AirDC++, EiskaltDC++, …):
    - Address: `adcs://127.0.0.1:5001/?kp=SHA256/<keyprint from step 1>`
@@ -138,14 +138,19 @@ do not run a public hub with `dummy / test` active.
 The hub uses an integer-based user level system. Higher levels grant
 more permissions. Bundled defaults:
 
-| Level | Name     | What it can do                                  |
-|-------|----------|-------------------------------------------------|
-| 100   | HUBOWNER | Everything (registers / deletes / shutdown)     |
-| 80    | ADMIN    | Admin operations, user + registration management |
-| 60    | OPERATOR | Moderation (ban / kick / gag / redirect)        |
-| 40    | SVIP     | Super-VIP: elevated privileges, exemptions      |
-| 20    | REG      | Registered user, basic chat / commands          |
-| 0     | UNREG    | Anonymous (unregistered) connection             |
+| Level | Name       | What it can do                                   |
+|-------|------------|--------------------------------------------------|
+| 100   | HUBOWNER   | Everything (registers / deletes / shutdown)      |
+| 80    | ADMIN      | Admin operations, user + registration management |
+| 70    | SUPERVISOR | Senior moderation, above operators               |
+| 60    | OPERATOR   | Moderation (ban / kick / gag / redirect)         |
+| 55    | SBOT       | Service-bot account level                        |
+| 50    | SERVER     | Server / linked-service account level            |
+| 40    | SVIP       | Super-VIP: elevated privileges, exemptions       |
+| 30    | VIP        | VIP user, extra privileges                       |
+| 20    | REG        | Registered user, basic chat / commands           |
+| 10    | GUEST      | Guest account, minimal privileges                |
+| 0     | UNREG      | Anonymous (unregistered) connection              |
 
 Customise per-script `minlevel` in `cfg.tbl` to grant or restrict
 specific commands.

@@ -310,14 +310,8 @@ end
 -- captured once at login and never re-keyed. Same idiom as
 -- etc_trafficmanager's find_online_by_firstnick (closed upstream
 -- luadch/luadch#240).
-find_online_by_firstnick = function( firstnick )
-    for _, buser in pairs( hub.getusers() ) do
-        if buser:firstnick() == firstnick then
-            return buser
-        end
-    end
-    return nil
-end
+-- firstnick fallback -> the shared core helper (#537 dedup).
+find_online_by_firstnick = hub.find_online_by_firstnick
 
 --// send msg to all members
 msg_to_members = function( chat, msg )

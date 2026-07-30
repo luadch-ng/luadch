@@ -633,11 +633,22 @@ dispatch = function( framer_unit, source_ip )
     local lookup_method = method == "HEAD" and "GET" or method
     local methods_for_path = { }
     local matched_route, matched_vars
+    -- A path is "public" if it carries any scope="none" route (e.g.
+    -- /health, the webhook receiver). Anonymous OPTIONS introspection
+    -- is allowed on such a path; on an auth-gated path it is not (it
+    -- would leak path existence - see the OPTIONS block below). This is
+    -- keyed on the concrete request path, and every scope="none" route
+    -- today is an EXACT template (no wildcard), so a public route can
+    -- never over-match an auth-gated concrete path. If a wildcard/
+    -- templated scope="none" route is ever added, revisit: it could
+    -- mark an auth-gated path public and expose its methods to anon.
+    local path_has_public_route = false
     for m, paths in pairs( _routes ) do
         for _, r in pairs( paths ) do
             local vars = match_path( r, path )
             if vars then
                 table_insert( methods_for_path, m )
+                if r.scope == "none" then path_has_public_route = true end
                 if m == lookup_method then
                     matched_route = r
                     matched_vars  = vars
@@ -646,32 +657,10 @@ dispatch = function( framer_unit, source_ip )
         end
     end
 
-    -- OPTIONS auto-introspection per §6.6: returns 204 + Allow
-    -- header listing the registered methods. No auth required
-    -- (this is introspection, not data) - same posture as a 405
-    -- on a known path. Skipped if the path is not registered at
-    -- all (falls through to the normal 401/404 path below).
-    if method == "OPTIONS" and #methods_for_path > 0 then
-        -- HEAD is implicit for any GET route per §6.6; surface it.
-        local has_get = false
-        for _, m in ipairs( methods_for_path ) do
-            if m == "GET" then has_get = true break end
-        end
-        if has_get then
-            local has_head = false
-            for _, m in ipairs( methods_for_path ) do
-                if m == "HEAD" then has_head = true break end
-            end
-            if not has_head then
-                table_insert( methods_for_path, "HEAD" )
-            end
-        end
-        table_insert( methods_for_path, "OPTIONS" )
-        resp_headers[ "Allow" ] = table_concat( methods_for_path, ", " )
-        return 204, "", resp_headers
-    end
-
     -- Auth resolution (label = nil means anonymous / bad token).
+    -- Resolved BEFORE the OPTIONS introspection below so that
+    -- introspection on an auth-gated path cannot serve as an
+    -- unauthenticated path-existence + method oracle.
     local authz_header = framer_unit.headers[ "authorization" ]
     local label, scope_or_err, bucket_id = resolve_token( authz_header )
 
@@ -707,6 +696,36 @@ dispatch = function( framer_unit, source_ip )
             return 429, envelope_error( "E_RATE_LIMITED",
                 "too many failed authentications; back off" ), resp_headers
         end
+    end
+
+    -- OPTIONS auto-introspection per §6.6: returns 204 + Allow header
+    -- listing the registered methods. Gated on auth for an auth-gated
+    -- path: the normal 405/404 outcomes below only reveal path
+    -- existence to an AUTHENTICATED caller, so serving 204+Allow to an
+    -- anonymous caller here would be exactly the path-existence +
+    -- method oracle the rest of the router withholds. A path carrying a
+    -- scope="none" route (/health, the webhook receiver) is public, so
+    -- anonymous OPTIONS on it stays allowed. Skipped if the path is not
+    -- registered at all (falls through to the 401/404 path below).
+    if method == "OPTIONS" and #methods_for_path > 0
+       and ( label or path_has_public_route ) then
+        -- HEAD is implicit for any GET route per §6.6; surface it.
+        local has_get = false
+        for _, m in ipairs( methods_for_path ) do
+            if m == "GET" then has_get = true break end
+        end
+        if has_get then
+            local has_head = false
+            for _, m in ipairs( methods_for_path ) do
+                if m == "HEAD" then has_head = true break end
+            end
+            if not has_head then
+                table_insert( methods_for_path, "HEAD" )
+            end
+        end
+        table_insert( methods_for_path, "OPTIONS" )
+        resp_headers[ "Allow" ] = table_concat( methods_for_path, ", " )
+        return 204, "", resp_headers
     end
 
     -- Method/path resolution outcomes - all require auth except

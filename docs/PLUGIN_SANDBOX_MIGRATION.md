@@ -25,7 +25,11 @@ Each pattern has a copy-paste fix.
 
 ## Reference: what the new sandbox contains
 
-Plugins see ONLY these globals after #206:
+Plugins see only an explicit whitelist of globals after #206. The list
+below is **illustrative** - the `SANDBOX_GLOBALS` table in
+[`core/scripts.lua`](../core/scripts.lua) is authoritative and grows as
+new core modules are exposed; if this guide disagrees with that table,
+the code wins.
 
 | Category | Globals |
 |---|---|
@@ -33,10 +37,11 @@ Plugins see ONLY these globals after #206:
 | Lua stdlib (full) | `table`, `math`, `coroutine` |
 | Lua stdlib (curated) | `os` (only `time`, `date`, `difftime`), `io` (only `open`, path-restricted) |
 | String lib | `string` (= `utf`, UTF-8-aware), `utf` (alias for the same) |
-| luadch core | `hub`, `cfg`, `util`, `util_http`, `adc`, `adclib`, `signal`, `out`, `unicode`, `sysinfo` |
+| luadch core | `hub`, `cfg`, `util`, `util_http`, `http_filter`, `http_events`, `http_client`, `adc`, `adclib`, `signal`, `out`, `unicode`, `sysinfo`, `const`, `audit`, `secrets`, `whitelist`, `blocklist`, `mmdb`, `geoip_update`, `hmac`, `backup` |
 | Optional libs | `ssl` (with `.x509` pre-attached as a field), `socket`, `basexx`, `zlib_stream`, `dkjson` |
 
-Anything not in this list is **unreachable** from plugin code.
+Anything not on the `SANDBOX_GLOBALS` whitelist is **unreachable** from
+plugin code.
 
 ## Removed primitives
 
@@ -90,7 +95,7 @@ local n = rawlen(my_tbl)
 **Replacement:** Direct table access. The `rawX` family bypasses
 metatable traps, which is only useful in code that uses metatables for
 sandbox escape. Plain `my_tbl[k]` / `my_tbl[k] = v` / `#my_tbl` work for
-every plugin use case observed in the 96-plugin audit (bundled + companion).
+every plugin use case observed in the bundled + companion plugin audit.
 
 ### `_G` / `_ENV`
 
@@ -250,13 +255,17 @@ here's the canonical replacement template:
 local state = util.loadtable(state_path) or {}
 
 -- ON STATE CHANGE:
-util.savearray(state, state_path)
--- (savearray writes atomically; replaces the historic
+util.savetable(state, "state", state_path)
+-- (savetable writes atomically; replaces the historic
 --  `io.open(path, "w+")` + `:write(serialize(t))` + `:close()` dance)
 ```
 
-This matches the pattern used by every bundled state-bearing plugin
-post-#206 (`cmd_gag`, `cmd_ban`, `etc_msgmanager`, etc).
+Use `util.savetable(tbl, name, path)` for a **keyed** table (a map, or
+scalars like `{ counter = 0 }`): it serialises string keys. `util.savearray(tbl, path)`
+writes ONLY the array part (`ipairs`) and silently drops string keys, so
+it is for **pure array-indexed** tables only. The bundled state-bearing
+plugins pick per shape - e.g. `cmd_ban` uses `savearray` for its
+array-indexed `bans` list and `savetable` for its keyed `history`.
 
 ## See also
 

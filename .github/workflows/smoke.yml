@@ -256,6 +256,13 @@ jobs:
       - name: Run backup_archive unit test
         run: lua5.4 tests/unit/backup_archive_test.lua
 
+      # core/cfg_secret.lua master.key permission classifier: owner-only
+      # POSIX modes (600/400/700/...) are secure; any group/other access
+      # is not. Regression guard for the exact-"600" check that refused a
+      # correctly-hardened 0400 key.
+      - name: Run cfg_secret perms unit test
+        run: lua5.4 tests/unit/cfg_secret_perms_test.lua
+
       # core/backup.lua (#480 PR-A) engine: collection spec (which files +
       # modes + master.key toggle + .tbl/.tmp filter), rotation victim
       # selection, cfg/secrets config interpretation. Pure seams; the full
@@ -641,6 +648,10 @@ jobs:
       - name: Run backup_archive unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/backup_archive_test.lua
+
+      - name: Run cfg_secret perms unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/cfg_secret_perms_test.lua
 
       - name: Run backup engine unit test
         shell: msys2 {0}

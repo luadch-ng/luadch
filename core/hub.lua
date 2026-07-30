@@ -307,6 +307,7 @@ local iscidonline
 local issidonline
 local getregusers
 local isnickonline
+local find_online_by_firstnick
 local isuserregged
 local loadregusers
 local insertreguser
@@ -1040,6 +1041,23 @@ isnickonline = function( nick )
     return nil
 end    -- public
 
+find_online_by_firstnick = function( firstnick )
+    -- Resolve an ONLINE human user by firstnick() - the original login
+    -- nick, captured once and never re-keyed. usr_nick_prefix re-keys
+    -- _usernicks to the PREFIXED display nick, so isnickonline( <base
+    -- nick> ) misses a prefixed user; a caller handed a typed base nick
+    -- falls back here (closed upstream luadch/luadch#240). Iterates the
+    -- same humans-only, normal-state set getusers() returns first; a
+    -- nil / unmatched nick yields nil. Was copy-pasted as a plugin-local
+    -- across a dozen scripts (#537 dedup) - the single source now.
+    for _, user in pairs( _nobot_normalstatesids ) do
+        if user:firstnick( ) == firstnick then
+            return user
+        end
+    end
+    return nil
+end    -- public
+
 issidonline = function( sid )
     return _normalstatesids[ sid ]
 end
@@ -1190,6 +1208,7 @@ createhub = function( )
         issidonline = issidonline,
         getregusers = getregusers,
         isnickonline = isnickonline,
+        find_online_by_firstnick = find_online_by_firstnick,
         isiponline = isiponline,
         --isuserregged = isuserregged,    -- private
         --loadregusers = loadregusers,    -- private
