@@ -115,6 +115,14 @@ local function make_hub( target )
     h.iscidonline  = function( ) return nil end
     h.isiponline   = function( ) return nil end
     h.getusers     = function( ) return { AAAA = target } end
+    -- Mirrors core/hub.lua's find_online_by_firstnick (#537): the plugins
+    -- now delegate to this shared hub helper instead of a local copy.
+    h.find_online_by_firstnick = function( firstnick )
+        for _, u in pairs( h.getusers( ) ) do
+            if u:firstnick( ) == firstnick then return u end
+        end
+        return nil
+    end
     h.escapeto     = function( _s ) return _s end
     h.escapefrom   = function( _s ) return _s end
     h.sendtoall    = function( ) h._sentall = true end

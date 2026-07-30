@@ -699,14 +699,8 @@ end
 -- so the user got no message and no description flag - the bug
 -- reported as upstream luadch/luadch#240. Iterating by firstnick is
 -- robust against any prefix scheme.
-local find_online_by_firstnick = function( firstnick )
-    for sid, buser in pairs( hub.getusers() ) do
-        if buser:firstnick() == firstnick then
-            return buser
-        end
-    end
-    return nil
-end
+-- firstnick fallback -> the shared core helper (#537 dedup).
+local find_online_by_firstnick = hub.find_online_by_firstnick
 
 add = function( firstnick, scriptname, reason, user )
     local err, by

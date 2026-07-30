@@ -362,6 +362,7 @@ hub.updateusers()                         -- refresh in-memory user table from d
 local user_in_state, user_in_any_state, conn = hub.getuser( sid )
 local nobot_table, all_normalstate, all_connections = hub.getusers()
 local regs, regs_by_nick, regs_by_cid = hub.getregusers()
+local user = hub.find_online_by_firstnick( nick )   -- online human by firstnick(); nil if none
 ```
 
 > `hub.getusers()` returns three tables of decreasing strictness.
@@ -372,6 +373,17 @@ local regs, regs_by_nick, regs_by_cid = hub.getregusers()
 > second/third table when you deliberately need bots or in-handshake
 > connections. ([#179](https://github.com/luadch-ng/luadch/issues/179),
 > which had bots leaking into the first table, is fixed.)
+
+> `hub.find_online_by_firstnick( nick )` resolves an online human by
+> `user:firstnick()` - the original login nick, captured once and never
+> re-keyed - scanning the humans-only table above. Use it as the fallback
+> when `hub.isnickonline( nick )` (keyed by the **current** display nick)
+> can miss a user whose nick was re-keyed by a prefix plugin such as
+> `usr_nick_prefix`: `hub.isnickonline( nick ) or hub.find_online_by_firstnick( nick )`.
+> A typed base nick then still resolves the prefixed online user (the
+> [#473](https://github.com/luadch-ng/luadch/issues/473) fix; centralised
+> from a dozen plugin-local copies in
+> [#537](https://github.com/luadch-ng/luadch/issues/537)).
 
 #### Escaping
 
