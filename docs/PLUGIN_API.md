@@ -13,17 +13,17 @@ a plugin must follow and the APIs the hub exposes to plugin code.
 > a plugin can call into core modules with the same authority as the
 > hub itself.
 
-- [1. Quick start](#1-quick-start)
-- [2. Sandbox and environment](#2-sandbox-and-environment)
-- [3. Plugin conventions](#3-plugin-conventions)
-- [4. Listeners](#4-listeners)
-- [5. Modules](#5-modules)
-- [6. Objects](#6-objects)
-- [7. Common patterns](#7-common-patterns)
-- [8. Bundled plugin exports](#8-bundled-plugin-exports)
-- [9. Testing](#9-testing)
-- [10. Common pitfalls](#10-common-pitfalls)
-- [11. See also](#11-see-also)
+- 🚀 [1. Quick start](#1-quick-start)
+- 🧪 [2. Sandbox and environment](#2-sandbox-and-environment)
+- 📐 [3. Plugin conventions](#3-plugin-conventions)
+- 👂 [4. Listeners](#4-listeners)
+- 🧱 [5. Modules](#5-modules)
+- ⚙️ [6. Objects](#6-objects)
+- 🔁 [7. Common patterns](#7-common-patterns)
+- 📤 [8. Bundled plugin exports](#8-bundled-plugin-exports)
+- ✅ [9. Testing](#9-testing)
+- ⚠️ [10. Common pitfalls](#10-common-pitfalls)
+- 🔗 [11. See also](#11-see-also)
 
 ---
 

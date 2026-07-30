@@ -9,21 +9,21 @@ live. Implementation was phased - see
 [§13 Implementation phases](#13-implementation-phases). This document is
 the authoritative spec; it is kept in lockstep with the implementation.
 
-- [1. Goals + non-goals](#1-goals-non-goals)
-- [2. Transport](#2-transport)
-- [3. Architecture](#3-architecture)
-- [4. Auth model](#4-auth-model)
-- [5. Plugin registration API](#5-plugin-registration-api)
-- [6. Request shape](#6-request-shape)
-- [7. Response shape](#7-response-shape)
-- [8. Audit log](#8-audit-log)
-- [9. Discovery endpoint](#9-discovery-endpoint)
-- [10. Endpoint catalog](#10-endpoint-catalog)
-- [11. Out-of-scope of the catalog](#11-out-of-scope-of-the-catalog)
-- [12. Dependencies](#12-dependencies)
-- [13. Implementation phases](#13-implementation-phases)
-- [14. Open questions](#14-open-questions)
-- [15. Related](#15-related)
+- 🎯 [1. Goals + non-goals](#1-goals--non-goals)
+- 🌐 [2. Transport](#2-transport)
+- 🏗️ [3. Architecture](#3-architecture)
+- 🔐 [4. Auth model](#4-auth-model)
+- 🧩 [5. Plugin registration API](#5-plugin-registration-api)
+- 📥 [6. Request shape](#6-request-shape)
+- 📤 [7. Response shape](#7-response-shape)
+- 🧾 [8. Audit log](#8-audit-log)
+- 🧭 [9. Discovery endpoint](#9-discovery-endpoint)
+- 📇 [10. Endpoint catalog](#10-endpoint-catalog)
+- 🚧 [11. Out-of-scope of the catalog](#11-out-of-scope-of-the-catalog)
+- 📦 [12. Dependencies](#12-dependencies)
+- 🗺️ [13. Implementation phases](#13-implementation-phases)
+- ❓ [14. Open questions](#14-open-questions)
+- 🔗 [15. Related](#15-related)
 
 ---
 

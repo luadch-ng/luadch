@@ -15,16 +15,16 @@ and published to GitHub Container Registry on every release tag, on
 
 Available platforms: `linux/amd64`, `linux/arm64`.
 
-- [Security model](#security-model)
-- [First-time setup](#first-time-setup)
-- [Mount layout](#mount-layout)
-- [Configuration changes](#configuration-changes)
-- [Backups](#backups)
-- [TLS-only deployments](#tls-only-deployments)
-- [IPv6](#ipv6)
-- [Updating](#updating)
-- [Troubleshooting](#troubleshooting)
-- [Building the image yourself](#building-the-image-yourself)
+- 🛡️ [Security model](#security-model)
+- 🚀 [First-time setup](#first-time-setup)
+- 📁 [Mount layout](#mount-layout)
+- ⚙️ [Configuration changes](#configuration-changes)
+- 💾 [Backups](#backups)
+- 🔐 [TLS-only deployments](#tls-only-deployments)
+- 🌐 [IPv6](#ipv6)
+- 🔄 [Updating](#updating)
+- 🔧 [Troubleshooting](#troubleshooting)
+- 🏗️ [Building the image yourself](#building-the-image-yourself)
 
 ---
 
