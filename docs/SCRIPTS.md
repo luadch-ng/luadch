@@ -21,7 +21,7 @@ parts than a single cfg key.
 Jump-links to every entry below, grouped by category. Purposes are the
 one-line summary from each entry; see the entry for commands and cfg keys.
 
-### Bot plugins
+### 🤖 Bot plugins
 
 | Plugin | Purpose |
 |---|---|
@@ -30,7 +30,7 @@ one-line summary from each entry; see the entry for commands and cfg keys.
 | [bot_regchat](#bot_regchat) | Registered-user chat with optional message history |
 | [bot_session_chat](#bot_session_chat) | Temporary per-session chats for user collaboration |
 
-### Command plugins
+### ⌨️ Command plugins
 
 | Plugin | Purpose |
 |---|---|
@@ -65,7 +65,7 @@ one-line summary from each entry; see the entry for commands and cfg keys.
 | [cmd_userlist](#cmd_userlist) | List all registered users sorted by level or registration date |
 | [cmd_usersearch](#cmd_usersearch) | Search registered users by partial nick match |
 
-### Etc (utility) plugins
+### 🧩 Etc (utility) plugins
 
 | Plugin | Purpose |
 |---|---|
@@ -103,7 +103,7 @@ one-line summary from each entry; see the entry for commands and cfg keys.
 | [etc_forcetlstransfer](#etc_forcetlstransfer) | Force TLS-encrypted client-to-client transfers (force ADCS) |
 | [etc_lockdown](#etc_lockdown) | Transient maintenance-mode access gate: temporarily admit only users at or above a given level |
 
-### Hub management plugins
+### 🎛️ Hub management plugins
 
 | Plugin | Purpose |
 |---|---|
@@ -113,7 +113,7 @@ one-line summary from each entry; see the entry for commands and cfg keys.
 | [hub_runtime](#hub_runtime) | Track cumulative hub runtime (survives restarts) and provide show / reset commands |
 | [hub_user_lastseen](#hub_user_lastseen) | Update `lastseen` timestamp in user database on periodic timer |
 
-### User restriction plugins
+### 🚫 User restriction plugins
 
 | Plugin | Purpose |
 |---|---|
@@ -126,7 +126,7 @@ one-line summary from each entry; see the entry for commands and cfg keys.
 | [usr_slots](#usr_slots) | Enforce minimum / maximum upload slots per user level |
 | [usr_uptime](#usr_uptime) | Track per-user session and cumulative online time |
 
-### Rate-limit configuration
+### 🚦 Rate-limit configuration
 
 | Section | Purpose |
 |---|---|

@@ -10,6 +10,16 @@ luadch and for contributors reviewing security-relevant changes. The
 detailed audit findings live in
 [`docs/phases/PHASE_7_FINDINGS.md`](phases/PHASE_7_FINDINGS.md).
 
+- [1. Threat model](#1-threat-model)
+- [2. Plugin trust contract](#2-plugin-trust-contract)
+- [3. Password storage and the ADC `BASE` constraint](#3-password-storage-and-the-adc-base-constraint)
+- [4. File-permission baseline](#4-file-permission-baseline)
+- [5. Network-level defenses](#5-network-level-defenses)
+- [6. TLS configuration](#6-tls-configuration)
+- [7. CVE / dependency tracking](#7-cve-dependency-tracking)
+- [8. Reporting a security issue](#8-reporting-a-security-issue)
+- [9. Audit history](#9-audit-history)
+
 ---
 
 ## 1. Threat model
