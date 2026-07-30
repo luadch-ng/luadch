@@ -40,10 +40,10 @@
 
     Four traps this deliberately avoids:
       - Do NOT assert the value is a string. Plenty of legitimate keys are
-        TABLES (`ucmd_menu*` right-click menu structures, `month_name`,
-        cmd_ascii's `pics`). An earlier draft asserted `type(v)=="string"`
-        and produced 149 false positives out of 151 hits. Existence is the
-        invariant; the type is the plugin's business.
+        TABLES (`ucmd_menu*` right-click menu structures, `month_name`).
+        An earlier draft asserted `type(v)=="string"` and produced 149
+        false positives out of 151 hits. Existence is the invariant; the
+        type is the plugin's business.
       - Comments are stripped first, so a `lang.X` mentioned in a header
         changelog cannot trip a false positive.
       - No shell/`io.popen` globbing. A native Windows Lua routes popen

@@ -1303,7 +1303,7 @@ multi-write iostream rewrite SSE would need.
 
 User SELF-service commands (`+myinf`, `+myip`, `+slots`, `+sslinfo`,
 `+accinfo` self, `+nickchange` self, `+setpass` self, `+talk`,
-`+uptime`, `+hubinfo`, `+rules`, `+ascii`, `+hubstats` user-side,
+`+uptime`, `+hubinfo`, `+rules`, `+hubstats` user-side,
 `+help`) are excluded - users already have an ADC session for these.
 Operator-side inspection of an arbitrary user's INF / slots / SSL
 info lives in `GET /v1/users/{sid}` per §10.1; the exclusions
