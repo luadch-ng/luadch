@@ -97,14 +97,14 @@ end
 
 do
     reset( )
-    _json_files[ "lang/en.json" ] = { hub_hub_is_full = "Hub is full." }
+    _json_files[ "lang/en/hub.json" ] = { hub_hub_is_full = "Hub is full." }
     local t, err = cfg_lang.loadlanguage( "en", nil, CORE, SCRIPTS )
     eq( "core/json: value from JSON",        t.hub_hub_is_full, "Hub is full." )
     eq( "core/json: err nil",                err, nil )
     eq( "core/json: exactly one loader call", #_calls, 1 )
     eq( "core/json: probed the JSON path",   _calls[ 1 ] and _calls[ 1 ].fn, "json" )
-    eq( "core/json: JSON path is lang/en.json",
-        _calls[ 1 ] and _calls[ 1 ].path, "lang/en.json" )
+    eq( "core/json: JSON path is lang/en/hub.json",
+        _calls[ 1 ] and _calls[ 1 ].path, "lang/en/hub.json" )
     eq( "core/json: no error logged",        _out_error_calls, 0 )
 end
 
@@ -120,23 +120,23 @@ do
     eq( "core/fallback: err nil",            err, nil )
     eq( "core/fallback: two loader calls",   #_calls, 2 )
     eq( "core/fallback: JSON probed first",  _calls[ 1 ] and _calls[ 1 ].fn, "json" )
-    eq( "core/fallback: JSON path first",    _calls[ 1 ] and _calls[ 1 ].path, "lang/en.json" )
+    eq( "core/fallback: JSON path first",    _calls[ 1 ] and _calls[ 1 ].path, "lang/en/hub.json" )
     eq( "core/fallback: .tbl probed second", _calls[ 2 ] and _calls[ 2 ].fn, "lua" )
     eq( "core/fallback: .tbl path is lang/en.tbl", _calls[ 2 ] and _calls[ 2 ].path, "lang/en.tbl" )
     eq( "core/fallback: no error logged",    _out_error_calls, 0 )
 end
 
 ----------------------------------------------------------------------
--- 3. plugin, JSON present -> path is <scripts><name>.lang.<lng>.json
+-- 3. plugin, JSON present -> path is <scripts_lang><lng>/<name>.json
 ----------------------------------------------------------------------
 
 do
     reset( )
-    _json_files[ "scripts/lang/cmd_reg.lang.en.json" ] = { msg_ok = "ok" }
+    _json_files[ "scripts/lang/en/cmd_reg.json" ] = { msg_ok = "ok" }
     local t = cfg_lang.loadlanguage( "en", "cmd_reg", CORE, SCRIPTS )
     eq( "plugin/json: value from JSON",      t.msg_ok, "ok" )
     eq( "plugin/json: JSON path shape",
-        _calls[ 1 ] and _calls[ 1 ].path, "scripts/lang/cmd_reg.lang.en.json" )
+        _calls[ 1 ] and _calls[ 1 ].path, "scripts/lang/en/cmd_reg.json" )
     eq( "plugin/json: one call only",        #_calls, 1 )
 end
 
@@ -151,7 +151,7 @@ do
     eq( "plugin/fallback: value from .lang.de", t.msg_ok, "ok-de" )
     eq( "plugin/fallback: JSON probed first", _calls[ 1 ] and _calls[ 1 ].fn, "json" )
     eq( "plugin/fallback: JSON path shape",
-        _calls[ 1 ] and _calls[ 1 ].path, "scripts/lang/cmd_reg.lang.de.json" )
+        _calls[ 1 ] and _calls[ 1 ].path, "scripts/lang/de/cmd_reg.json" )
     eq( "plugin/fallback: legacy path shape",
         _calls[ 2 ] and _calls[ 2 ].path, "scripts/lang/cmd_reg.lang.de" )
 end
@@ -166,7 +166,7 @@ end
 
 do
     reset( )
-    _json_errors[ "lang/en.json" ] = "json parse error"    -- present but corrupt
+    _json_errors[ "lang/en/hub.json" ] = "json parse error"    -- present but corrupt
     _lua_files[ "lang/en.tbl" ]    = { hub_hub_is_full = "from tbl" }
     local t, err = cfg_lang.loadlanguage( "en", nil, CORE, SCRIPTS )
     eq( "malformed-json: value from .tbl fallback", t.hub_hub_is_full, "from tbl" )

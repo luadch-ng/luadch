@@ -197,31 +197,36 @@ Order in the array determines listener-chain order - see
 
 ### 3.5 Language files
 
-Plugins with user-facing strings ship per-language `.lang` files:
+Plugins with user-facing strings ship a per-language JSON file in a
+per-language subdirectory (the Weblate-friendly layout since the #301
+P3 i18n migration):
 
 ```
-scripts/lang/etc_my_plugin.lang.en
-scripts/lang/etc_my_plugin.lang.de
+scripts/lang/en/etc_my_plugin.json
+scripts/lang/de/etc_my_plugin.json
 ```
 
-Each file is a Lua table of key/value strings. The hub picks the
+Each file is a JSON object of key/value strings. The hub picks the
 file matching the `language` cfg key. Loading happens via
 [`cfg.loadlanguage()`](../core/cfg.lua) and the plugin reads keys
-via the returned table.
+via the returned table. (The loader is dual-format: if no `.json` is
+present it falls back to a legacy flat Lua table at
+`scripts/lang/<name>.lang.<lng>`, so an un-migrated third-party plugin
+keeps working - but new plugins ship JSON.)
 
-Worked example. The `.lang.en` file returns a table:
+Worked example. `scripts/lang/en/etc_my_plugin.json`:
 
-```lua
--- scripts/lang/etc_my_plugin.lang.en
-return {
-    ["etc_my_plugin_msg_done"] = "Done.",
-    ["etc_my_plugin_err_denied"] = "You are not allowed to do that.",
+```json
+{
+    "etc_my_plugin_msg_done": "Done.",
+    "etc_my_plugin_err_denied": "You are not allowed to do that."
 }
 ```
 
 The plugin loads it once at scope top and reads each key with an
 in-source fallback (the pattern every bundled plugin uses, e.g.
-`scripts/etc_aliases.lua`):
+`scripts/etc_aliases.lua`) - the plugin-side code is identical
+regardless of the on-disk format:
 
 ```lua
 local scriptname = "etc_my_plugin"
@@ -230,9 +235,9 @@ local lang       = cfg.loadlanguage( scriptlang, scriptname ) or { }
 local msg_done   = lang.etc_my_plugin_msg_done or "Done."  -- fallback if the key is missing
 ```
 
-Ship every operator-visible string this way in BOTH `.lang.en` and
-`.lang.de` (all-or-nothing), and keep DC jargon (Hub, Slot, Share, OP,
-Kick, Ban, Nick, PM) in English in both files.
+Ship every operator-visible string this way in BOTH `en/` and `de/`
+(all-or-nothing), and keep DC jargon (Hub, Slot, Share, OP, Kick, Ban,
+Nick, PM) in English in both files.
 
 ### 3.6 Plugin state persistence
 

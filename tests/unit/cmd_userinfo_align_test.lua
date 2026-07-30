@@ -76,8 +76,15 @@ local function count_sub( s, sub )
     while true do local j = s:find( sub, i, true ); if not j then break end; n = n + 1; i = j + 1 end
     return n
 end
+-- Lang files are per-language JSON now (#301 P3): scripts/lang/<lng>/<name>.json.
+-- Decode with the same bundled dkjson the hub uses.
+local _dkjson = assert( loadfile( "dkjson/dkjson.lua" ) )( )
 local function load_lang( path )
-    return ( assert( loadfile( path ) )( ) ).msg_userinfo
+    local f = assert( io.open( path, "rb" ) )
+    local s = f:read( "*a" )
+    f:close( )
+    local t = assert( _dkjson.decode( s, 1, nil ) )
+    return t.msg_userinfo
 end
 
 ----------------------------------------------------------------------
@@ -101,8 +108,8 @@ local function check_lang( name, path, sample_label )
     ok( name .. ": translated label preserved (" .. sample_label .. ")", contains( aligned, sample_label ) )
 end
 
-check_lang( "EN", "scripts/lang/cmd_userinfo.lang.en", "Received:" )
-check_lang( "DE", "scripts/lang/cmd_userinfo.lang.de", "Empfangen:" )
+check_lang( "EN", "scripts/lang/en/cmd_userinfo.json", "Received:" )
+check_lang( "DE", "scripts/lang/de/cmd_userinfo.json", "Empfangen:" )
 
 ----------------------------------------------------------------------
 -- guard the OTHER half of the fix: the value args must carry no fixed

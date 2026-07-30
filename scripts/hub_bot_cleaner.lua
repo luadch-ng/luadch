@@ -6,7 +6,7 @@
 
         v0.5:
             - route the ops-report literal through lang. New lang file
-              scripts/lang/hub_bot_cleaner.lang.{de,en}. Part of #301
+              scripts/lang/{de,en}/hub_bot_cleaner.json. Part of #301
               i18n cleanup.
 
         v0.4: by pulsar

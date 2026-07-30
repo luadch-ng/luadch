@@ -1,7 +1,0 @@
-return {
-
-    -- Sent to the ops report channel after the cleaner sweep removes
-    -- an orphaned bot account. %s is the bot's nick.
-    msg_deleted_bot = "[ BOT CLEANER ]--> deleted unused bot:  %s",
-
-}

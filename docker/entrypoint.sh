@@ -52,7 +52,7 @@ mkdir -p "${LUADCH_HOME}/log"
 #   scripts/cfg/*.tbl      - per-plugin operator settings
 #   scripts/<dir>/         - any other subdirectory
 #
-# scripts/lang/*.lang.* is handled separately in block 1c below
+# scripts/lang/<lng>/*.json is handled separately in block 1c below
 # (add-only, never overwrite).
 #
 # Operators who hand-patched a bundled .lua (rare, discouraged) can
@@ -80,7 +80,7 @@ if [ "${LUADCH_AUTOSYNC_SCRIPTS:-1}" = "1" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 1c. Auto-add NEW bundled scripts/lang/*.lang.* from /defaults
+# 1c. Auto-add NEW bundled scripts/lang/<lng>/*.json from /defaults
 # ---------------------------------------------------------------------------
 # When a release ships a new plugin or adds i18n infrastructure to an
 # existing one, the bundled .lua lands via 1b but the matching language
@@ -90,8 +90,8 @@ fi
 # operators but visibly broken for non-English ones.
 #
 # This block closes the gap with a STRICTLY ADD-ONLY copy: bundled
-# .lang.* files that don't exist on the operator's mount are added,
-# but existing files are NEVER overwritten. That preserves any
+# per-language JSON files that don't exist on the operator's mount are
+# added, but existing files are NEVER overwritten. That preserves any
 # operator-customized translations / MOTD strings - the same
 # "operator's edits are sacred" rule the lang/ tree was carved out
 # from 1b for.
@@ -100,14 +100,17 @@ fi
 # steady-state restarts (target exists -> skipped).
 if [ "${LUADCH_AUTOSYNC_SCRIPTS:-1}" = "1" ]; then
     added=0
-    mkdir -p "${LUADCH_HOME}/scripts/lang"
-    for f in "${DEFAULTS}"/scripts/lang/*.lang.*; do
+    # Lang files live in per-language subdirs since the #301 P3 JSON
+    # migration: scripts/lang/<lng>/<name>.json. Preserve that layout on
+    # the operator mount, creating the language subdir as needed.
+    for f in "${DEFAULTS}"/scripts/lang/*/*.json; do
         [ -f "$f" ] || continue
-        n=$(basename "$f")
-        target="${LUADCH_HOME}/scripts/lang/${n}"
+        rel=${f#"${DEFAULTS}/scripts/lang/"}          # <lng>/<name>.json
+        target="${LUADCH_HOME}/scripts/lang/${rel}"
         if [ ! -e "$target" ]; then
+            mkdir -p "$(dirname "$target")"
             cp "$f" "$target"
-            log "auto-added new bundled lang file: ${n}"
+            log "auto-added new bundled lang file: ${rel}"
             added=$((added + 1))
         fi
     done

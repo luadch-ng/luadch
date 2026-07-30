@@ -1,6 +1,0 @@
-﻿return {
-
-    msg_invalid = "Invalid named parameter in inf: ",
-    msg_failedauth_reason = "User sent offending flag in INF: ",
-
-}

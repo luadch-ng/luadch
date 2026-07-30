@@ -53,20 +53,25 @@ end
 -- a missing file (returns "not found" without logging), so the probe for
 -- an un-migrated file costs one failed io.open and no log noise.
 --
--- JSON file naming (what Weblate will translate):
---   core:   <core_lang_path><language>.json          e.g. lang/en.json
---   plugin: <scripts_lang_path><name>.lang.<language>.json
---                                        e.g. scripts/lang/cmd_reg.lang.en.json
+-- JSON files live in a per-language SUBDIRECTORY (#301 P3), the standard
+-- i18n layout Weblate expects (mask `<dir>/*/<file>.json`, `*` = language)
+-- and one that stays tidy as languages are added - a flat dir would grow
+-- to (plugins x languages) entries. The legacy Lua fallback keeps its old
+-- FLAT path, so a not-yet-migrated third-party plugin still loads:
+--   core:   <core_lang_path><language>/hub.json         e.g. lang/en/hub.json
+--           (legacy fallback: <core_lang_path><language>.tbl)
+--   plugin: <scripts_lang_path><language>/<name>.json   e.g. scripts/lang/en/cmd_reg.json
+--           (legacy fallback: <scripts_lang_path><name>.lang.<language>)
 local function loadlanguage( language, name, core_lang_path, scripts_lang_path )
     language = tostring( language )
     local lua_path, json_path
     if not name then
         lua_path  = core_lang_path .. language .. ".tbl"
-        json_path = core_lang_path .. language .. ".json"
+        json_path = core_lang_path .. language .. "/hub.json"
     else
         name = tostring( name )
         lua_path  = scripts_lang_path .. name .. ".lang." .. language
-        json_path = lua_path .. ".json"
+        json_path = scripts_lang_path .. language .. "/" .. name .. ".json"
     end
     local ret, err = util_loadjsontable( json_path )
     if not ret then
