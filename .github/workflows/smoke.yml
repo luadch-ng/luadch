@@ -123,11 +123,11 @@ jobs:
       - name: Run hbri unit test
         run: lua5.4 tests/unit/hbri_test.lua
 
-      # #301 PR-1: lang-table coverage. Verifies every i18n key required
-      # by core/hub.lua exists in BOTH lang/de.tbl and en.tbl
-      # (missing keys would silently fall through to the hardcoded
-      # English default), plus the de/en parity that future translation
-      # tooling depends on.
+      # #301: lang-table coverage. Verifies every i18n key required
+      # by core/hub.lua exists in BOTH lang/de.json and en.json (core
+      # lang migrated .tbl -> JSON in P3; missing keys would silently
+      # fall through to the hardcoded English default), plus the de/en
+      # parity that Weblate and other translation tooling depend on.
       - name: Run lang unit test
         run: lua5.4 tests/unit/lang_test.lua
 
