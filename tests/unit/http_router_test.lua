@@ -360,6 +360,59 @@ do
 end
 
 ----------------------------------------------------------------------
+-- dispatch: OPTIONS introspection must not be an unauthenticated
+-- path-existence oracle (Part of #533). The normal 405/404 outcomes
+-- only reveal path existence to an authenticated caller, so anonymous
+-- OPTIONS on an auth-gated path must 401 just like a GET would; only a
+-- scope="none" (public) path or an authenticated caller gets 204+Allow.
+-- RED pre-fix: anonymous OPTIONS on an auth-gated path returned
+-- 204+Allow (introspection ran before auth).
+----------------------------------------------------------------------
+
+do
+    router.unregister_all( )
+    local h = function( ) return { status = 200, data = { } } end
+    router.register( "GET",  "/v1/probe", "read",  h )   -- auth-gated path
+    router.register( "POST", "/v1/probe", "admin", h )
+    router.register( "GET",  "/v1/pub",   "none",  h )   -- public path
+    _stub_cfg_tokens = { [ "VALIDREADTOKEN0001" ] = { scope = "read" } }
+
+    local function opt( path, token )
+        local headers = { }
+        if token then headers[ "authorization" ] = "Bearer " .. token end
+        return router.dispatch(
+            { method = "OPTIONS", target = path, headers = headers, body = nil },
+            "127.0.0.1" )
+    end
+    local function allows( hdrs, m )
+        return hdrs and hdrs[ "Allow" ] and hdrs[ "Allow" ]:find( m, 1, true ) ~= nil
+    end
+
+    -- anonymous OPTIONS on the auth-gated path: 401, no Allow leak.
+    local st, _b, hdrs = opt( "/v1/probe", nil )
+    eq( "OPTIONS anon auth-gated path -> 401", st, 401 )
+    eq( "OPTIONS anon auth-gated: no Allow leak", hdrs and hdrs[ "Allow" ], nil )
+
+    -- authenticated OPTIONS on the same path: 204 + Allow(GET,HEAD,OPTIONS).
+    local st2, _b2, hdrs2 = opt( "/v1/probe", "VALIDREADTOKEN0001" )
+    eq( "OPTIONS authed auth-gated path -> 204", st2, 204 )
+    eq( "OPTIONS authed: Allow lists GET",     allows( hdrs2, "GET" ),     true )
+    eq( "OPTIONS authed: Allow lists HEAD",    allows( hdrs2, "HEAD" ),    true )
+    eq( "OPTIONS authed: Allow lists OPTIONS", allows( hdrs2, "OPTIONS" ), true )
+
+    -- anonymous OPTIONS on a public (scope="none") path: still 204.
+    local st3, _b3, hdrs3 = opt( "/v1/pub", nil )
+    eq( "OPTIONS anon public path -> 204", st3, 204 )
+    eq( "OPTIONS anon public: Allow present", allows( hdrs3, "GET" ), true )
+
+    -- anonymous OPTIONS on an unknown path: 401 (unchanged).
+    eq( "OPTIONS anon unknown path -> 401", ( opt( "/v1/unknown", nil ) ), 401 )
+
+    router.unregister_all( )
+    _stub_cfg_tokens = { }
+end
+
+----------------------------------------------------------------------
 
 io.write( string.format( "\n%d checks, %d failures\n", checks, failures ) )
 os.exit( failures == 0 and 0 or 1 )
