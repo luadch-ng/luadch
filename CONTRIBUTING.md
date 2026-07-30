@@ -57,6 +57,14 @@ authorship intact. No need to close and reopen it.
 - **`tests/`** - unit tests (`tests/unit/`) and the smoke harness
   (`tests/smoke/run.py`).
 
+## Translating
+
+You do not need to touch code to help. luadch is translated on Weblate at
+[translate.dcvault.net](https://translate.dcvault.net/) - pick the `luadch`
+project and your language. Translations flow back into the repo automatically;
+see [`docs/TRANSLATING.md`](docs/TRANSLATING.md) for the how-to and the rules
+(keep `%s` placeholders, keep DC jargon in English).
+
 ## Reporting bugs
 
 Open an issue with the hub version (`+hubinfo` output or the boot line in

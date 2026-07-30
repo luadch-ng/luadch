@@ -123,20 +123,21 @@ jobs:
       - name: Run hbri unit test
         run: lua5.4 tests/unit/hbri_test.lua
 
-      # #301: lang-table coverage. Verifies every i18n key required
-      # by core/hub.lua exists in BOTH lang/de/hub.json and en/hub.json
-      # (core lang migrated .tbl -> JSON in a per-language subdir in P3;
-      # missing keys would silently fall through to the hardcoded English
-      # default), plus the de/en parity Weblate and other translation
-      # tooling depend on.
+      # #301: core lang coverage. EN (lang/en/hub.json) is the strict
+      # source of truth - every key core/hub.lua needs must exist there.
+      # DE (lang/de/hub.json) is Weblate-managed and may be incomplete (an
+      # untranslated key falls back to the hardcoded English default), so
+      # it is checked only for orphan keys and %s/%d placeholder parity on
+      # what it does translate.
       - name: Run lang unit test
         run: lua5.4 tests/unit/lang_test.lua
 
       # Repo-wide plugin lang-key consistency. For every bundled plugin
       # that ships lang files (scripts/lang/<lng>/<name>.json since the P3
       # migration; legacy flat .lang.<lng> still accepted), scans the source
-      # for each lang.X reference and asserts X is defined in both de and en.
-      # Catches
+      # for each lang.X reference and asserts X is defined in EN (the source
+      # of truth). DE is Weblate-managed: may be incomplete, but no orphan
+      # keys and %s parity on translated strings. Catches
       # the drift class that silently kills a translation: the lookup
       # returns nil, the `or "<english>"` fallback fires, and no error is
       # ever raised. Supersedes the former usr_share-only test (#301 PR-2,

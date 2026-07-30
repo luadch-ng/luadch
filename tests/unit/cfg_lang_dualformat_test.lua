@@ -57,6 +57,7 @@ local _out_stub = { error = function( ) _out_error_calls = _out_error_calls + 1 
 local _real = {
     util = _fake_util,
     tostring = tostring,
+    pairs = pairs,
     out = _out_stub,
 }
 _G.use = function( name )
@@ -186,6 +187,27 @@ do
     eq( "both-absent: table is empty",        next( t ), nil )
     eq( "both-absent: err is a string",       type( err ), "string" )
     eq( "both-absent: error was logged",      _out_error_calls >= 1, true )
+end
+
+----------------------------------------------------------------------
+-- 6. empty-string values are dropped (Weblate untranslated -> English
+--    fallback). checklanguage strips "" so lang.key is nil and the call
+--    site's `... or "<english>"` fires, instead of a truthy "" blanking
+--    the line. Non-empty values and nested tables survive.
+----------------------------------------------------------------------
+
+do
+    reset( )
+    _json_files[ "scripts/lang/en/foo.json" ] = {
+        translated = "Hello",
+        untranslated = "",                 -- Weblate untranslated marker
+        menu = { "a", "b" },               -- nested table must survive
+    }
+    local t = cfg_lang.loadlanguage( "en", "foo", CORE, SCRIPTS )
+    eq( "empty-drop: translated key kept",     t.translated, "Hello" )
+    eq( "empty-drop: empty key removed (-> nil)", t.untranslated, nil )
+    eq( "empty-drop: nested table survives",   type( t.menu ), "table" )
+    eq( "empty-drop: nested table intact",     t.menu[ 2 ], "b" )
 end
 
 ----------------------------------------------------------------------

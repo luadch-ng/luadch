@@ -7,12 +7,17 @@
     per-language subdir in the #301 P3 Weblate move; the runtime loads
     them via the dual-format cfg_lang.loadlanguage). Verifies that
 
-      (a) every key required by core (see _REQUIRED below) exists in both
-          tables - missing a key would silently fall through to the hardcoded
-          English literal in core/hub.lua at runtime, defeating the i18n
-          migration; and
-      (b) de and en have full key parity (any key in one must exist in the
-          other) - the Weblate-readiness invariant called out in #301.
+      (a) every key required by core (see _REQUIRED below) exists in EN,
+          the source of truth; DE is checked only where present, since a
+          Weblate-managed translation may legitimately be incomplete and
+          the runtime falls back to the hardcoded English literal;
+      (b) no ORPHAN de keys (every de key must exist in en) - a de key the
+          source dropped is dead weight; the reverse is NOT required (an
+          untranslated en key is expected in the Weblate era); and
+      (c) placeholder parity: every translated de string carries the same
+          ordered printf-conversion signature (type AND order, not just
+          count) as its en source, so a reordered or dropped %s / %d
+          cannot break string.format at runtime.
 
     #301 (i18n PR-1) adds 13 new keys (hbri x5 + zlif x2 + reg x5 + tls
     label). This test FAILS on master (those keys are absent) and PASSES on
@@ -97,36 +102,52 @@ local function check( label, ok )
     end
 end
 
--- (a) Every required key present in BOTH tables, non-empty string.
+-- (a) EN is the source of truth: every required key must exist and be a
+-- non-empty string in EN. DE is translator-managed (Weblate) and may be
+-- INCOMPLETE - an untranslated key is simply absent, and core/hub.lua
+-- falls back to its hardcoded English literal - so DE is checked only
+-- where it actually carries the key.
 for _, key in ipairs( _REQUIRED ) do
-    check( "de." .. key .. " present",
-           type( de[ key ] ) == "string" and de[ key ] ~= "" )
-    check( "en." .. key .. " present",
+    check( "en." .. key .. " present (source)",
            type( en[ key ] ) == "string" and en[ key ] ~= "" )
+    if de[ key ] ~= nil then
+        check( "de." .. key .. " (if translated) is a non-empty string",
+               type( de[ key ] ) == "string" and de[ key ] ~= "" )
+    end
 end
 
--- (b) Full key parity: every key in one must exist in the other. Weblate
--- and any future translation tooling depend on this.
+-- (b) No orphan translations: every DE key must exist in EN. A DE key the
+-- source no longer defines is dead weight a translator keeps maintaining.
+-- The reverse (an EN key missing in DE) is NOT required post-Weblate -
+-- that is just an untranslated string, covered by the English fallback.
 for key in pairs( de ) do
-    check( "parity: en has key " .. key, en[ key ] ~= nil )
-end
-for key in pairs( en ) do
-    check( "parity: de has key " .. key, de[ key ] ~= nil )
+    check( "no orphan: en has de key " .. key, en[ key ] ~= nil )
 end
 
--- (c) login_tls_label MUST contain a single %s - hub.lua formats the TLS
--- mode through it. A translator dropping the placeholder would silently
--- break the login banner. (Other format-bearing keys are validated by
--- the existing en.hub_login_message convention.)
-local function count_pct_s( s )
-    local n = 0
-    for _ in s:gmatch( "%%s" ) do n = n + 1 end
-    return n
+-- (c) + (d) Placeholder safety. `fmt_sig` returns the ORDERED sequence of
+-- printf conversion-type letters (`%s`->"s", `%-20d`->"d") after removing
+-- the literal `%%`. Lua string.format fills arguments positionally, so a
+-- translation must keep not just the COUNT but the exact TYPE and ORDER: a
+-- German word-order swap of `"%s ... %d"` into `"%d ... %s"` has the same
+-- count yet crashes ("number expected, got string"). EN's login banner
+-- label carries a single %s; every DE string that is actually translated
+-- must share EN's signature (Weblate flags this too; CI is the backstop).
+local function fmt_sig( s )
+    s = ( s:gsub( "%%%%", "" ) )
+    local out = { }
+    for spec in s:gmatch( "%%[%-+ #0-9.]*([%a])" ) do
+        out[ #out + 1 ] = spec
+    end
+    return table.concat( out )
 end
-check( "de.hub_login_tls_label has exactly one %s",
-       count_pct_s( de.hub_login_tls_label or "" ) == 1 )
-check( "en.hub_login_tls_label has exactly one %s",
-       count_pct_s( en.hub_login_tls_label or "" ) == 1 )
+check( "en.hub_login_tls_label signature is a single %s",
+       fmt_sig( en.hub_login_tls_label or "" ) == "s" )
+for key, v in pairs( en ) do
+    if type( v ) == "string" and type( de[ key ] ) == "string" and de[ key ] ~= "" then
+        check( "de." .. key .. " placeholder signature matches en",
+               fmt_sig( de[ key ] ) == fmt_sig( v ) )
+    end
+end
 
 io.write( string.format( "\n%d/%d checks passed\n", checks - failures, checks ) )
 if failures > 0 then

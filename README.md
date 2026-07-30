@@ -90,6 +90,8 @@ and operator guidance.
   reference (listeners, modules, objects, conventions, pitfalls)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - which branch to target, what a
   PR needs, how to report a bug
+- **[docs/TRANSLATING.md](docs/TRANSLATING.md)** - help translate luadch on
+  Weblate ([translate.dcvault.net](https://translate.dcvault.net/))
 - **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - engineering how-to:
   authoring core modules, plugin conventions, testing, security
   checklists, Definition of Done
