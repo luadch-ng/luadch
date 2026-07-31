@@ -1,17 +1,23 @@
 {
-  "help_desc":"Liefert Informationen über einen User oder dich selbst",
-  "help_title":"cmd_userinfo.lua",
-  "help_usage":"[+!#]userinfo sid|nick <SID>|<NICK>",
-  "msg_days":" Tage, ",
-  "msg_god":"Du bist nicht befugt die Userinfo dieses Users abzufragen",
-  "msg_hours":" Std, ",
-  "msg_minutes":" Min, ",
-  "msg_off":"User nicht gefunden.",
-  "msg_seconds":" Sek",
-  "msg_unknown":"<UNBEKANNT>",
-  "msg_usage":"Gebrauch: [+!#]userinfo sid|nick <SID>|<NICK>",
-  "msg_userinfo":"\n\n=== USERINFO =============================================================================\n\nNick: %s\n1. Nick: %s\nDesc:  %s\nShare:  %s\nEmail:  %s\nSlots:  %s\nHubs:  %s\nVersion:  %s\nSID:  %s\nCID: %s\nKP: %s\nHash:  %s\nIP: %s\nPort: %s\nSrvport: %s\nSSL: %s\nSU: %s\nBot: %s\nRank: %s\nLevel: %s  [ %s ]\nReguser: %s\n\nGesendet: %s\nEmpfangen: %s\n\nUptime: %s\n\n============================================================================= USERINFO ===\n\n   ",
-  "msg_years":" Jahre, ",
-  "ucmd_menu_ct1":["Über Dich","zeige Userinfo"],
-  "ucmd_menu_ct2":["Anzeigen","Userinfo"]
+    "help_desc": "Liefert Informationen über einen User oder dich selbst",
+    "help_title": "cmd_userinfo.lua",
+    "help_usage": "[+!#]userinfo sid|nick <SID>|<NICK>",
+    "msg_days": " Tage, ",
+    "msg_god": "Du bist nicht befugt die Userinfo dieses Users abzufragen",
+    "msg_hours": " Std, ",
+    "msg_minutes": " Min, ",
+    "msg_off": "User nicht gefunden.",
+    "msg_seconds": " Sek",
+    "msg_unknown": "<UNBEKANNT>",
+    "msg_usage": "Gebrauch: [+!#]userinfo sid|nick <SID>|<NICK>",
+    "msg_userinfo": "\n    \n=== USERINFO =============================================================================\n\nNick: %s\n1. Nick: %s\nDesc:  %s\nShare:  %s\nEmail:  %s\nSlots:  %s\nHubs:  %s\nVersion:  %s\nSID:  %s\nCID: %s\nKP: %s\nHash:  %s\nIP: %s\nPort: %s\nSrvport: %s\nSSL: %s\nSU: %s\nBot: %s\nRank: %s\nLevel: %s  [ %s ]\nReguser: %s\n\nGesendet: %s\nEmpfangen: %s\n\nUptime: %s\n\n============================================================================= USERINFO ===\n\n  ",
+    "msg_years": " Jahre, ",
+    "ucmd_menu_ct1": [
+        "Über Dich",
+        "zeige Userinfo"
+    ],
+    "ucmd_menu_ct2": [
+        "Anzeigen",
+        "Userinfo"
+    ]
 }
