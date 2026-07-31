@@ -135,7 +135,12 @@ end
 local function fmt_sig( s )
     s = ( s:gsub( "%%%%", "" ) )
     local out = { }
-    for spec in s:gmatch( "%%[%-+ #0-9.]*([%a])" ) do
+    -- No space in the flag class on purpose: luadch format strings use no
+    -- space-flag conversions, and allowing one makes a literal percent in
+    -- free-form translator text ("50% der Dateien") parse as a phantom "% d"
+    -- spec, so a legitimate translation would fail the placeholder check and
+    -- stall the whole funnel. Real specs (%s %d %-20s %.2f) are unaffected.
+    for spec in s:gmatch( "%%[%-+#0-9.]*([%a])" ) do
         out[ #out + 1 ] = spec
     end
     return table.concat( out )
@@ -146,6 +151,36 @@ for key, v in pairs( en ) do
     if type( v ) == "string" and type( de[ key ] ) == "string" and de[ key ] ~= "" then
         check( "de." .. key .. " placeholder signature matches en",
                fmt_sig( de[ key ] ) == fmt_sig( v ) )
+    end
+end
+
+-- (e) Extra translator-managed languages (the Weblate funnel gate).
+-- Unset in the normal smoke run, so ONLY de is checked above (the current
+-- behaviour, and Windows-portable - no directory globbing here). The Weblate
+-- funnel workflow enumerates the languages it is importing on its Linux runner
+-- and passes them via LANG_TEST_EXTRA_CODES (comma/space separated) so each
+-- gets exactly the orphan + placeholder-signature checks de gets: an imported
+-- translation with an orphan key or a reordered/dropped %s never reaches dev.
+-- Empty (untranslated) values are skipped, mirroring the runtime's
+-- checklanguage, so a partially-translated language passes on what it HAS.
+local extra = os.getenv( "LANG_TEST_EXTRA_CODES" )
+if extra and extra ~= "" then
+    for lng in extra:gmatch( "[^,%s]+" ) do
+        if lng ~= "en" and lng ~= "de" then
+            local path = "lang/" .. lng .. "/hub.json"
+            local f = io.open( path, "rb" )
+            if f then
+                f:close( )
+                local t = load_lang( path )
+                for key, v in pairs( t ) do
+                    check( lng .. ": no orphan, en has key " .. key, en[ key ] ~= nil )
+                    if type( v ) == "string" and v ~= "" and type( en[ key ] ) == "string" then
+                        check( lng .. "." .. key .. " placeholder signature matches en",
+                               fmt_sig( v ) == fmt_sig( en[ key ] ) )
+                    end
+                end
+            end
+        end
     end
 end
 
