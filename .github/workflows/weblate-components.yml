@@ -44,7 +44,7 @@ jobs:
       - name: Create missing Weblate components
         env:
           WEBLATE_URL: https://translate.dcvault.net
-          WEBLATE_PROJECT: luadch
+          WEBLATE_PROJECT: ${{ vars.WEBLATE_PROJECT }}   # defaults to 'luadch' in the script
           WEBLATE_CORE_SLUG: ${{ vars.WEBLATE_CORE_SLUG }}
           WEBLATE_API_TOKEN: ${{ secrets.WEBLATE_API_TOKEN }}
         run: |

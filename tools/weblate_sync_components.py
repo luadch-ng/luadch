@@ -36,7 +36,9 @@ from glob import glob
 
 URL = os.environ.get("WEBLATE_URL", "").rstrip("/")
 TOKEN = os.environ.get("WEBLATE_API_TOKEN", "")
-PROJECT = os.environ.get("WEBLATE_PROJECT", "luadch")
+# `or "luadch"` (not the .get default) so an env var set to the empty string
+# - as GitHub Actions passes an unset `vars.WEBLATE_PROJECT` - still falls back.
+PROJECT = os.environ.get("WEBLATE_PROJECT") or "luadch"
 CORE_SLUG = os.environ.get("WEBLATE_CORE_SLUG", "").strip()
 
 if not URL or not TOKEN:
@@ -83,6 +85,11 @@ core_candidates = set()
 nxt = COMPONENTS + "?page_size=100"
 while nxt:
     status, page = api("GET", nxt)
+    if status == 404:
+        sys.exit(
+            f"error: project '{PROJECT}' not found (404) - check the project slug "
+            f"in the Weblate URL (/projects/<slug>/) and set WEBLATE_PROJECT"
+        )
     if status != 200 or not isinstance(page, dict):
         sys.exit(f"error: listing components failed ({status}): {page}")
     for comp in page.get("results", []):
