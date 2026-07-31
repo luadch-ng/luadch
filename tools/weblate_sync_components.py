@@ -45,11 +45,24 @@ if not URL or not TOKEN:
 COMPONENTS = f"{URL}/api/projects/{PROJECT}/components/"
 
 
+# A browser-like User-Agent. urllib's default ("Python-urllib/3.x") is an
+# instant bot signal for a Cloudflare-fronted instance (translate.dcvault.net)
+# and gets served the "Just a moment..." challenge instead of JSON. Overridable
+# via WEBLATE_USER_AGENT for tuning without a code change.
+USER_AGENT = os.environ.get(
+    "WEBLATE_USER_AGENT",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36",
+)
+
+
 def api(method, url, data=None):
     """Return (status_code, parsed_or_text). Never raises on HTTP errors."""
     body = urllib.parse.urlencode(data).encode() if data else None
     req = urllib.request.Request(url, data=body, method=method)
     req.add_header("Authorization", f"Token {TOKEN}")
+    req.add_header("User-Agent", USER_AGENT)
+    req.add_header("Accept", "application/json")
     if body:
         req.add_header("Content-Type", "application/x-www-form-urlencoded")
     try:
