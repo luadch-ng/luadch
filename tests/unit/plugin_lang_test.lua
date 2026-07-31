@@ -197,6 +197,21 @@ check( string.format( "cfg.scripts lists at least %d plugins (found %d)",
                       MIN_PLUGINS, #names ),
        #names >= MIN_PLUGINS )
 
+-- Extra translator-managed languages to gate (the Weblate funnel gate). See
+-- lang_test.lua: unset in the normal smoke run (only de is checked, and no
+-- directory globbing here keeps the Windows leg portable), set by the funnel
+-- workflow to the languages it imports so each gets the same per-plugin orphan
+-- + placeholder-signature checks de gets, skipping empty (untranslated) values.
+local EXTRA_CODES = { }
+do
+    local extra = os.getenv( "LANG_TEST_EXTRA_CODES" )
+    if extra then
+        for lng in extra:gmatch( "[^,%s]+" ) do
+            if lng ~= "en" and lng ~= "de" then EXTRA_CODES[ #EXTRA_CODES + 1 ] = lng end
+        end
+    end
+end
+
 local scanned, total_refs, reverse_checks = 0, 0, 0
 
 for _, name in ipairs( names ) do
@@ -262,6 +277,25 @@ for _, name in ipairs( names ) do
                 if type( v ) == "string" and v ~= "" and type( en[ key ] ) == "string" then
                     check( name .. ": de." .. key .. " placeholder signature matches en",
                            fmt_sig( v ) == fmt_sig( en[ key ] ) )
+                end
+            end
+            -- Extra translator-managed languages (Weblate funnel gate): the
+            -- same orphan + placeholder checks as de, for each language the
+            -- funnel imports. A plugin that ships no file for a given language
+            -- is skipped (translator-managed, may be incomplete).
+            for _, lng in ipairs( EXTRA_CODES ) do
+                local xpath = lang_path( name, lng )
+                if xpath then
+                    local xt, xerr = load_lang( xpath )
+                    check( name .. ": ." .. lng .. " loads (" .. tostring( xerr ) .. ")", xt ~= nil )
+                    for key, v in pairs( xt or { } ) do
+                        reverse_checks = reverse_checks + 1
+                        check( name .. ": " .. lng .. " key '" .. key .. "' exists in en (no orphan)", en[ key ] ~= nil )
+                        if type( v ) == "string" and v ~= "" and type( en[ key ] ) == "string" then
+                            check( name .. ": " .. lng .. "." .. key .. " placeholder signature matches en",
+                                   fmt_sig( v ) == fmt_sig( en[ key ] ) )
+                        end
+                    end
                 end
             end
         end

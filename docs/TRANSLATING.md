@@ -62,10 +62,16 @@ That's it. Saving in Weblate is all that is required from a translator.
 
 - Weblate pulls English source from `dev` and pushes translations to a
   dedicated **`weblate`** branch (never straight to `dev`).
-- A maintainer merges the `weblate` -> `dev` pull request, so translations
-  pass the same review + CI gate as code (the CI checks English is complete
-  and consistent with the code, that a translation has no orphan keys, and
-  that every translated string keeps its `%s` / `%d` count).
+- The `weblate-funnel` workflow (weekly + on demand) opens/updates a
+  `weblate` -> `dev` pull request, but funnels **only real translations**: a
+  language that was added but not yet translated (all-empty), and files Weblate
+  only reformatted, are filtered out, so empty language skeletons never reach
+  `dev`. It gates every imported language before opening the PR (English
+  complete and consistent with the code, no orphan keys, and each translated
+  string keeps its `%s` / `%d` placeholder signature - same conversion types in
+  the same order).
+- A maintainer reviews and merges that pull request (squash), so translations
+  pass the same review as code.
 - From `dev` translations ride the normal `dev` -> `master` promotion; there
   is no separate translation release. A hub upgrade ships whatever
   translations exist at that point.
