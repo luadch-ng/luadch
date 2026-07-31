@@ -1,0 +1,56 @@
+# Auto-create a Weblate component for every new bundled plugin language file.
+#
+# luadch has one monolingual-JSON lang file per plugin (scripts/lang/<lng>/<name>.json)
+# and one Weblate component per plugin. New plugins would otherwise need a
+# component added by hand (the Component-discovery add-on is unavailable on our
+# instance). This runs tools/weblate_sync_components.py, which creates ONLY the
+# missing components over the Weblate REST API - idempotent, never modifies or
+# deletes anything.
+#
+# Runs when a plugin's English source lang file lands on dev (the source of
+# truth), and on demand. It does NOT run on pull requests, so the API token is
+# never exposed to fork PRs.
+#
+# One-time setup on the repo:
+#   - Secret  WEBLATE_API_TOKEN   (Weblate -> Settings -> API access)
+#   - Optional variable WEBLATE_CORE_SLUG (else the script auto-detects it).
+
+name: Weblate components
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'scripts/lang/en/**'
+      - 'tools/weblate_sync_components.py'
+      - '.github/workflows/weblate-components.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weblate-components
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Create missing Weblate components
+        env:
+          WEBLATE_URL: https://translate.dcvault.net
+          WEBLATE_PROJECT: luadch
+          WEBLATE_CORE_SLUG: ${{ vars.WEBLATE_CORE_SLUG }}
+          WEBLATE_API_TOKEN: ${{ secrets.WEBLATE_API_TOKEN }}
+        run: |
+          if [ -z "$WEBLATE_API_TOKEN" ]; then
+            echo "::notice::WEBLATE_API_TOKEN secret is not set - skipping." \
+                 "Add the repo secret to enable Weblate component auto-creation."
+            exit 0
+          fi
+          python3 tools/weblate_sync_components.py
