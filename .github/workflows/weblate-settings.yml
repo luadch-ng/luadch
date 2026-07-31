@@ -1,0 +1,51 @@
+# Apply translation-workflow settings to every Weblate component, from the CI
+# runner. Weblate's linked components do NOT inherit per-component settings
+# ("Adding new translation", suggestions, suggestion voting), so they must be
+# set on each of ~71 components. Doing that with tools/weblate_apply_settings.py
+# from a local machine is blocked by the Cloudflare bot challenge on write
+# methods; the GitHub Actions runner gets through (same path that created the
+# components), so this runs it there.
+#
+# Dispatch-only. Run it with "apply" unchecked first (dry run - lists what would
+# change, writes nothing), then again with "apply" checked to write.
+#
+# Requires the repo secret WEBLATE_API_TOKEN; optional var WEBLATE_PROJECT
+# (defaults to 'luadch-ng' in the script). Green-skips if the secret is unset.
+
+name: Weblate settings
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Write the changes (leave unchecked for a dry run)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weblate-settings
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Apply Weblate component settings
+        env:
+          WEBLATE_URL: https://translate.dcvault.net
+          WEBLATE_PROJECT: ${{ vars.WEBLATE_PROJECT }}   # defaults to 'luadch-ng' in the script
+          WEBLATE_API_TOKEN: ${{ secrets.WEBLATE_API_TOKEN }}
+          APPLY: ${{ inputs.apply && '1' || '' }}
+        run: |
+          if [ -z "$WEBLATE_API_TOKEN" ]; then
+            echo "::notice::WEBLATE_API_TOKEN secret is not set - skipping."
+            exit 0
+          fi
+          python3 tools/weblate_apply_settings.py
