@@ -24,6 +24,7 @@ Environment (same as tools/weblate_sync_components.py):
   WEBLATE_API_TOKEN  a Weblate API token (Settings -> API access)   (required)
   WEBLATE_PROJECT    project slug                    (default: luadch-ng)
   APPLY=1            actually write (otherwise dry run)
+  WEBLATE_ONE=<slug> restrict to one component (diagnose without a wall of output)
 
 Run from anywhere. Exit code 0 = all good, 1 = at least one failure.
 """
@@ -53,6 +54,24 @@ if not URL or not TOKEN:
 
 COMPONENTS = f"{URL}/api/projects/{PROJECT}/components/"
 
+# Test-run a single component by slug (e.g. WEBLATE_ONE=core-hub) to get one
+# clean line of output instead of a wall of errors while diagnosing.
+ONLY = os.environ.get("WEBLATE_ONE", "").strip()
+
+
+def short(resp):
+    """One-line summary of a response body - detects the Cloudflare challenge
+    page (a wall of obfuscated base32/JS) so an error is diagnosable, not a
+    50k-char dump."""
+    s = resp if isinstance(resp, str) else json.dumps(resp)
+    low = s.lower()
+    if "just a moment" in low or "cf-chl" in low or "cf_chl" in low or "challenge-platform" in low:
+        return ("Cloudflare challenge page (this request was blocked by Cloudflare, "
+                "not by Weblate - run from an allowlisted IP or the CI runner)")
+    if "<!doctype html" in low or "<html" in low:
+        return "HTML page (not JSON) - likely a proxy/Cloudflare/error page: " + s[:200].replace("\n", " ")
+    return s[:300].replace("\n", " ")
+
 # A browser-like User-Agent - urllib's default is served the Cloudflare
 # "Just a moment..." challenge on translate.dcvault.net (see weblate_sync_components.py).
 USER_AGENT = os.environ.get(
@@ -69,6 +88,8 @@ def api(method, url, data=None):
     req.add_header("Authorization", f"Token {TOKEN}")
     req.add_header("User-Agent", USER_AGENT)
     req.add_header("Accept", "application/json")
+    # Force an uncompressed body so an error page is readable text, not bytes.
+    req.add_header("Accept-Encoding", "identity")
     if body is not None:
         req.add_header("Content-Type", "application/json")
     try:
@@ -88,7 +109,7 @@ def all_components():
         if status == 404:
             sys.exit(f"error: project '{PROJECT}' not found (404) - check WEBLATE_PROJECT")
         if status != 200 or not isinstance(page, dict):
-            sys.exit(f"error: listing components failed ({status}): {page}")
+            sys.exit(f"error: listing components failed ({status}): {short(page)}")
         comps.extend(page.get("results", []))
         nxt = page.get("next")
     return comps
@@ -98,6 +119,10 @@ def main():
     comps = all_components()
     if not comps:
         sys.exit(f"error: no components found in project '{PROJECT}'")
+    if ONLY:
+        comps = [c for c in comps if c["slug"] == ONLY]
+        if not comps:
+            sys.exit(f"error: component '{ONLY}' not found (WEBLATE_ONE)")
 
     print(f"project: {PROJECT}   components: {len(comps)}   "
           f"mode: {'APPLY' if APPLY else 'DRY RUN (set APPLY=1 to write)'}")
@@ -122,7 +147,7 @@ def main():
             print(f"updated  {slug}: {change}")
             updated += 1
         else:
-            print(f"FAILED   {slug} ({status}): {resp}")
+            print(f"FAILED   {slug} ({status}): {short(resp)}")
             failed += 1
         time.sleep(0.3)
 
