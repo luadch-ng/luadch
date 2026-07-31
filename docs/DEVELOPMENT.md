@@ -195,7 +195,9 @@ The conventions below are either not in it or are easy to get wrong:
   since the #301 P3 Weblate migration; the loader still accepts a legacy flat
   `scripts/lang/<name>.lang.<lng>` Lua table as a fallback for third-party
   plugins). Keep DC jargon (Hub, Slot, Share, OP, Kick, Ban, Nick, PM) in
-  English in both files. Do not half-translate.
+  English in both files. Do not half-translate. The plugin's Weblate
+  component is created automatically when its `scripts/lang/en/<name>.json`
+  lands on `dev` (the `weblate-components` workflow); no manual Weblate step.
 - **Operator *policy* text goes in cfg, not lang.** A kick/ban reason the
   operator is meant to customise (e.g. `etc_geoip_kick_reason`) belongs in a cfg
   key, not a `.lang` key - a lang key with the same fallback silently *shadows*
