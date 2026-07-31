@@ -64,7 +64,7 @@
             - route the three operator-facing chat hints (the
               "[command]" echo, the "Did you mean +X?" forgot-prefix
               hint, and the literal-bracket hint) through lang. New
-              lang file scripts/lang/etc_hubcommands.lang.{de,en}.
+              lang file scripts/lang/{de,en}/etc_hubcommands.json.
               Part of #301 i18n cleanup.
 
         v0.05: by Aybo

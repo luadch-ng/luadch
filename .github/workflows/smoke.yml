@@ -123,17 +123,21 @@ jobs:
       - name: Run hbri unit test
         run: lua5.4 tests/unit/hbri_test.lua
 
-      # #301 PR-1: lang-table coverage. Verifies every i18n key required
-      # by core/hub.lua exists in BOTH lang/de.tbl and en.tbl
-      # (missing keys would silently fall through to the hardcoded
-      # English default), plus the de/en parity that future translation
-      # tooling depends on.
+      # #301: core lang coverage. EN (lang/en/hub.json) is the strict
+      # source of truth - every key core/hub.lua needs must exist there.
+      # DE (lang/de/hub.json) is Weblate-managed and may be incomplete (an
+      # untranslated key falls back to the hardcoded English default), so
+      # it is checked only for orphan keys and %s/%d placeholder parity on
+      # what it does translate.
       - name: Run lang unit test
         run: lua5.4 tests/unit/lang_test.lua
 
       # Repo-wide plugin lang-key consistency. For every bundled plugin
-      # that ships lang files, scans the source for each lang.X reference
-      # and asserts X is defined in both .lang.de and .lang.en. Catches
+      # that ships lang files (scripts/lang/<lng>/<name>.json since the P3
+      # migration; legacy flat .lang.<lng> still accepted), scans the source
+      # for each lang.X reference and asserts X is defined in EN (the source
+      # of truth). DE is Weblate-managed: may be incomplete, but no orphan
+      # keys and %s parity on translated strings. Catches
       # the drift class that silently kills a translation: the lookup
       # returns nil, the `or "<english>"` fallback fires, and no error is
       # ever raised. Supersedes the former usr_share-only test (#301 PR-2,
@@ -143,6 +147,20 @@ jobs:
       # msg_denied/msg_nofile), which the one-plugin test could not see.
       - name: Run plugin lang unit test
         run: lua5.4 tests/unit/plugin_lang_test.lua
+
+      # #301 P3: the sandboxed JSON table loader (util.loadjsontable) that
+      # backs the lang Lua->JSON / Weblate migration. Asserts valid JSON
+      # decodes (format specifiers intact), a MISSING file is silent (no
+      # error.log spam during the incremental migration), and a malformed
+      # / non-utf8 / non-object / unsafe-path file is a logged fault.
+      - name: Run util loadjsontable unit test
+        run: lua5.4 tests/unit/util_loadjsontable_test.lua
+
+      # #301 P3: cfg_lang.loadlanguage dual-format contract - JSON path is
+      # probed first, the legacy .tbl / .lang.X is the fallback, path shapes
+      # are correct for both core and plugin lang files.
+      - name: Run cfg_lang dual-format unit test
+        run: lua5.4 tests/unit/cfg_lang_dualformat_test.lua
 
       # #327 etc_aliases: HTTP API surface + reload-safety. Exercises
       # all four +addalias reject branches (bad_alias / conflict_command
@@ -576,6 +594,14 @@ jobs:
       - name: Run plugin lang unit test
         shell: msys2 {0}
         run: lua5.4 tests/unit/plugin_lang_test.lua
+
+      - name: Run util loadjsontable unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/util_loadjsontable_test.lua
+
+      - name: Run cfg_lang dual-format unit test
+        shell: msys2 {0}
+        run: lua5.4 tests/unit/cfg_lang_dualformat_test.lua
 
       - name: Run etc_aliases unit test
         shell: msys2 {0}

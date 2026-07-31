@@ -43,7 +43,7 @@ local _mem_stub     = { free = function( ) end }
 local _real = {
     type = type, load = load, table = table, pairs = pairs, pcall = pcall,
     select = select, ipairs = ipairs, tostring = tostring, tonumber = tonumber,
-    loadfile = loadfile, setmetatable = setmetatable,
+    loadfile = loadfile, setmetatable = setmetatable, getmetatable = getmetatable,
     io = _io_stub, math = math, string = string, os = os, package = package,
     adclib = _adclib_stub, unicode = _unicode_stub, out = _out_stub, mem = _mem_stub,
 }

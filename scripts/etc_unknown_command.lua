@@ -6,7 +6,7 @@
 
         - changelog 0.04:
           - route msg_denied through lang. New lang file
-            scripts/lang/etc_unknown_command.lang.{de,en}.
+            scripts/lang/{de,en}/etc_unknown_command.json.
             Part of #301 i18n cleanup.
 
         - changelog 0.03: by pulsar

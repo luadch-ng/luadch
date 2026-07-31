@@ -323,9 +323,17 @@ end
 ----------------------------------------------------------------------
 
 do
+    -- Lang files are per-language JSON now (#301 P3): scripts/lang/<lng>/<name>.json.
+    local dkjson = assert( loadfile( "dkjson/dkjson.lua" ) )( )
+    local function load_lang_json( path )
+        local f = assert( io.open( path, "rb" ) )
+        local s = f:read( "*a" )
+        f:close( )
+        return ( assert( dkjson.decode( s, 1, nil ) ) )
+    end
     local function pct( s ) return select( 2, ( s or "" ):gsub( "%%s", "" ) ) end
     for _, lc in ipairs( { "en", "de" } ) do
-        local L = assert( loadfile( "scripts/lang/etc_trafficmanager.lang." .. lc ) )( )
+        local L = load_lang_json( "scripts/lang/" .. lc .. "/etc_trafficmanager.json" )
         eq( "lang " .. lc .. ": msg_users has 3 %s", pct( L.msg_users ), 3 )
         eq( "lang " .. lc .. ": opmsg has 8 %s",     pct( L.opmsg ),     8 )
     end

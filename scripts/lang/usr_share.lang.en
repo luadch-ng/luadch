@@ -1,6 +1,0 @@
-﻿return {
-
-    msg_sharelimits = "[ USER SHARE ]--> Hub min share:  %s  |  Hub max share:  %s  |  Your share:  %s",
-    msg_redirect = "[ USER SHARE ]--> You got redirected because:  ",
-
-}

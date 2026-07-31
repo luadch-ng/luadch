@@ -87,6 +87,7 @@ local ipairs = use "ipairs"
 local tostring = use "tostring"
 local tonumber = use "tonumber"
 local loadfile = use "loadfile"
+local getmetatable = use "getmetatable"
 
 --// lua libs //--
 
@@ -151,6 +152,7 @@ local sortserialize
 
 local loadtable
 local loadtable_string
+local loadjsontable
 local savetable
 local savearray
 local arraytostring
@@ -422,6 +424,85 @@ loadtable = function( path )
         end
     end
     return nil, err
+end
+
+-- Sandboxed JSON table loader for Weblate-friendly language files
+-- (#301 P3, lang Lua->JSON migration). Same return-shape as loadtable:
+-- (table, nil) on success, (nil, err) on any failure.
+--
+-- Unlike loadtable there is NO _ENV / RCE surface here: dkjson.decode
+-- is pure-Lua data parsing that never executes the file, so a tampered
+-- .json degrades to a parse error, not code execution.
+--
+-- A MISSING file returns (nil, "not found") WITHOUT logging. The
+-- dual-format language loader (cfg_lang.loadlanguage) probes the .json
+-- path first and silently falls back to the legacy .tbl / .lang.X while
+-- the migration is incremental, so a not-yet-converted file must not
+-- spam error.log on every boot / +reload. This is the same io.open peek
+-- several plugins already do (etc_geoip, etc_blocklist_feeds, whitelist)
+-- to dodge checkfile's first-run noise. A file that DOES exist but is
+-- unreadable-as-utf8 / malformed / not a JSON object is a real fault and
+-- IS logged.
+--
+-- dkjson is captured lazily (`use "dkjson"` at call time, not file
+-- scope) because util loads before the dkjson lib is registered; the
+-- call runs long after boot so the resolver always has it.
+loadjsontable = function( path )
+    local ok, perr = safe_path( path )
+    if not ok then
+        out_error( "util.lua: function 'loadjsontable': unsafe path '", tostring( path ), "': ", perr )
+        return nil, perr
+    end
+    local f = io_open( path, "r" )
+    if not f then
+        return nil, "not found"    -- silent: caller may fall back (migration)
+    end
+    local content = f:read "*a" or ""
+    f:close( )
+    if not isutf8( content ) then
+        out_error( "util.lua: function 'loadjsontable': error in ", path, ": no utf8 format" )
+        return nil, "no utf8 format"
+    end
+    -- dkjson is an OPTIONAL lib (core/init.lua): use "dkjson" returns nil on
+    -- an install that dropped it. A converted .json is unreadable without it,
+    -- so degrade to (nil, err) - loadlanguage then falls back to the legacy
+    -- .tbl instead of indexing nil and throwing into the boot / plugin-load
+    -- path. Mirrors core/http_router.lua's missing-dkjson guard. Resolved
+    -- BEFORE the pcall below because `pcall( use("dkjson").decode, ... )`
+    -- would evaluate the index-of-nil while building pcall's arguments, i.e.
+    -- outside pcall's protection.
+    local dkjson = use "dkjson"
+    if not dkjson then
+        out_error( "util.lua: function 'loadjsontable': dkjson not loaded, cannot parse ", path )
+        return nil, "dkjson unavailable"
+    end
+    -- dkjson.decode RAISES on some malformed input (empty / whitespace-only
+    -- content among them - a truncated write or a migration-tool bug), so it
+    -- must be pcall-wrapped: a corrupt .json degrades to (nil, err) instead
+    -- of throwing up through loadlanguage into the boot / plugin-load path
+    -- (DEVELOPMENT.md §5, untrusted-input parsers).
+    local pok, ret, _pos, derr = pcall( dkjson.decode, content, 1, nil )
+    if not pok then
+        out_error( "util.lua: function 'loadjsontable': JSON parse error in ", path, ": ", ret )
+        return nil, "json parse error"
+    end
+    if derr then
+        out_error( "util.lua: function 'loadjsontable': JSON error in ", path, ": ", derr )
+        return nil, derr
+    end
+    if type( ret ) == "table" then
+        -- A JSON array root decodes to a Lua table too, but a lang file must
+        -- be a JSON object (key -> string). dkjson tags the root type via its
+        -- metatable, so reject an array explicitly rather than hand back a
+        -- table whose every lang.<key> lookup silently misses. An empty
+        -- object "{}" tags as "object" and correctly passes.
+        local mt = getmetatable( ret )
+        if mt and mt.__jsontype == "array" then
+            return nil, "invalid table"
+        end
+        return ret, nil
+    end
+    return nil, "invalid table"
 end
 
 -- Atomically replace `path` with `content` via tmp + rename
@@ -950,6 +1031,7 @@ return {
     savetable = savetable,
     loadtable = loadtable,
     loadtable_string = loadtable_string,
+    loadjsontable = loadjsontable,
     serialize = serialize,
     savearray = savearray,
     arraytostring = arraytostring,

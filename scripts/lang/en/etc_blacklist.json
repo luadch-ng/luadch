@@ -1,0 +1,20 @@
+{
+  "help_desc":"Show blacklisted users",
+  "help_desc2":"Delete user from blacklist",
+  "help_title":"etc_blacklist.lua - Show",
+  "help_title2":"etc_blacklist.lua - Del",
+  "help_usage":"[+!#]blacklist show",
+  "help_usage2":"[+!#]blacklist del <NICK>",
+  "msg_01":"\t  Username: ",
+  "msg_02":"\t  Deleted on: ",
+  "msg_03":"\t  Reason: ",
+  "msg_04":"The following user was deleted from Blacklist: ",
+  "msg_05":"Error: User not found.",
+  "msg_06":"\t  Deleted by: ",
+  "msg_denied":"You are not allowed to use this command.",
+  "msg_out":"\n\n=== BLACKLIST =========================================================================================\n%s\n========================================================================================= BLACKLIST ===\n  ",
+  "msg_usage":"Usage: [+!#]blacklist show  /  [+!#]blacklist del <NICK>",
+  "ucmd_menu_del":["Hub","etc","Blacklist","user delete"],
+  "ucmd_menu_show":["Hub","etc","Blacklist","show"],
+  "ucmd_nick":"Username:"
+}

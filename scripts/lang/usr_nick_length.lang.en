@@ -1,6 +1,0 @@
-﻿return {
-
-    msg_failedauth_reason = "Invalid nick length: ",
-    msg_invalid_length    = "Invalid nick length.",
-
-}

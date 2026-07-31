@@ -33,10 +33,19 @@
 
     Method: enumerate the shipped plugins from `examples/cfg/cfg.tbl`'s
     `scripts` whitelist, and for each one that ships lang files, load both
-    the .en and .de table, scan the plugin source for every `lang.X`
-    reference, then assert BOTH directions:
-      - every X referenced by the source exists in .en and .de, and
-      - every key defined in .en / .de is referenced by the source.
+    the .en and .de table (the JSON `scripts/lang/<lng>/<name>.json` if
+    present, else the legacy flat Lua `scripts/lang/<name>.lang.<lng>` -
+    dual-format, mirroring the runtime loader since the #301 P3 per-language
+    subdir Weblate migration), scan the plugin source for every `lang.X`
+    reference, then assert:
+      - forward: every X the source reads exists in EN, the source of
+        truth (this is the usr_share / etc_cmdlog bug class);
+      - reverse: every EN key is read by the source (no dead key); and
+      - DE is translator-managed via Weblate, so it may be incomplete - it
+        gets NO missing-key check (an untranslated key falls back to EN),
+        only that it carries no ORPHAN key (every de key exists in en) and
+        that each string it DOES translate keeps en's placeholder
+        signature (same conversion types in the same order).
 
     Four traps this deliberately avoids:
       - Do NOT assert the value is a string. Plenty of legitimate keys are
@@ -102,12 +111,57 @@ local function load_table( path )
     return t
 end
 
+-- Plugin lang files migrated to JSON in a per-language subdir (#301 P3):
+-- scripts/lang/<lng>/<name>.json. This test mirrors the dual-format runtime
+-- loader (core/cfg_lang.loadlanguage): prefer the JSON file, fall back to the
+-- legacy flat Lua table (scripts/lang/<name>.lang.<lng>), so it keeps passing
+-- whether a given plugin has migrated yet or not.
+local dkjson = assert( loadfile( "dkjson/dkjson.lua" ) )( )
+
+-- Resolve which lang file ships for (name, lng): the subdir .json first, else
+-- the legacy flat Lua table, else nil (plugin ships no lang for that language).
+local function lang_path( name, lng )
+    local json = LANG_DIR .. lng .. "/" .. name .. ".json"
+    if read_text( json ) then return json end
+    local lua = LANG_DIR .. name .. ".lang." .. lng
+    if read_text( lua ) then return lua end
+    return nil
+end
+
+-- Load a lang file in whichever format it is. JSON via the same bundled
+-- dkjson the hub uses; legacy tables via the sandboxed loader above.
+local function load_lang( path )
+    if path:sub( -5 ) == ".json" then
+        local s = read_text( path )
+        if not s then return nil, "cannot read" end
+        local t, _, err = dkjson.decode( s, 1, nil )
+        if err or type( t ) ~= "table" then return nil, err or "did not return a table" end
+        return t
+    end
+    return load_table( path )
+end
+
 -- Strip block comments `--[[ ... ]]` and line comments so a `lang.X` in a
 -- header changelog or an explanatory note cannot register as a lookup.
 local function strip_comments( s )
     s = s:gsub( "%-%-%[%[.-%]%]", "" )
     s = s:gsub( "%-%-[^\n]*", "" )
     return s
+end
+
+-- Ordered signature of printf conversions: the sequence of conversion-type
+-- letters (`%s`->"s", `%-20d`->"d") after removing the literal `%%`. Lua
+-- string.format fills arguments positionally, so a translated de string
+-- must keep en's exact TYPE and ORDER, not just the count - a word-order
+-- swap of `"%s ... %d"` into `"%d ... %s"` has the same count but crashes
+-- string.format at runtime.
+local function fmt_sig( s )
+    s = ( s:gsub( "%%%%", "" ) )
+    local out = { }
+    for spec in s:gmatch( "%%[%-+ #0-9.]*([%a])" ) do
+        out[ #out + 1 ] = spec
+    end
+    return table.concat( out )
 end
 
 local failures, checks = 0, 0
@@ -146,30 +200,43 @@ check( string.format( "cfg.scripts lists at least %d plugins (found %d)",
 local scanned, total_refs, reverse_checks = 0, 0, 0
 
 for _, name in ipairs( names ) do
-    local en_path = LANG_DIR .. name .. ".lang.en"
     -- Not every plugin ships lang files; those are simply out of scope
-    -- here (nothing to be inconsistent with).
-    if read_text( en_path ) then
+    -- here (nothing to be inconsistent with). Resolve either format.
+    local en_path = lang_path( name, "en" )
+    if en_path then
+        local de_path = lang_path( name, "de" )
         local source = read_text( PLUGIN_DIR .. name .. ".lua" )
-        local en, en_err = load_table( en_path )
-        local de, de_err = load_table( LANG_DIR .. name .. ".lang.de" )
+        local en, en_err = load_lang( en_path )
+        local de, de_err = nil, "no .lang.de"
+        if de_path then de, de_err = load_lang( de_path ) end
 
         check( name .. ": plugin source exists", source ~= nil )
         check( name .. ": .lang.en loads (" .. tostring( en_err ) .. ")", en ~= nil )
+        -- The de FILE is required to exist and load: a bundled plugin ships
+        -- en + de together (DEVELOPMENT.md "all-or-nothing"), and de is
+        -- authored, not created by Weblate. Its CONTENT may be partial (an
+        -- empty `{}` de file passes) - only its presence is enforced, so a
+        -- plugin author who forgot de is still caught.
         check( name .. ": .lang.de exists and loads (" .. tostring( de_err ) .. ")", de ~= nil )
 
         if source and en and de then
             scanned = scanned + 1
             local seen = { }
+            -- Forward: EN is the source of truth. A key the plugin reads
+            -- MUST exist in EN (the usr_share / etc_cmdlog bug class: source
+            -- reads lang.X, the file defines a differently-named key, the
+            -- `or "<english>"` fallback silently fires forever). DE is NOT
+            -- checked here - it is translator-managed (Weblate) and may be
+            -- incomplete; an untranslated key is absent and the runtime
+            -- falls back to EN, which the forward check already guarantees.
             for key in strip_comments( source ):gmatch( "lang%.%s*([%w_]+)" ) do
                 if not seen[ key ] then
                     seen[ key ] = true
                     total_refs = total_refs + 1
-                    check( name .. ": lang." .. key .. " defined in .lang.en", en[ key ] ~= nil )
-                    check( name .. ": lang." .. key .. " defined in .lang.de", de[ key ] ~= nil )
+                    check( name .. ": lang." .. key .. " defined in en (source)", en[ key ] ~= nil )
                 end
             end
-            -- Reverse direction. A key no plugin reads is invisible rot:
+            -- Reverse (dead EN key). A key no plugin reads is invisible rot:
             -- translators keep maintaining it, reviewers keep reading it as
             -- live, and nothing ever fires. The forward check above cannot
             -- see it, which is how 22 of them accumulated by #447 PR 6.
@@ -181,11 +248,21 @@ for _, name in ipairs( names ) do
             -- form, or it will report a live key as dead.
             for key in pairs( en ) do
                 reverse_checks = reverse_checks + 1
-                check( name .. ": .lang.en key '" .. key .. "' is read by the plugin", seen[ key ] == true )
+                check( name .. ": en key '" .. key .. "' is read by the plugin", seen[ key ] == true )
             end
-            for key in pairs( de ) do
+            -- DE is translator-managed: only require it has NO ORPHAN keys
+            -- (every de key must exist in en - a key the source dropped is
+            -- dead translation), and that every string it DOES translate
+            -- keeps en's placeholder signature - same conversion types in
+            -- the same order (a reordered or dropped %s breaks
+            -- string.format; Weblate flags this too, CI is the backstop).
+            for key, v in pairs( de ) do
                 reverse_checks = reverse_checks + 1
-                check( name .. ": .lang.de key '" .. key .. "' is read by the plugin", seen[ key ] == true )
+                check( name .. ": de key '" .. key .. "' exists in en (no orphan)", en[ key ] ~= nil )
+                if type( v ) == "string" and v ~= "" and type( en[ key ] ) == "string" then
+                    check( name .. ": de." .. key .. " placeholder signature matches en",
+                           fmt_sig( v ) == fmt_sig( en[ key ] ) )
+                end
             end
         end
     end

@@ -1,7 +1,0 @@
-return {
-
-    -- Replied to the user when they typed [+!#]something but no
-    -- command was matched (typo / unknown command / leading space).
-    msg_denied = "Unbekannter Befehl. Bitte führende Leerzeichen und Syntax prüfen.",
-
-}

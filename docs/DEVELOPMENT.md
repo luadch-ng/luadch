@@ -190,9 +190,14 @@ The conventions below are either not in it or are easy to get wrong:
   `etc_blocklist_feeds` (#386) and `etc_geoip` auto-update (#414); when you
   add a third periodic fetcher, do this from the start.
 - **i18n: all-or-nothing, en + de.** If a plugin uses `cfg.loadlanguage`, every
-  operator-visible string goes through it, and both `scripts/lang/<name>.lang.en`
-  and `.lang.de` ship. Keep DC jargon (Hub, Slot, Share, OP, Kick, Ban, Nick,
-  PM) in English in both files. Do not half-translate.
+  operator-visible string goes through it, and both `scripts/lang/en/<name>.json`
+  and `scripts/lang/de/<name>.json` ship (monolingual JSON, per-language subdir
+  since the #301 P3 Weblate migration; the loader still accepts a legacy flat
+  `scripts/lang/<name>.lang.<lng>` Lua table as a fallback for third-party
+  plugins). Keep DC jargon (Hub, Slot, Share, OP, Kick, Ban, Nick, PM) in
+  English in both files. Do not half-translate. The plugin's Weblate
+  component is created automatically when its `scripts/lang/en/<name>.json`
+  lands on `dev` (the `weblate-components` workflow); no manual Weblate step.
 - **Operator *policy* text goes in cfg, not lang.** A kick/ban reason the
   operator is meant to customise (e.g. `etc_geoip_kick_reason`) belongs in a cfg
   key, not a `.lang` key - a lang key with the same fallback silently *shadows*
@@ -539,7 +544,7 @@ expansion of `CLAUDE.md` §1 for a single PR.
 - [ ] **Docs**: `CLAUDE.md` and affected `docs/*.md` updated in the SAME PR
       when architecture, conventions, module layout, defaults, or an
       engineering rule changed. No stale numbers introduced.
-- [ ] **Plugin extras** (if a plugin): `.lang.en` + `.lang.de`, cfg default +
+- [ ] **Plugin extras** (if a plugin): `scripts/lang/en/<name>.json` + `scripts/lang/de/<name>.json`, cfg default +
       validator in `cfg_defaults.lua`, `examples/cfg/cfg.tbl` entry,
       `scriptversion` bumped, audit fire-site where a state change happens.
 - [ ] **CHANGELOG.md** `[Unreleased]` entry (Breaking / Features / Bugfixes /

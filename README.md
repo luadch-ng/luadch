@@ -14,10 +14,11 @@ Maintained by [Aybo](https://github.com/Aybook), with help from Claude.
 
 ## Release lines
 
-| Line | Status | What it gets |
+| Line / branch | Status | What it gets |
 |---|---|---|
-| **3.2.x** | active development (`master`) | New features, (HTTP API, Dual-Stack, audit log, etc.), refactors |
-| **3.1.x** | security fixes only (`release/3.1.x` branch) | Backports for critical CVEs / severity-1 bugs only; no new features |
+| `dev` | staging (feeds 3.2.x) | Every feature lands here first and is validated on the `:dev` testhub image, then promoted to `master` |
+| **3.2.x** (`master`) | active release line | New features (HTTP API, dual-stack, audit log, etc.) + refactors, promoted from `dev`; release tags are cut here |
+| **3.1.x** (`release/3.1.x`) | security fixes only | Backports for critical CVEs / severity-1 bugs only; no new features |
 | ≤ 3.0.x | end of life | No updates of any kind |
 
 The 3.1.x line concludes the modernisation programme (Phases 1-7 +
@@ -89,6 +90,8 @@ and operator guidance.
   reference (listeners, modules, objects, conventions, pitfalls)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - which branch to target, what a
   PR needs, how to report a bug
+- **[docs/TRANSLATING.md](docs/TRANSLATING.md)** - help translate luadch on
+  Weblate ([translate.dcvault.net](https://translate.dcvault.net/))
 - **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - engineering how-to:
   authoring core modules, plugin conventions, testing, security
   checklists, Definition of Done

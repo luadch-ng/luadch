@@ -63,8 +63,8 @@ After a fresh install, before opening the hub to real users:
 | `cfg/cfg.tbl`            | Main hub configuration (Lua-serialised table)                |
 | `cfg/user.tbl`           | Registered users (nick, password hash, level, …)             |
 | `cfg/user.tbl.bak`       | Rolling backup the hub maintains automatically               |
-| `lang/de.tbl`, `en.tbl`  | Hub-side strings (greeting, error messages, …)               |
-| `scripts/lang/*.lang.de` / `*.lang.en` | Per-script translations                          |
+| `lang/de/hub.json`, `en/hub.json` | Hub-side strings (greeting, error messages, …)      |
+| `scripts/lang/de/*.json` / `en/*.json` | Per-script translations                          |
 | `scripts/data/*.tbl`     | Per-script runtime state (bans, chatlog, records, …)         |
 | `certs/`                 | TLS keys + helpers                                           |
 
@@ -220,9 +220,9 @@ of the bundled `cmd_*.lua` files for working examples.
 
 Two layers:
 
-- **Hub-side strings** (`lang/de.tbl`, `lang/en.tbl`) — chosen via
+- **Hub-side strings** (`lang/de/hub.json`, `lang/en/hub.json`) — chosen via
   `cfg.language` in `cfg.tbl`. Affects core hub messages.
-- **Per-script strings** (`scripts/lang/<scriptname>.lang.de` / `.lang.en`)
+- **Per-script strings** (`scripts/lang/de/<scriptname>.json` / `en/<scriptname>.json`)
   — overrides the script's default texts. Edit the file matching your
   selected language; missing keys fall back to the script's hardcoded
   defaults.

@@ -1,0 +1,13 @@
+{
+  "activate_cmd_msg":"The 'cmd.log' cleaner is disabled",
+  "activate_error_msg":"The 'error.log' cleaner is disabled",
+  "failmsg":"You are not allowed to use this command.",
+  "help_desc":"Cleans logfiles",
+  "help_title":"etc_log_cleaner.lua",
+  "help_usage":"[+!#]cleanlog error|cmd",
+  "logfile_cmd_msg":"The 'cmd.log' was cleaned",
+  "logfile_error_msg":"The 'error.log' was cleaned",
+  "msg_usage":"Usage: [+!#]cleanlog error|cmd",
+  "ucmd_menu_cmd":["Hub","Logs","clean","cmd.log"],
+  "ucmd_menu_error":["Hub","Logs","clean","error.log"]
+}

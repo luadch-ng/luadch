@@ -1,0 +1,15 @@
+{
+  "help_desc":"Sends a list of basic informations about the hub",
+  "help_title":"cmd_hubinfo.lua",
+  "help_usage":"[+!#]hubinfo",
+  "msg_days":" days, ",
+  "msg_denied":"You are not allowed to use this command.",
+  "msg_hours":" hours, ",
+  "msg_level_label":"        Level:  ",
+  "msg_minutes":" minutes, ",
+  "msg_out":"\n\n=== HUBINFO =====================================================================================\n\n   [ HUB ]\n\n        Hubname:  %s\n        Address: %s\n\n        Reg only: %s\n\n        ADC Port:  %s\n        ADCS Port:  %s\n        ADC Port IPv6:  %s\n        ADCS Port IPv6:  %s\n\n        Use SSL:  %s\n        TLS Mode:  %s\n        Use Keyprint:        %s\n        Keyprint:  %s\n\n        Version:  %s %s\n        Copyright:  %s\n\n        Uptime (complete):  %s\n        Uptime (session):  %s\n\n        Running scripts:  %s\n        Memory usage:  %s\n\n        Hub share:  %s\n\n        Hub website:  %s\n        Hub Network:  %s\n        Hub eMail:  %s\n        Hub owner:  %s\n\n   [ CERTIFICATE ]\n\n        Validity\n\n             Not Before:   %s\n             Not After:      %s\n\n        Signature\n\n             Algorithm:     %s\n\n   [ USERS ]\n\n        Total registered:      %s\n        Total online:            %s\n        Reg. online:     %s\n        Unreg. online:  %s\n        Active online:          %s\n        Passive online:       %s\n\n   [ USER LEVELS ]\n\n%s\n   [ SYSTEM ]\n\n        OS:     %s\n        CPU:   %s\n        RAM total:  %s\n        RAM free:  %s\n\n===================================================================================== HUBINFO ===\n  ",
+  "msg_seconds":" seconds",
+  "msg_unknown":"<UNKNOWN>",
+  "msg_years":" years, ",
+  "ucmd_menu":["General","Hubinfo"]
+}
