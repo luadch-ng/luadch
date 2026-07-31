@@ -555,7 +555,7 @@ command names).
 
 Operator-defined command aliases. Lets the hub admin map short or
 memorable alias names to existing commands (e.g. `+us` -> `+usersearch`,
-`+tm` -> `+trafficmanager`). Closes [#327](https://github.com/luadch-ng/luadch/issues/327).
+`+tm` -> `+trafficmanager`). Closes [#327](https://github.com/luadch-ng/luadch-ng/issues/327).
 
 **Commands:**
 - `+addalias <alias> <target>` - create a new alias
@@ -604,7 +604,7 @@ pattern).
 Persistent JSONL audit trail for staff actions. Subscribes to
 `onAudit` events fired by every staff-action plugin via the
 core/audit.lua helper (`audit.fire(audit.build(action, actor,
-target, reason, meta))`). Closes [#84](https://github.com/luadch-ng/luadch/issues/84).
+target, reason, meta))`). Closes [#84](https://github.com/luadch-ng/luadch-ng/issues/84).
 
 **Commands:** `+auditlog show` (today's file as chat banner).
 
@@ -898,7 +898,7 @@ etc. in `cfg.tbl`, then `+reload`).
 ### etc_blocklist_feeds
 
 External IP/CIDR blocklist feed puller (#78 Phase E, closes
-[#79](https://github.com/luadch-ng/luadch/issues/79)). Fetches
+[#79](https://github.com/luadch-ng/luadch-ng/issues/79)). Fetches
 known-bad-IP lists over HTTPS on a per-feed timer and pushes them into
 the unified pre-handshake blocklist (`core/blocklist.lua`) with
 `source="external"` + `meta.feed=<name>`, so matched IPs are dropped at
@@ -964,7 +964,7 @@ the table.
 ### etc_proxydetect
 
 Live proxy / VPN / Tor detection via an external provider API on connect
-(#78 Phase F, closes [#352](https://github.com/luadch-ng/luadch/issues/352)).
+(#78 Phase F, closes [#352](https://github.com/luadch-ng/luadch-ng/issues/352)).
 **Off by default** - needs a provider (`etc_proxydetect_provider`) and,
 for most, an API key. Full setup, the provider free-tier / commercial-use
 comparison, and the `log_only` -> `block` workflow are in
@@ -1049,7 +1049,7 @@ var), `etc_status_push_interval`, `etc_status_push_tls_verify`,
 ### etc_prometheus
 
 Prometheus text-exposition `/metrics` endpoint for the HTTP API
-([#83](https://github.com/luadch-ng/luadch/issues/83)). A PULL model:
+([#83](https://github.com/luadch-ng/luadch-ng/issues/83)). A PULL model:
 a Prometheus scraper GETs `/metrics` and the hub returns 7 gauges +
 7 counters in the 0.0.4 exposition format. The pull counterpart to
 `etc_status_push` (push heartbeat) and the metrics sibling of
@@ -1113,7 +1113,7 @@ re-announce).
 
 Block clients by Lua-pattern match against the BINF `AP+VE` field
 (`user:version()` returns the concatenated `<AP> <VE>` form). Closes
-[#81](https://github.com/luadch-ng/luadch/issues/81). Promoted into
+[#81](https://github.com/luadch-ng/luadch-ng/issues/81). Promoted into
 core from the `luadch-ng/scripts` companion repo (basis: pulsar
 v0.2, GPLv3).
 

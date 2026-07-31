@@ -53,7 +53,7 @@
                   (REST-orthodox over idempotent 200-no-op).
 
             v0.09: by Aybo
-                - new shadowmute mode (closes luadch-ng/luadch#85): the
+                - new shadowmute mode (closes luadch-ng/luadch-ng#85): the
                   sender sees their own messages echoed back, others see
                   nothing. The user does not know they are muted. Useful
                   against persistent spam bots.

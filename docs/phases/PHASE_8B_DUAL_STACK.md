@@ -2,8 +2,8 @@
 
 > Working agreement: see [`CLAUDE.md`](../../CLAUDE.md) §1.
 > Phase scope: see [`CLAUDE.md`](../../CLAUDE.md) §5 ("Phase 8+ - Future features").
-> Tracker: [issue #147](https://github.com/luadch-ng/luadch/issues/147) (ADC-protocol coverage roadmap),
-> [issue #107](https://github.com/luadch-ng/luadch/issues/107) (dual-stack listening).
+> Tracker: [issue #147](https://github.com/luadch-ng/luadch-ng/issues/147) (ADC-protocol coverage roadmap),
+> [issue #107](https://github.com/luadch-ng/luadch-ng/issues/107) (dual-stack listening).
 
 **Status:** in flight - PR 1 (#107) merged via #176; PR 2 (T3.1 HBRI) implementation underway
 **Target line:** 3.2.x on master
@@ -108,17 +108,17 @@ The cfg-defaults flip (e.g. `ssl_ports_ipv6 = { 5001 }` to align with `ssl_ports
 
 ## 3. T3.1 HBRI - dual-stack INF (next PR after #107)
 
-> **Correction ([#214](https://github.com/luadch-ng/luadch/issues/214), 2026-05-28):** what
+> **Correction ([#214](https://github.com/luadch-ng/luadch-ng/issues/214), 2026-05-28):** what
 > T3.1 actually shipped was *partial dual-stack INF acceptance* - the
 > parser learned to accept both `I4` and `I6` in one BINF - NOT real
 > HBRI. The "leave the other family unverified-but-stored" approach
 > described below was a DDoS-amplification hole (an unverified
 > secondary could name an arbitrary victim other clients then aimed
 > CTM / RCM at). It has been replaced: the unverified secondary is now
-> **stripped before broadcast** (#214 Gap 1, [#283](https://github.com/luadch-ng/luadch/pull/283)),
+> **stripped before broadcast** (#214 Gap 1, [#283](https://github.com/luadch-ng/luadch-ng/pull/283)),
 > and *real* HBRI - a second-family side-channel handshake that
 > validates the secondary before restoring it - landed in
-> [#284](https://github.com/luadch-ng/luadch/pull/284) (`core/hbri.lua`).
+> [#284](https://github.com/luadch-ng/luadch-ng/pull/284) (`core/hbri.lua`).
 > Read the sections below as the historical T3.1 plan, not current
 > behaviour.
 
@@ -211,7 +211,7 @@ Test count after this PR: 42 -> 43.
 
 CLAUDE.md §1.6 = one logical change per PR.
 
-### PR 1: #107 dual-stack listening (merged via [#176](https://github.com/luadch-ng/luadch/pull/176), 2026-05-14)
+### PR 1: #107 dual-stack listening (merged via [#176](https://github.com/luadch-ng/luadch-ng/pull/176), 2026-05-14)
 
 | File | Change |
 |---|---|

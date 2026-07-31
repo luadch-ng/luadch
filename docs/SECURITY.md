@@ -54,7 +54,7 @@ The trust boundary is between "operator-installed plugin" and
 
 [`core/scripts.lua`](../core/scripts.lua) builds each plugin's
 `_ENV` from an explicit `SANDBOX_GLOBALS` whitelist (added in
-[#206](https://github.com/luadch-ng/luadch/issues/206)). `os` and
+[#206](https://github.com/luadch-ng/luadch-ng/issues/206)). `os` and
 `io` are curated shims: `os` exposes only `time` / `date` /
 `difftime`; `io` exposes only a path-restricted `open` (relative
 paths, no `..` traversal) - `io.popen`, `io.lines`, `package`,
@@ -67,7 +67,7 @@ The same path-restriction gate covers the plugin-callable I/O
 functions exported by [`core/util.lua`](../core/util.lua)
 (`checkfile`, `loadtable`, `savetable`, `savearray`, `maketable`,
 `atomic_write`) via the shared `util.safe_path` helper - closed
-in [#266](https://github.com/luadch-ng/luadch/issues/266) where
+in [#266](https://github.com/luadch-ng/luadch-ng/issues/266) where
 `util` had previously captured the unsandboxed `io.open` at module
 load and bypassed `_io_safe`.
 
@@ -138,7 +138,7 @@ Server: must compute Tiger(stored, salt) and match
 The salt is CSPRNG-backed (OpenSSL `RAND_bytes` via `adclib`) and freshly
 generated per login. Its length is **24 bytes** (39 base32 chars on the wire),
 the ADC 1.0.1 minimum ("at least 24 random bytes"); raised from an earlier
-6-byte default in [#551](https://github.com/luadch-ng/luadch/issues/551).
+6-byte default in [#551](https://github.com/luadch-ng/luadch-ng/issues/551).
 
 For the server's hash to match the client's, **the stored value must
 equal the client's password input**. Any one-way KDF (Argon2id,
@@ -147,7 +147,7 @@ Tiger output, so login breaks. This constraint is shared by the
 entire ADC ecosystem (ADCH++ stores cleartext in XML, uHub in
 `users.conf`, …) and there is no published ADC extension that lifts
 it. The audit research is recorded in issue
-[#52](https://github.com/luadch-ng/luadch/issues/52).
+[#52](https://github.com/luadch-ng/luadch-ng/issues/52).
 
 ### What luadch actually does
 
@@ -235,9 +235,9 @@ over a raw `tar czf cfg/`.
 OS-bound key wrapping (TPM, DPAPI machine-scope, libsecret, macOS
 Keychain) would harden the master-key-theft case and is tracked as a
 Phase 8+ candidate in
-[#48](https://github.com/luadch-ng/luadch/issues/48).
+[#48](https://github.com/luadch-ng/luadch-ng/issues/48).
 
-### Operator opt-out: `encrypt_usertbl = false` ([#128](https://github.com/luadch-ng/luadch/issues/128))
+### Operator opt-out: `encrypt_usertbl = false` ([#128](https://github.com/luadch-ng/luadch-ng/issues/128))
 
 Some deployments do not need disk-level confidentiality and prefer
 the operational convenience of a plaintext `user.tbl` (custom backup
@@ -291,7 +291,7 @@ private host where the disk-level threat model is "if my disk
 leaves my house I have bigger problems": `false` is reasonable. The
 hub does not assume which one applies.
 
-### Password disclosure in command replies ([#95](https://github.com/luadch-ng/luadch/issues/95))
+### Password disclosure in command replies ([#95](https://github.com/luadch-ng/luadch-ng/issues/95))
 
 The same cleartext-equivalent password the hub must hold for the ADC
 `BASE` challenge (F-AUTH-1, above) used to be echoed back over the
@@ -299,7 +299,7 @@ chat / PM channel by four admin commands. On a plain-ADC listener that
 exposes the value on the wire; even on TLS it lands in the client's
 local chat log (DC++ keeps one by default).
 
-**Redacted (PR [#119](https://github.com/luadch-ng/luadch/pull/119)):**
+**Redacted (PR [#119](https://github.com/luadch-ng/luadch-ng/pull/119)):**
 
 - `+accinfo` and `+usersearch` show `<REDACTED>` in the password
   column of every output format (the pre-existing permission gate is
@@ -343,8 +343,8 @@ two parties who need the value, not a broadcast; the opchat reg-report
 is inherent to password-based ADC registration without an external
 side channel, and is mitigated by the at-rest encryption above plus
 the `cmd.log` redaction from
-[#96](https://github.com/luadch-ng/luadch/issues/96). A leak-free
-delivery (SMTP invite via [#100](https://github.com/luadch-ng/luadch/issues/100),
+[#96](https://github.com/luadch-ng/luadch-ng/issues/96). A leak-free
+delivery (SMTP invite via [#100](https://github.com/luadch-ng/luadch-ng/issues/100),
 or a first-login token flow) is a Phase 8+ candidate that depends on
 infrastructure luadch does not yet ship; until then the chat-delivery
 behaviour is retained deliberately.
@@ -396,7 +396,7 @@ different location (e.g. `C:\ProgramData\luadch\master.key`), apply
 the same `icacls` line there. The same recipe lives in
 [`docs/BUILDING.md`](BUILDING.md).
 
-### Audit log of staff actions ([#84](https://github.com/luadch-ng/luadch/issues/84))
+### Audit log of staff actions ([#84](https://github.com/luadch-ng/luadch-ng/issues/84))
 
 `log/audit-YYYY-MM-DD.jsonl` is the centralised, machine-readable
 record of every staff action across both ADC chat (`+ban`, `+reg`,
@@ -577,20 +577,20 @@ authentication:
 | Per-IP failed-auth tracking + sticky lockout | [`core/hub_dispatch.lua` HPAS](../core/hub_dispatch.lua) | `ratelimit_perip_authfail_*`, `ratelimit_authfail_lockout` |
 | Per-account bad-password lockout (independent of per-IP) | same | `max_bad_password`, `bad_pass_timeout` |
 | Per-user mainchat rate-limit | [`core/hub_dispatch.lua` BMSG](../core/hub_dispatch.lua) | `ratelimit_user_msg_*` |
-| Per-user PM rate-limit ([#80](https://github.com/luadch-ng/luadch/issues/80)) | [`core/hub_dispatch.lua` DMSG/EMSG](../core/hub_dispatch.lua) | `ratelimit_user_pm_*` |
-| Per-user BINF-update rate-limit ([#80](https://github.com/luadch-ng/luadch/issues/80)) | [`core/hub_dispatch.lua` BINF](../core/hub_dispatch.lua) | `ratelimit_user_inf_*` |
-| Per-user CTM/RCM rate-limit ([#80](https://github.com/luadch-ng/luadch/issues/80)) | [`core/hub_dispatch.lua` DCTM/DRCM](../core/hub_dispatch.lua) | `ratelimit_user_ctm_*` |
+| Per-user PM rate-limit ([#80](https://github.com/luadch-ng/luadch-ng/issues/80)) | [`core/hub_dispatch.lua` DMSG/EMSG](../core/hub_dispatch.lua) | `ratelimit_user_pm_*` |
+| Per-user BINF-update rate-limit ([#80](https://github.com/luadch-ng/luadch-ng/issues/80)) | [`core/hub_dispatch.lua` BINF](../core/hub_dispatch.lua) | `ratelimit_user_inf_*` |
+| Per-user CTM/RCM rate-limit ([#80](https://github.com/luadch-ng/luadch-ng/issues/80)) | [`core/hub_dispatch.lua` DCTM/DRCM](../core/hub_dispatch.lua) | `ratelimit_user_ctm_*` |
 | Per-user search rate-limit | [`core/hub_dispatch.lua` BSCH](../core/hub_dispatch.lua) | `ratelimit_user_search_*` |
-| Per-userlevel tier overlay ([#80](https://github.com/luadch-ng/luadch/issues/80)) | [`core/ratelimit.lua` init](../core/ratelimit.lua) | `ratelimit_tiers`, `ratelimit_tier_for_level` |
+| Per-userlevel tier overlay ([#80](https://github.com/luadch-ng/luadch-ng/issues/80)) | [`core/ratelimit.lua` init](../core/ratelimit.lua) | `ratelimit_tiers`, `ratelimit_tier_for_level` |
 | Op-level bypass of per-user limits | [`core/ratelimit.lua`](../core/ratelimit.lua) | `ratelimit_bypass_level` (default 60) |
 | Parser-side message-size cap | [`core/adc.lua` parse](../core/adc.lua) | hardcoded 64 KiB |
 | Connection read-buffer cap | [`core/server.lua`](../core/server.lua) | hardcoded 1 MiB |
 | INF-IP consistency check (kick on TCP-source vs INF-claim mismatch) | [`core/hub_dispatch.lua` BINF](../core/hub_dispatch.lua) + [`scripts/hub_inf_manager.lua`](../scripts/hub_inf_manager.lua) | `kill_wrong_ips` (default **false** since v3.2.x; see operator note below) |
 
 The full DoS-hardening rationale is in Phase 7c
-([#56](https://github.com/luadch-ng/luadch/issues/56)).
+([#56](https://github.com/luadch-ng/luadch-ng/issues/56)).
 
-### `kill_wrong_ips` operator note ([#97](https://github.com/luadch-ng/luadch/issues/97))
+### `kill_wrong_ips` operator note ([#97](https://github.com/luadch-ng/luadch-ng/issues/97))
 
 The `kill_wrong_ips` default flipped from `true` (v3.1.4 through
 v3.1.x) back to `false` in v3.2.x. The motivation for the v3.1.4
@@ -599,7 +599,7 @@ strict default was to prevent a client from broadcasting a spoofed
 would direct CTM / RCM connection attempts at the spoofed
 victim address). Since v3.2.x that vector is closed at a lower
 level - the
-[#214 Gap 2 fix](https://github.com/luadch-ng/luadch/issues/214)
+[#214 Gap 2 fix](https://github.com/luadch-ng/luadch-ng/issues/214)
 in [`core/hub_dispatch.lua`](../core/hub_dispatch.lua) overrides
 any client-claimed mismatched IP with the authenticated TCP source
 IP **before** broadcasting, regardless of `kill_wrong_ips`. The
@@ -623,7 +623,7 @@ unaffected either way.
   single-NAT). This gate only concerns the advertised-vs-source
   *mismatch*; it is unrelated to how the hub blocks users - e.g. the
   Traffic Manager, which on 3.x decides on level / share / account-nick,
-  not IP ([#364](https://github.com/luadch-ng/luadch/issues/364)).
+  not IP ([#364](https://github.com/luadch-ng/luadch-ng/issues/364)).
 - The edge case where the user's TCP source genuinely cannot reach
   their P2P listener (multi-WAN with policy routing, certain
   corporate setups) becomes a silent failure: user stays online,
@@ -636,7 +636,7 @@ unaffected either way.
 - Mismatched-IP clients get an explicit kick on login with an
   actionable hint pointing them at their client's
   `External / WAN IP` setting (PR
-  [#331](https://github.com/luadch-ng/luadch/pull/331)). Operator
+  [#331](https://github.com/luadch-ng/luadch-ng/pull/331)). Operator
   sees these kicks in `log/error.log` for diagnostics.
 - Picks a louder failure mode over a silent one: useful for hubs
   with a known-tightly-configured userbase where any mismatch is
@@ -647,11 +647,11 @@ and any plugin reading `user:ip()` operate on the **TCP source IP**
 regardless of this toggle - none of those primitives depend on
 the kill semantic.
 
-### Dual-stack secondary-address verification ([#214](https://github.com/luadch-ng/luadch/issues/214), HBRI)
+### Dual-stack secondary-address verification ([#214](https://github.com/luadch-ng/luadch-ng/issues/214), HBRI)
 
 Since v3.2.x luadch accepts a BINF that carries BOTH `I4` and `I6`
 in one frame, so a dual-stack peer can advertise both
-([#147](https://github.com/luadch-ng/luadch/issues/147) T3.1). The
+([#147](https://github.com/luadch-ng/luadch-ng/issues/147) T3.1). The
 hub can only authenticate the field matching the **connecting** TCP
 source's family against the actual TCP source IP - it has no socket
 on the other family through which to verify the secondary address.
@@ -686,7 +686,7 @@ This is **not** an unavoidable trade-off; luadch closes it two ways:
   placeholder (`I6::` / `I40.0.0.0`, the common auto-detect case): the
   placeholder makes the hub **discover** the address from the
   side-channel getpeername
-  ([#291](https://github.com/luadch-ng/luadch/issues/291)); a concrete
+  ([#291](https://github.com/luadch-ng/luadch-ng/issues/291)); a concrete
   value is accepted only if it equals that source. On validation
   failure or a `hbri_timeout`-second timeout the user enters the hub
   normally with the secondary left stripped (the Gap-1 default). The
@@ -695,12 +695,12 @@ This is **not** an unavoidable trade-off; luadch closes it two ways:
   does TLS on the side-channel too (matching its main connection). HBRI
   needs a listener (plain or TLS) on both families; a family with no
   listener disables it
-  ([#298](https://github.com/luadch-ng/luadch/issues/298)).
+  ([#298](https://github.com/luadch-ng/luadch-ng/issues/298)).
 
 Either path guarantees the broadcast INF only ever carries an address
 the hub authenticated. A client that advertises its secondary only in
 a **post-login** INF update (not the initial BINF) is handled the same
-way ([#286](https://github.com/luadch-ng/luadch/issues/286)): the
+way ([#286](https://github.com/luadch-ng/luadch-ng/issues/286)): the
 unverified `I4` / `I6` is still stripped from that update before
 broadcast (the #97 / #222 closeout in
 [`scripts/hub_inf_manager.lua`](../scripts/hub_inf_manager.lua) stays
@@ -714,7 +714,7 @@ letting a NAT-weird client's *wrong primary* claim broadcast - was
 closed under #214 Gap 2: the mismatched primary claim is overwritten
 with the authenticated `user:ip()` rather than forwarded.
 
-### Rate-limit and plugin contract ([#80](https://github.com/luadch-ng/luadch/issues/80))
+### Rate-limit and plugin contract ([#80](https://github.com/luadch-ng/luadch-ng/issues/80))
 
 Per-user rate limits fire **before** the plugin listener chain
 inside [`core/hub_dispatch.lua`](../core/hub_dispatch.lua). When a
@@ -746,7 +746,7 @@ If you write a plugin and need exact message accounting, do not
 rely on the dispatcher's listener fan-out alone - it is rate-
 limited at the hub boundary by design.
 
-### onSearchResult contract widening for F-class ([#147](https://github.com/luadch-ng/luadch/issues/147) T1.6)
+### onSearchResult contract widening for F-class ([#147](https://github.com/luadch-ng/luadch-ng/issues/147) T1.6)
 
 Before #147 the `onSearchResult` listener only fired on D-class
 (`DRES`) - single-recipient search results. Returning a truthy value
@@ -923,7 +923,7 @@ truth, not to greps.
 ## 8. Reporting a security issue
 
 Open a private security advisory at
-<https://github.com/luadch-ng/luadch/security/advisories/new> rather
+<https://github.com/luadch-ng/luadch-ng/security/advisories/new> rather
 than a public issue, especially for issues that:
 
 - enable RCE without prior authentication

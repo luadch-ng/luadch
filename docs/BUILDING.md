@@ -38,7 +38,7 @@ false` at runtime).
 ### Build & install
 
 ```sh
-git clone https://github.com/luadch-ng/luadch.git
+git clone https://github.com/luadch-ng/luadch-ng.git
 cd luadch
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
@@ -259,7 +259,7 @@ is already running in this directory` (also written to
 
 On Linux/BSD the hub's event loop uses `poll()`, so there is no fixed
 software cap on how many clients can be connected at once
-([#310](https://github.com/luadch-ng/luadch/issues/310)). The practical
+([#310](https://github.com/luadch-ng/luadch-ng/issues/310)). The practical
 ceiling is the process **open-file-descriptor limit** (each connection is
 one socket, plus a handful for listeners, HBRI and the HTTP API). The
 launcher raises the soft limit to the hard limit at boot, and the boot
@@ -282,7 +282,7 @@ next start:
 
 Windows uses the `select()` backend, capped at `FD_SETSIZE = 1024`
 sockets (raised from the Winsock default of 64 in
-[#416](https://github.com/luadch-ng/luadch/issues/416)); the boot line
+[#416](https://github.com/luadch-ng/luadch-ng/issues/416)); the boot line
 there reports `select() capacity (FD_SETSIZE): 1024 sockets`.
 
 ---
@@ -290,7 +290,7 @@ there reports `select() capacity (FD_SETSIZE): 1024 sockets`.
 ## File permissions for secrets
 
 `cfg/user.tbl` (registered users with their cleartext passwords - see
-[F-AUTH-1](https://github.com/luadch-ng/luadch/issues/52) for the
+[F-AUTH-1](https://github.com/luadch-ng/luadch-ng/issues/52) for the
 ADC-protocol-mandated reason) and `certs/serverkey.pem` (TLS private
 key) hold material that must not be world-readable.
 
@@ -333,7 +333,7 @@ sources against system OpenSSL 3.x (`EC_KEY_*`, `PEM_read_bio_DHparams`,
 `SSL_CTX_set_tmp_dh_callback`, `EC_KEY_free`, `DH_free`). These are
 cosmetic — the functions still work in current OpenSSL. The negotiated
 TLS session is modern (TLS 1.3 + AES-256-GCM verified). Tracked in
-[issue #3](https://github.com/luadch-ng/luadch/issues/3) as
+[issue #3](https://github.com/luadch-ng/luadch-ng/issues/3) as
 `upstream-blocked` / `wontfix`.
 
 The Windows build (gcc 16+) emits 2 stylistic `-Wparentheses` warnings

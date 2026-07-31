@@ -82,7 +82,7 @@ luadch is a DC++ **ADC** hub server written in Lua with a thin C launcher
 - **Latest release:** `v3.1.14` (2026-07-13, on `release/3.1.x`)
 - **Status:** the Phase 1-7 modernisation programme is content-complete; work is now
   3.2.x feature development (Phase 8+) plus 3.1.x security-only maintenance (see §8).
-- **Open issues:** check `gh issue list --repo luadch-ng/luadch` (never trust a
+- **Open issues:** check `gh issue list --repo luadch-ng/luadch-ng` (never trust a
   count written into a doc).
 - **Testing:** a pure-Lua unit suite (`tests/unit/*_test.lua`) plus a protocol-level
   smoke harness (`tests/smoke/run.py`) run in CI on Linux AND Windows on every push
@@ -153,7 +153,7 @@ rewritten by `hub_runtime` (60s `onTimer`), `cmd_uptime` and `cmd_hubinfo` -
 but that put mutable plugin state under `core/`, which is shipped wholesale
 (`install(DIRECTORY core/)`, and Docker bakes it into the image rather than
 mounting it), so every upgrade overwrote the operator's accumulated runtime
-with pristine zeros. [#445](https://github.com/luadch-ng/luadch/issues/445)
+with pristine zeros. [#445](https://github.com/luadch-ng/luadch-ng/issues/445)
 moved the live store to `scripts/data/hub_runtime.tbl` (operator-owned,
 upgrade-safe, per §7): `hub_runtime` is now the sole writer and migrates the
 legacy value once on load; `cmd_uptime` / `cmd_hubinfo` are pure readers.
@@ -279,7 +279,7 @@ status-push heartbeat #395, inbound webhook receiver #398, automatic
 encrypted backup + offline restore #480, maintenance-mode lockdown gate
 #501, force-ADCS transfer gate #500.
 
-**Unified blocklist arc [#78](https://github.com/luadch-ng/luadch/issues/78)
+**Unified blocklist arc [#78](https://github.com/luadch-ng/luadch-ng/issues/78)
 COMPLETE + on master (2026-07-10); #78 + #79 + #352 closed.** All precursors
 + Phases A-F + D3 in-hub GeoIP auto-update shipped (`core/blocklist`,
 `ipmatch`, `mmdb`, `geoip_update`; plugins `etc_blocklist`, `etc_geoip`,
@@ -351,7 +351,7 @@ master (frozen history - the live delta is always
   Sopor-testhub wait (Sopor runs 3.1.x, engages at the official 3.2.0 release).
 
 `dev` and `master` track closely; open work is the feature-arc backlog -
-`gh issue list --repo luadch-ng/luadch` (no open bugs). Durable pattern from
+`gh issue list --repo luadch-ng/luadch-ng` (no open bugs). Durable pattern from
 this era: a **periodic-fetch plugin must persist its next-fetch deadline
 across `+reload`**, or every reload re-hits a rate-limited provider - fixed
 twice (`etc_blocklist_feeds` #386, `etc_geoip` #414); general rule in
@@ -371,7 +371,7 @@ contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and
   modernization phase: activities, findings, build-output specs, and the review-gate
   checklist. Entry point for "what happened in phase N" is `docs/phases/PHASE_N.md`.
   These are the narrative — issues and code are the actionable state.
-- **GitHub issues** — https://github.com/luadch-ng/luadch/issues — the actionable backlog.
+- **GitHub issues** — https://github.com/luadch-ng/luadch-ng/issues — the actionable backlog.
   Each finding from a phase journal that needs work is an issue here, labeled with the
   target phase (`phase-2`, `phase-3`, …). Use `gh issue list --label phase-2` to scope
   upcoming work. Upstream `luadch/luadch` issues are referenced selectively when we
@@ -386,7 +386,7 @@ contract, preflight): see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) §3 and
 
 ### Upstream policy
 
-The repo at `luadch-ng/luadch` is a fork of `luadch/luadch`. The upstream is
+The repo at `luadch-ng/luadch-ng` is a fork of `luadch/luadch`. The upstream is
 not actively released (last release 2022-04-02) but still receives occasional commits.
 We do **not** plan to push modernization work back upstream and do **not** bulk-import
 upstream's open issues. When a phase touches an area covered by an upstream issue, we
@@ -436,7 +436,7 @@ open a fresh issue here that references the upstream one in its body.
 
 ### Tooling gotchas (these have already burned us)
 
-- **Always pin `gh` to the repo:** `gh ... --repo luadch-ng/luadch`. The checkout has
+- **Always pin `gh` to the repo:** `gh ... --repo luadch-ng/luadch-ng`. The checkout has
   an upstream remote; bare `gh` defaults to the parent-of-fork and acts on the wrong
   repository.
 - **Multi-tier tracker issues: never `Closes #N`.** GitHub auto-closes the whole
