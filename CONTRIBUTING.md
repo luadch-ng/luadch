@@ -13,7 +13,7 @@ have already been validated. New work goes to `dev` first.
 
 | Branch | What it is | Target it? |
 |---|---|---|
-| **`dev`** | Staging. Everything lands here first and is validated on a test hub (`ghcr.io/luadch-ng/luadch:dev` is rebuilt on every push). | **Yes - this one** |
+| **`dev`** | Staging. Everything lands here first and is validated on a test hub (`ghcr.io/luadch-ng/luadch-ng:dev` is rebuilt on every push). | **Yes - this one** |
 | `master` | Release substrate for the 3.2.x line. Promoted from `dev` once validated; release tags are cut here. | No (maintainers) |
 | `release/3.1.x` | Maintenance line, critical security backports only. | No (maintainers) |
 
