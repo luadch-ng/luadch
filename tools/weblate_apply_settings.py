@@ -53,6 +53,11 @@ if not URL or not TOKEN:
     sys.exit("error: WEBLATE_URL and WEBLATE_API_TOKEN must be set")
 
 COMPONENTS = f"{URL}/api/projects/{PROJECT}/components/"
+# Weblate uses TWO different URL shapes: the project-scoped endpoint above lists
+# components (GET) and creates them (POST), but a single component's detail -
+# including PATCH to edit its settings - lives at a DIFFERENT path:
+# /api/components/<project>/<slug>/. Using the list path for PATCH 404s.
+COMPONENT_DETAIL = f"{URL}/api/components/{PROJECT}"  # + /<slug>/
 
 # Test-run a single component by slug (e.g. WEBLATE_ONE=core-hub) to get one
 # clean line of output instead of a wall of errors while diagnosing.
@@ -60,17 +65,19 @@ ONLY = os.environ.get("WEBLATE_ONE", "").strip()
 
 
 def short(resp):
-    """One-line summary of a response body - detects the Cloudflare challenge
-    page (a wall of obfuscated base32/JS) so an error is diagnosable, not a
-    50k-char dump."""
+    """One-line summary of a response body so an error is diagnosable, not a
+    50k-char dump. Only the actual Cloudflare interstitial ("Just a moment...")
+    is a challenge; the `challenge-platform` script Cloudflare injects into
+    NORMAL pages (incl. 404s) is NOT one - do not flag on that alone, or a plain
+    404 gets misread as a Cloudflare block (the bug that hid a wrong PATCH URL)."""
     s = resp if isinstance(resp, str) else json.dumps(resp)
     low = s.lower()
-    if "just a moment" in low or "cf-chl" in low or "cf_chl" in low or "challenge-platform" in low:
-        return ("Cloudflare challenge page (this request was blocked by Cloudflare, "
-                "not by Weblate - run from an allowlisted IP or the CI runner)")
+    if "just a moment" in low or "attention required" in low:
+        return ("Cloudflare challenge page - this request was actually challenged "
+                "by Cloudflare (not just proxied)")
     if "<!doctype html" in low or "<html" in low:
-        return "HTML page (not JSON) - likely a proxy/Cloudflare/error page: " + s[:200].replace("\n", " ")
-    return s[:300].replace("\n", " ")
+        return "HTML page (not JSON): " + " ".join(s.split())[:200]
+    return " ".join(s.split())[:300]
 
 # A browser-like User-Agent - urllib's default is served the Cloudflare
 # "Just a moment..." challenge on translate.dcvault.net (see weblate_sync_components.py).
@@ -142,7 +149,7 @@ def main():
             print(f"would update  {slug}: {change}")
             updated += 1
             continue
-        status, resp = api("PATCH", f"{COMPONENTS}{slug}/", diff)
+        status, resp = api("PATCH", f"{COMPONENT_DETAIL}/{slug}/", diff)
         if status == 200:
             print(f"updated  {slug}: {change}")
             updated += 1
