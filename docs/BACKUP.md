@@ -1,7 +1,7 @@
 # Backup and restore
 
 Encrypted, self-contained hub backups (`etc_backup` plugin + `core/backup*`,
-[#480](https://github.com/luadch-ng/luadch/issues/480)) and an offline restore
+[#480](https://github.com/luadch-ng/luadch-ng/issues/480)) and an offline restore
 (`Luadch --restore`). The hub is a **producer only**: it writes encrypted
 `.ldbk` artifacts to a local directory. Copying them off-site (rclone, restic,
 a cron job, a mounted volume) is the operator's job - see

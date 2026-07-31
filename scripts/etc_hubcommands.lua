@@ -70,7 +70,7 @@
         v0.05: by Aybo
             - catch users who type the literal `[+!#]command` form
               with the doc-notation brackets included
-                - closes luadch-ng/luadch#137 (Sopor)
+                - closes luadch-ng/luadch-ng#137 (Sopor)
                 - same swallow-and-hint mechanism as the bare-word
                   case; the hint never echoes the input args because
                   the args can carry a password (e.g. `[+!#]reg
@@ -246,7 +246,7 @@ hub.setlistener( "onBroadcast", { },
                 end
             end
         end
-        -- Closes luadch-ng/luadch#137 (Sopor): catch the "literal
+        -- Closes luadch-ng/luadch-ng#137 (Sopor): catch the "literal
         -- bracket" mistake. Users who are not familiar with the
         -- documentation notation type the form `[+!#]command` (or
         -- partial forms like `[+]command`, `[!#]command`) as if

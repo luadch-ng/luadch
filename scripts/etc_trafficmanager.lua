@@ -67,7 +67,7 @@
               block_tbl, so `show blocks` (which only iterates block_tbl)
               previously showed nothing for them - the operator saw an
               empty list plus an empty etc_trafficmanager.tbl while the
-              users were in fact being blocked (luadch-ng/luadch#502,
+              users were in fact being blocked (luadch-ng/luadch-ng#502,
               reported by Sopor). The new section is online-only (share
               is a per-session INF field; an offline user is not being
               share-blocked) and skips nicks already in the manual
@@ -105,7 +105,7 @@
               gate block. Behaviour unchanged. Bytecode is two
               instructions shorter per listener (the deduplicated
               LOADNIL / RETURN1 pair); verified with `luac -l`.
-              Closes luadch-ng/luadch#166. onSearch is not part of
+              Closes luadch-ng/luadch-ng#166. onSearch is not part of
               this refactor because its control-flow shape is
               different (no masterlevel gate, returns PROCESSED
               after fan-out).
@@ -113,7 +113,7 @@
         v2.2:
             - defense-in-depth: onSearchResult listener swallows
               RES / DRES / FRES from or to blocked users
-                - closes luadch-ng/luadch#160 (Sopor) - covers the
+                - closes luadch-ng/luadch-ng#160 (Sopor) - covers the
                   unsolicited-result edge case the onSearch filter
                   alone cannot reach
 
@@ -467,7 +467,7 @@ local start = os.time()
 --
 -- If your threat model requires hard-blocking ops on CTM / RCM /
 -- RES too (e.g. defense against a rogue / compromised op-account),
--- see luadch-ng/luadch#167 for the design discussion + options.
+-- see luadch-ng/luadch-ng#167 for the design discussion + options.
 -- The options (global hardblock toggle, per-block flag, separate
 -- filter-min-level cfg) are not implemented because no operator
 -- has reported needing them yet. Threat-model is "ops are
@@ -652,7 +652,7 @@ format_description = function( flag, listener, target, cmd )
         end
     end
     if listener == "onInf" then
-        -- Phase 8a F-INF-1e (luadch-ng/luadch#121 review pass): cmd:getnp
+        -- Phase 8a F-INF-1e (luadch-ng/luadch-ng#121 review pass): cmd:getnp
         -- "DE" returns nil if the incoming INF carries no DE field. Pre-
         -- fix the only caller (the onInf listener at the bottom of this
         -- file) gated the call with `if desc then`, so this branch was

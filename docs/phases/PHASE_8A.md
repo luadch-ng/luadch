@@ -2,7 +2,7 @@
 
 > Working agreement: see [`CLAUDE.md`](../../CLAUDE.md) §1.
 > Phase scope: see [`CLAUDE.md`](../../CLAUDE.md) §5 ("Phase 8+ - Future features (post-modernisation)").
-> Tracker: [issue #121](https://github.com/luadch-ng/luadch/issues/121).
+> Tracker: [issue #121](https://github.com/luadch-ng/luadch-ng/issues/121).
 
 **Status:** complete - all 8a-3 fix waves landed + post-fix review pass closed
 **Started:** 2026-05-10
@@ -27,12 +27,12 @@ post-parse handlers and a regression net for malformed ADC input.
 External proposal from a luadch user (no GitHub handle) suggested a
 focused audit of all externally-controlled ADC input fields with a
 checklist of edge-case classes per field. Filed as
-[issue #121](https://github.com/luadch-ng/luadch/issues/121). The
+[issue #121](https://github.com/luadch-ng/luadch-ng/issues/121). The
 audit splits into three sub-phases:
 
 - **8a-1** (this doc): read-only pass; document current behaviour
   per field for each edge-case class; file findings as issues.
-- **8a-2** ([PR #123](https://github.com/luadch-ng/luadch/pull/123)):
+- **8a-2** ([PR #123](https://github.com/luadch-ng/luadch-ng/pull/123)):
   negative-test fuzz suite added to `tests/smoke/run.py` (14 -> 30
   tests). Caught five real bugs on first run, fixed them inline:
   - `core/adc.lua` parse() positional-param nil-safety
@@ -70,15 +70,15 @@ deployed.
 |---|---|---|
 | critical | 0 | - |
 | high | 0 | - |
-| medium | 1 | fixed in [#123](https://github.com/luadch-ng/luadch/pull/123) (8a-2) |
-| low | 6 | all fixed (3 in [#123](https://github.com/luadch-ng/luadch/pull/123), 2 in [#125](https://github.com/luadch-ng/luadch/pull/125), 1 in [scripts#22](https://github.com/luadch-ng/scripts/pull/22)); plus F-INF-1e defensive cleanup in this closeout PR |
+| medium | 1 | fixed in [#123](https://github.com/luadch-ng/luadch-ng/pull/123) (8a-2) |
+| low | 6 | all fixed (3 in [#123](https://github.com/luadch-ng/luadch-ng/pull/123), 2 in [#125](https://github.com/luadch-ng/luadch-ng/pull/125), 1 in [scripts#22](https://github.com/luadch-ng/scripts/pull/22)); plus F-INF-1e defensive cleanup in this closeout PR |
 | info | 3 | F-INF-2 (per-field bounds, by design); F-INF-3 (scope marker); F-INF-1f (etc_userlogininfo cosmetic, deferred) |
 
-The fuzz suite in [#123](https://github.com/luadch-ng/luadch/pull/123)
+The fuzz suite in [#123](https://github.com/luadch-ng/luadch-ng/pull/123)
 covered the `medium` finding (parse positional nil) plus the seven
 sites of `(user:share/slots() or 0)` defensive coercion in bundled
-scripts. The remaining `low` items landed in [#125](https://github.com/luadch-ng/luadch/pull/125)
-(luadch-ng/luadch) and [scripts#22](https://github.com/luadch-ng/scripts/pull/22)
+scripts. The remaining `low` items landed in [#125](https://github.com/luadch-ng/luadch-ng/pull/125)
+(luadch-ng/luadch-ng) and [scripts#22](https://github.com/luadch-ng/scripts/pull/22)
 (companion repo). The post-fix review pass surfaced one additional
 `low` (F-INF-1e, defensive cleanup) and one `info` (F-INF-1f,
 cosmetic UX) - both addressed below.
@@ -92,7 +92,7 @@ cosmetic UX) - both addressed below.
 #### F-PRS-7: parse() crashes on malformed positional params (FIXED)
 
 - **Location:** [`core/adc.lua:849-861`](../../core/adc.lua#L849-L861) (post-fix; pre-fix was the same site)
-- **Status:** Fixed in [PR #123](https://github.com/luadch-ng/luadch/pull/123).
+- **Status:** Fixed in [PR #123](https://github.com/luadch-ng/luadch-ng/pull/123).
 - **Symptom:** A malformed ADC command with fewer positional parameters than the cmd descriptor declared (e.g. `BMSG <sid>` with no body) left `buffer[i] == nil`. The parse loop passed nil straight into the type-validator, which crashed on `string_find(nil, "%c")` from the `default` validator.
 - **Exploit vector:** Post-login, any client could send `BMSG <sid>\n` (or another command short of one positional param) and force a Lua error in the parser. Connection got dropped per the parse-failure path; no script-level RCE; effectively a degraded-functionality DoS against a single connection per crash. Hub-wide impact bounded by Phase 7d's reentrant-parse fix (#65) - parse-locals are per-call so one crash does not corrupt other parses.
 - **Severity:** medium. Requires an authenticated client (post-login) but no special privilege; reproducible with a one-line ADC frame.
@@ -122,7 +122,7 @@ Plugin code that reads these getters into arithmetic / comparisons / string oper
 ##### F-INF-1b: bundled `usr_hubs.lua` arithmetic-before-nil-check (FIXED)
 
 - **Location:** [`scripts/usr_hubs.lua:119-122`](../../scripts/usr_hubs.lua#L119-L122)
-- **Status:** Fixed in [PR #125](https://github.com/luadch-ng/luadch/pull/125).
+- **Status:** Fixed in [PR #125](https://github.com/luadch-ng/luadch-ng/pull/125).
 - **Symptom:**
   ```lua
   local hn, hr, ho = user:hubs()
@@ -141,7 +141,7 @@ Plugin code that reads these getters into arithmetic / comparisons / string oper
 - **Location:**
   - [`scripts/usr_desc_prefix.lua:71`](../../scripts/usr_desc_prefix.lua#L71): `local desc = utf.sub( user:description(), utf.len( prefix ) + 1, -1 )`
   - [`scripts/etc_trafficmanager.lua:650`](../../scripts/etc_trafficmanager.lua#L650): same pattern with `target:description()`
-- **Status:** Fixed in [PR #125](https://github.com/luadch-ng/luadch/pull/125).
+- **Status:** Fixed in [PR #125](https://github.com/luadch-ng/luadch-ng/pull/125).
 - **Symptom:** `user:description()` is nil if the client did not send `DE` in BINF. `utf.sub(nil, ...)` raises.
 - **Exploit:** Any client can omit DE. Listener crashes on every onInf or other event that reaches these branches.
 - **Severity:** low. Plugin-local, hub stays up.
@@ -160,7 +160,7 @@ Plugin code that reads these getters into arithmetic / comparisons / string oper
 
 - **Location:** [`scripts/etc_trafficmanager.lua:453-466`](../../scripts/etc_trafficmanager.lua#L453-L466) (inside `format_description`)
 - **Status:** Fixed in this Phase-8a closeout PR.
-- **Surfaced by:** post-fix review pass (this audit's second pass after [#125](https://github.com/luadch-ng/luadch/pull/125) and [scripts#22](https://github.com/luadch-ng/scripts/pull/22) merged).
+- **Surfaced by:** post-fix review pass (this audit's second pass after [#125](https://github.com/luadch-ng/luadch-ng/pull/125) and [scripts#22](https://github.com/luadch-ng/scripts/pull/22) merged).
 - **Symptom:** The `onInf` branch of `format_description` reads `local desc = cmd:getnp "DE"` without a nil-guard, then calls `desc:sub(...)` on it. The other three branches (`onStart`, `onExit`, `onConnect`) all read `target:description() or ""` instead, defending against missing DE fields. The onInf branch was safe in practice only because the single caller at line 1015 gates the call with `if desc then ... format_description(...)`, so when this branch runs, `cmd:getnp "DE"` is always non-nil.
 - **Risk:** Implicit precondition - a future caller that drops the gate at the call site reintroduces the crash. Defence-in-depth gap.
 - **Severity:** low.
@@ -169,7 +169,7 @@ Plugin code that reads these getters into arithmetic / comparisons / string oper
 #### F-AUD-1: smoke harness only scanned hub stdout, missing all error.log traffic (FIXED)
 
 - **Location:** [`tests/smoke/run.py`](../../tests/smoke/run.py) `test_no_script_errors`
-- **Status:** Fixed in [PR #123](https://github.com/luadch-ng/luadch/pull/123).
+- **Status:** Fixed in [PR #123](https://github.com/luadch-ng/luadch-ng/pull/123).
 - **Symptom:** The function read from `staging_dir / "log" / "smoke-hub.log"` (the captured Popen stdout) and grepped for `"script error:"`. Lua-side `out.error()` writes to `log/error.log` on disk, not stdout. Pre-fix, every plugin error from F-INF-1 hits was silently produced on every clean smoke run; the test passed regardless.
 - **Severity:** low (audit / test infrastructure gap). Without the fix, the negative-test fuzz suite would land green in CI even when triggering plugin crashes.
 - **Fix:** Test now scans both `smoke-hub.log` (stdout) and `log/error.log`.
@@ -207,13 +207,13 @@ Plugin code that reads these getters into arithmetic / comparisons / string oper
 
 | ID | Severity | Repo | Status | Tracking |
 |---|---|---|---|---|
-| F-PRS-7 | medium | luadch | fixed | [#123](https://github.com/luadch-ng/luadch/pull/123) |
-| F-INF-1a | low | luadch | fixed | [#123](https://github.com/luadch-ng/luadch/pull/123) |
-| F-INF-1b | low | luadch | fixed | [#125](https://github.com/luadch-ng/luadch/pull/125) |
-| F-INF-1c | low | luadch | fixed | [#125](https://github.com/luadch-ng/luadch/pull/125) |
+| F-PRS-7 | medium | luadch | fixed | [#123](https://github.com/luadch-ng/luadch-ng/pull/123) |
+| F-INF-1a | low | luadch | fixed | [#123](https://github.com/luadch-ng/luadch-ng/pull/123) |
+| F-INF-1b | low | luadch | fixed | [#125](https://github.com/luadch-ng/luadch-ng/pull/125) |
+| F-INF-1c | low | luadch | fixed | [#125](https://github.com/luadch-ng/luadch-ng/pull/125) |
 | F-INF-1d | low | luadch-ng/scripts | fixed (3 of 4; 1 false-positive) | [scripts#22](https://github.com/luadch-ng/scripts/pull/22) |
 | F-INF-1e | low | luadch | fixed (defensive) | this closeout PR |
-| F-AUD-1 | low | luadch | fixed | [#123](https://github.com/luadch-ng/luadch/pull/123) |
+| F-AUD-1 | low | luadch | fixed | [#123](https://github.com/luadch-ng/luadch-ng/pull/123) |
 | F-INF-1f | info | luadch | fixed | post-Phase-8a housekeeping |
 | F-INF-2 | info | luadch | by design / open | 8a-3 design call (deferred) |
 | F-INF-3 | info | luadch | scope marker | 8a-1b future pass (when needed) |
@@ -221,8 +221,8 @@ Plugin code that reads these getters into arithmetic / comparisons / string oper
 ## 4. Phase 8a closure criteria
 
 - [x] 8a-1 first pass documented (this file).
-- [x] 8a-2 fuzz harness landed ([#123](https://github.com/luadch-ng/luadch/pull/123)).
-- [x] 8a-3 fix wave: F-INF-1b / F-INF-1c in the luadch repo ([#125](https://github.com/luadch-ng/luadch/pull/125)).
+- [x] 8a-2 fuzz harness landed ([#123](https://github.com/luadch-ng/luadch-ng/pull/123)).
+- [x] 8a-3 fix wave: F-INF-1b / F-INF-1c in the luadch repo ([#125](https://github.com/luadch-ng/luadch-ng/pull/125)).
 - [x] 8a-3 fix wave: F-INF-1d in the companion repo ([scripts#22](https://github.com/luadch-ng/scripts/pull/22)).
 - [x] Post-fix review pass: surfaces F-INF-1e (defensive cleanup, fixed in this closeout PR) and F-INF-1f (cosmetic, deferred, fixed 2026-05-23 in housekeeping PR).
 - [x] Phase 8a closeout: this doc updated; phase status flipped to `complete`.
@@ -235,7 +235,7 @@ Plugin code that reads these getters into arithmetic / comparisons / string oper
 2026-05-10. Eight findings, all addressed:
 
 - **1 medium, 6 low, 3 info findings** across the luadch core + bundled scripts + companion `luadch-ng/scripts` repo.
-- **All `medium` and `low` findings fixed** across [#123](https://github.com/luadch-ng/luadch/pull/123) (fuzz suite + initial defensive coercion in 7 sites), [#125](https://github.com/luadch-ng/luadch/pull/125) (usr_hubs reorder + utf.sub coercion in 2 sites), [scripts#22](https://github.com/luadch-ng/scripts/pull/22) (companion repo: 3 plugins fixed, 1 confirmed false-positive), and this closeout PR (F-INF-1e defensive cleanup in format_description's onInf branch).
+- **All `medium` and `low` findings fixed** across [#123](https://github.com/luadch-ng/luadch-ng/pull/123) (fuzz suite + initial defensive coercion in 7 sites), [#125](https://github.com/luadch-ng/luadch-ng/pull/125) (usr_hubs reorder + utf.sub coercion in 2 sites), [scripts#22](https://github.com/luadch-ng/scripts/pull/22) (companion repo: 3 plugins fixed, 1 confirmed false-positive), and this closeout PR (F-INF-1e defensive cleanup in format_description's onInf branch).
 - **3 `info` items remain open by design or as future scope:**
   - F-INF-1f (cosmetic UX) - operator-facing only, fixed 2026-05-23 in housekeeping PR (one-line `nil`-check before `hub.escapefrom`).
   - F-INF-2 (per-field numeric bounds) - design call, intentionally accepts negative integers per upstream `luadch/luadch#241`.

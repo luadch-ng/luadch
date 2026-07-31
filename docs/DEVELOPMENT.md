@@ -554,4 +554,4 @@ expansion of `CLAUDE.md` §1 for a single PR.
       blockers, or each skip justified in writing.
 - [ ] **GitFlow A**: branched off `dev`, PR to `dev`; `Part of #N` (not
       `Closes #N`) for multi-tier trackers; `gh` pinned to `--repo
-      luadch-ng/luadch`.
+      luadch-ng/luadch-ng`.

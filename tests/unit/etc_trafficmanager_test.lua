@@ -3,7 +3,7 @@
     tests/unit/etc_trafficmanager_test.lua
 
     Unit tests for scripts/etc_trafficmanager.lua `show blocks` /
-    `show settings` output (luadch-ng/luadch#502).
+    `show settings` output (luadch-ng/luadch-ng#502).
 
     Focus: the v2.7 change that makes `+trafficmanager show blocks`
     also list currently-online users who are auto-blocked by share
