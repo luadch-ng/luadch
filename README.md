@@ -1,147 +1,92 @@
-# Luadch - DC++ ADC Hub Server
-
+# luadch-ng
 [![License](https://img.shields.io/badge/license-GPLv3.0-blueviolet.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ARM-orange.svg)](docs/BUILDING.md)
-[![Lua](https://img.shields.io/badge/lua-5.4-blue.svg)](https://www.lua.org/)
-[![Smoke](https://github.com/luadch-ng/luadch/actions/workflows/smoke.yml/badge.svg)](https://github.com/luadch-ng/luadch/actions/workflows/smoke.yml)
-[![Docker](https://github.com/luadch-ng/luadch/actions/workflows/docker.yml/badge.svg)](https://github.com/luadch-ng/luadch/actions/workflows/docker.yml)
-[![Release](https://img.shields.io/github/v/release/luadch-ng/luadch.svg)](https://github.com/luadch-ng/luadch/releases/latest)
-[![GHCR](https://img.shields.io/badge/ghcr.io-amd64%20%7C%20arm64-blue?logo=docker)](https://github.com/luadch-ng/luadch/pkgs/container/luadch)
+[![Lua](https://img.shields.io/badge/lua-5.4.8-blue.svg)](https://www.lua.org/)
+[![Release](https://img.shields.io/github/v/release/luadch-ng/luadch-ng.svg)](https://github.com/luadch-ng/luadch-ng/releases/latest)
+[![GHCR](https://img.shields.io/badge/ghcr.io-amd64%20%7C%20arm64-blue?logo=docker)](https://github.com/luadch-ng/luadch-ng/pkgs/container/luadch-ng)
+[![Translation status](https://translate.dcvault.net/widget/luadch-ng/svg-badge.svg)](https://translate.dcvault.net/engage/luadch-ng/)
 
-A modernised fork of [luadch](https://github.com/luadch/luadch) by
-**blastbeat** and **pulsar**, hosted at [`luadch-ng`](https://github.com/luadch-ng).
-Maintained by [Aybo](https://github.com/Aybook), with help from Claude.
+A modernised fork of [luadch](https://github.com/luadch/luadch), an ADC(S) hub for the [Direct Connect](https://dcvault.net/docs/basics/what-is-direct-connect) network. Originally by **blastbeat** and **pulsar**. Check out our [Support Hub](https://dcvault.net/docs/community/support-hub) or [Support Forum](https://forum.dcvault.net) if you have any questions or problems, or just to chat.
 
-## Release lines
+Help us translate Luadch-ng into your language. Visit our [Translation Hub](https://translate.dcvault.net/projects/luadch-ng/)
 
-| Line / branch | Status | What it gets |
-|---|---|---|
-| `dev` | staging (feeds 3.2.x) | Every feature lands here first and is validated on the `:dev` testhub image, then promoted to `master` |
-| **3.2.x** (`master`) | active release line | New features (HTTP API, dual-stack, audit log, etc.) + refactors, promoted from `dev`; release tags are cut here |
-| **3.1.x** (`release/3.1.x`) | security fixes only | Backports for critical CVEs / severity-1 bugs only; no new features |
-| ≤ 3.0.x | end of life | No updates of any kind |
+🔴🔴 REPO RENAMED `luadch` → `luadch-ng` - the Docker image moved from `ghcr.io/luadch-ng/luadch` to `ghcr.io/luadch-ng/luadch-ng`. Update your `docker pull` / compose `image:` line; the old image is frozen.
+🔴🔴 BETA SOFTWARE - Please report Errors
 
-The 3.1.x line concludes the modernisation programme (Phases 1-7 +
-ADC-coverage closure). The active 3.2.x line picks up the Phase 8
-feature work.
+## Features
 
-**Contributing?** New work is staged on the `dev` branch before it is
-promoted to `master`, so pull requests go against **`dev`** - see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+- 📜 Full ADC hub protocol support, TLS 1.3, ADCS-only
+- 🥷 Private only & public hub features
+- ↔️ IPv4 & IPv6 dual-stack (*HBRI for active mode NAT traversal)
+- 🔒 Hardened by default - plugin sandbox, rate limits
+- 🐍 Lua 5.4.8 scripting API + lots of bundled plugins
+- 🪶 Low footprint (~ 30 MB RAM), ARM-ready
+- ⚡ HTTP API - full REST management (users, bans, config, plugins, logs)
+- 📥 Simple Webhook System
+- 💬 Multilanguage support (i18n)
+- 🛡️ Blocklist engine + external feeds (Tor, Spamhaus, AbuseIPDB)
+- 🌍 GeoIP country/ASN policy + in-hub MaxMind auto-update
+- 🕵️ Proxy/VPN/Tor detection
+- 📦 Encrypted backup & restore system
+- 📊 Prometheus metrics + polled event stream
+- 🐳 Prebuilt binaries Windows, Linux + multi-arch Docker Image
 
-## Original Features
+*[HBRI](https://forum.dcvault.net/t/hbri-ipv4-ipv6-verification-for-hybrid-hubs/22) is not an official ADC specification and was proposed as a protocol extension in DCBase in 2012. AirDC++ implemented this in its client in 2013.
 
-- TLS 1.3 with AES-128 / AES-256 cipher suites
-- Fast, small footprint (≈ 3 MB install size)
-- ARM-compatible (Raspberry Pi, ARM servers, Apple Silicon Linux)
-- Easy-to-use Lua scripting API for plugins
-- Many bundled command and bot scripts
-- Right-click menu support in modern clients (AirDC++)
 
-## New Features
+## ToDo
+- 🌐 Web interface for hub management
 
-- **Lua 5.4.8 runtime** - bumped from upstream Lua 5.1 (EOL since 2012). Modern bytecode, integer-aware math, native `utf8` library, supported standard library
-- **DoS hardening** ([#56](https://github.com/luadch-ng/luadch/issues/56)) - per-IP / per-user rate limits, TLS handshake deadline, failed-auth lockout
-- **Per-userlevel rate-limit tiers** ([#80](https://github.com/luadch-ng/luadch/issues/80)) - independent buckets for chat / PM / INF / CTM-RCM / search, optional named tiers per user level (see [`docs/SCRIPTS.md`](docs/SCRIPTS.md#rate-limit-configuration))
-- **Encrypted user database** ([#52](https://github.com/luadch-ng/luadch/issues/52)) - AES-256-GCM at-rest encryption of `cfg/user.tbl`
-- **Sandboxed config / state loaders** ([#51](https://github.com/luadch-ng/luadch/issues/51)) - tampered `.tbl` files cannot achieve RCE
-- **POSIX file-permission enforcement** on secret files
-- **TLS-only default + auto-generated cert on first boot** ([#77](https://github.com/luadch-ng/luadch/issues/77) / [#113](https://github.com/luadch-ng/luadch/pull/113)) - fresh installs ship TLS-only on both IPv4 and IPv6, with a P-256 ECDSA cert generated automatically when none exists
-- **Atomic plugin saves** ([#133](https://github.com/luadch-ng/luadch/issues/133)) - `util.savearray` / `util.savetable` use tmp + rename so a hub crash mid-write leaves the `.tbl` intact
-- **Docker plugin + language autosync** ([#118](https://github.com/luadch-ng/luadch/pull/118)) - container restarts pull in new bundled scripts and lang files without overwriting operator customisations
+## Quick Start
 
-### 3.2.x feature era (Phase 8+, on `master`)
-
-- **HTTP / JSON API** ([#82](https://github.com/luadch-ng/luadch/issues/82)) - token-authed REST surface for users, bans, registered users, config, logs, and a live `/v1/events` stream; see [`docs/HTTP_API.md`](docs/HTTP_API.md)
-- **Audit log** ([#84](https://github.com/luadch-ng/luadch/issues/84)) - structured JSONL `onAudit` records across the hub's staff-action plugins, exposed via `etc_auditlog` + the HTTP event stream
-- **Unified pre-handshake blocklist + in-hub GeoIP** ([#78](https://github.com/luadch-ng/luadch/issues/78) / [#79](https://github.com/luadch-ng/luadch/issues/79)) - CIDR/IPv6 blocklist with provenance, stealth mode, external feeds (Tor / Spamhaus / AbuseIPDB), MaxMind GeoLite2 country/ASN, and live proxy/VPN detection ([#352](https://github.com/luadch-ng/luadch/issues/352)); operator guide in [`docs/BLOCKLIST.md`](docs/BLOCKLIST.md)
-- **Global allowlist / whitelist** (#78 allowlist) - trusted infrastructure (hublist pingers etc.) exempt from the *automated* blockers, never from a manual ban
-- **Client blocker** ([#81](https://github.com/luadch-ng/luadch/issues/81)) - version-range client filtering
-- **Real dual-stack HBRI** ([#214](https://github.com/luadch-ng/luadch/issues/214)) - secondary-IP verification for IPv4+IPv6 clients
-- **Inbound webhook receiver + status-push heartbeat** ([#398](https://github.com/luadch-ng/luadch/issues/398) / [#395](https://github.com/luadch-ng/luadch/issues/395)) - HMAC-authed inbound webhooks (Discourse / GitHub) and an outbound status heartbeat
-- **`select`->`poll` event loop** ([#310](https://github.com/luadch-ng/luadch/issues/310)) - lifts the ~1024 concurrent-socket ceiling on POSIX
-- **ADC command aliases** ([#327](https://github.com/luadch-ng/luadch/issues/327)) - operator-defined `+alias`es
-- **Encrypted local backup + offline restore** ([#480](https://github.com/luadch-ng/luadch/issues/480)) - scheduled AES-256-GCM `.ldbk` archives of hub state via `+backup`, plus a standalone `./luadch --restore` that rebuilds a hub from an archive without booting it; see [`docs/BACKUP.md`](docs/BACKUP.md)
-- **Force TLS on client-to-client transfers** ([#500](https://github.com/luadch-ng/luadch/issues/500)) - `etc_forcetlstransfer` refuses to broker a plaintext direct transfer on an ADCS hub, so file transfers are TLS too; ships in a non-breaking warn mode
-- **Maintenance-mode lockdown** ([#501](https://github.com/luadch-ng/luadch/issues/501)) - `+lockdown` temporarily admits only users at or above a chosen level (with a timed auto-lift) to drain a hub for maintenance
-
-See [`docs/SECURITY.md`](docs/SECURITY.md) for the full threat model
-and operator guidance.
-
-## Documentation
-
-- **[docs/BUILDING.md](docs/BUILDING.md)** - build from source on
-  Linux, Windows, or ARM
-- **[docs/INSTALLING.md](docs/INSTALLING.md)** - deploy a built hub
-  (file layout, permissions, systemd, backups, updates)
-- **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** - configure the
-  hub, register users, manage plugins, set up TLS
-- **[docs/SCRIPTS.md](docs/SCRIPTS.md)** - every bundled plugin with
-  its commands and cfg keys, plus the rate-limit configuration guide
-- **[docs/SECURITY.md](docs/SECURITY.md)** - threat model, plugin
-  trust contract, file-permission baseline, network-defense map,
-  CVE-tracking process, how to report a security issue
-- **[docs/DOCKER.md](docs/DOCKER.md)** - container image, mount layout,
-  TLS-only deployments, troubleshooting
-- **[docs/BACKUP.md](docs/BACKUP.md)** - encrypted backups + offline
-  restore: configuration, the `+backup` command, off-site mirroring
-  (rclone), and the disaster-recovery runbook
-- **[docs/PLUGIN_API.md](docs/PLUGIN_API.md)** - plugin scripting API
-  reference (listeners, modules, objects, conventions, pitfalls)
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** - which branch to target, what a
-  PR needs, how to report a bug
-- **[docs/TRANSLATING.md](docs/TRANSLATING.md)** - help translate luadch on
-  Weblate ([translate.dcvault.net](https://translate.dcvault.net/))
-- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - engineering how-to:
-  authoring core modules, plugin conventions, testing, security
-  checklists, Definition of Done
-
-## Quick start
-
-Pre-built binaries for Linux x86_64 and Windows x86_64 are attached to
-each [release](https://github.com/luadch-ng/luadch/releases/latest) - extract
-and run.
-
-### Docker
-
-```sh
-git clone https://github.com/luadch-ng/luadch.git
-cd luadch
-cp .env.example .env   # adjust PUID / PGID if `id -u` is not 1000
-mkdir -p cfg scripts certs log secrets
+### Docker (recommended)
+```bash
+git clone https://github.com/luadch-ng/luadch-ng.git
+cd luadch-ng
+cp .env.example .env   # Adjust PUID/PGID if `id -u` != 1000
 docker compose up -d
 ```
+Multi-arch image (`ghcr.io/luadch-ng/luadch-ng:latest`), runs as an unprivileged user. Upon first startup, a self-signed TLS certificate is generated, and the keyprint for the `adcs://` URL is logged.
 
-The image (`ghcr.io/luadch-ng/luadch:latest`, multi-arch
-linux/amd64+arm64) runs **unprivileged** by default; the entrypoint
-seeds empty mounts, generates a self-signed TLS cert, and logs the
-keyprint for the `adcs://` URL. See [`docs/DOCKER.md`](docs/DOCKER.md)
-for the full operator guide.
+### Prebuilt binaries
+Linux/Windows x86_64 versions are included with every [release](https://github.com/luadch-ng/luadch-ng/releases/latest) - just unzip and run.
 
 ### From source
-
-```sh
-git clone https://github.com/luadch-ng/luadch.git
-cd luadch
+```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 cmake --install build
 cd build/install/luadch && ./luadch
 ```
 
-Fresh installs are TLS-only (the cert is auto-generated on first boot).
-Connect with an ADC client (e.g. AirDC++) to `adcs://127.0.0.1:5001`, log
-in as `dummy` / `test`, and read [CONFIGURATION.md](docs/CONFIGURATION.md)
-for first-run steps (including keyprint pinning and enabling a plain
-`adc://` port if you want one). Windows users: see the Windows section of
-[BUILDING.md](docs/BUILDING.md).
+Then connect to `adcs://127.0.0.1:5001` using an ADC client (e.g., AirDC++), and log in with `dummy` / `test`. Getting started: [CONFIGURATION.md](docs/CONFIGURATION.md).
+
+## Documentation
+
+[Building](docs/BUILDING.md) · [Installing](docs/INSTALLING.md) · [Configuration](docs/CONFIGURATION.md) · [Scripts](docs/SCRIPTS.md) · [Security](docs/SECURITY.md) · [Docker](docs/DOCKER.md) · [Plugin API](docs/PLUGIN_API.md)
+
+## Links
+
+- 💬 [DCVault Forum](https://forum.dcvault.net)
+- 🐦 [Support Hub](https://dcvault.net/docs/community/support-hub)
+- 📧 [DCVault Wiki](https://dcvault.net)
+
+## Credits and Acknowledgements
+
+Conceptual credit goes to **[@blastbeat](https://github.com/blasti)** and **[@pulsar](https://github.com/pulsar-de)**, the original authors. This fork only modernizes and extends their foundation.
+
+A special thank you goes to the following users who helped me during development by suggesting improvements and finding bugs:
+- [@Sopor](https://github.com/Sopor)
+- [@Kcchouette](https://github.com/Kcchouette)
+
+## Contribution
+
+Any help or pull request is welcome. Please open an issue for bugs or improvements.
+
+## AI-Transparency
+
+This fork uses Claude Code to help with analyzing, planning, and writing code.
 
 ## License
 
-GPLv3.0 - see [LICENSE](LICENSE).
-
-## Credits
-
-All conceptual credit goes to **blastbeat** and **pulsar**, the original
-authors of luadch. This fork only modernises and extends their excellent
-foundation.
+GPLv3.0 — see [LICENSE](LICENSE).
