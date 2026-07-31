@@ -10,11 +10,11 @@ A modernised fork of [luadch](https://github.com/luadch/luadch), an ADC(S) hub f
 
 Help us translate Luadch-ng into your language. Visit our [Translation Hub](https://translate.dcvault.net/projects/luadch-ng/)
 
-🔴🔴 REPO RENAMED `luadch` → `luadch-ng` - the Docker image moved from `ghcr.io/luadch-ng/luadch` to `ghcr.io/luadch-ng/luadch-ng`.
+🔴🔴 **REPO RENAMED `luadch` → `luadch-ng` - the Docker image moved from `ghcr.io/luadch-ng/luadch` to `ghcr.io/luadch-ng/luadch-ng`.**
 
-🔴🔴 BETA SOFTWARE - Please report Errors
+🔴🔴 **BETA SOFTWARE - Version 3.2.0 not released yet. Use 3.1 for stable release**
 
-## Features
+## Features in 3.2
 
 - 📜 Full ADC hub protocol support, TLS 1.3, ADCS-only
 - 🥷 Private only & public hub features
