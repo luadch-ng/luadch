@@ -17,7 +17,7 @@ safe to run repeatedly - on CI when a new plugin lang file lands, or by hand.
 Environment:
   WEBLATE_URL        base URL, e.g. https://translate.dcvault.net   (required)
   WEBLATE_API_TOKEN  a Weblate API token (Settings -> API access)   (required)
-  WEBLATE_PROJECT    project slug                       (default: luadch)
+  WEBLATE_PROJECT    project slug                    (default: luadch-ng)
   WEBLATE_CORE_SLUG  Core component slug for the weblate:// link.
                      Optional - auto-detected as the one component whose repo
                      is a real VCS URL (not a weblate:// link) when omitted.
@@ -36,9 +36,10 @@ from glob import glob
 
 URL = os.environ.get("WEBLATE_URL", "").rstrip("/")
 TOKEN = os.environ.get("WEBLATE_API_TOKEN", "")
-# `or "luadch"` (not the .get default) so an env var set to the empty string
-# - as GitHub Actions passes an unset `vars.WEBLATE_PROJECT` - still falls back.
-PROJECT = os.environ.get("WEBLATE_PROJECT") or "luadch"
+# `or "luadch-ng"` (not the .get default) so an env var set to the empty string
+# - as GitHub Actions passes an unset `vars.WEBLATE_PROJECT` - still falls back
+# to the real project slug on translate.dcvault.net.
+PROJECT = os.environ.get("WEBLATE_PROJECT") or "luadch-ng"
 CORE_SLUG = os.environ.get("WEBLATE_CORE_SLUG", "").strip()
 
 if not URL or not TOKEN:
