@@ -34,13 +34,18 @@ FROM alpine:3.20
 #   libstdc++     adclib.so (Tiger hash impl is C++) links against the
 #                 GNU C++ runtime; alpine's musl base does not include
 #                 it so we have to pull it in explicitly
-#   coreutils     busybox lacks `base32`, which we need for the
-#                 SHA256 keyprint -> adcs:// URL form
 #   zlib          dynamic dep of zlib_stream.so (Phase 8 S4b ADC-EXT
 #                 ZLIF binding); only matters at runtime when
 #                 cfg.zlif_enabled = true, but the shared object's
 #                 dependency on libz.so.1 is resolved at hub start
-RUN apk add --no-cache openssl zlib ca-certificates tini libstdc++ coreutils
+#
+# NOTE: GNU coreutils used to be pulled in for `base32` (the SHA-256
+# keyprint -> adcs:// URL form). That moved into the hub in v3.1.6
+# (cert_bootstrap.lua computes the keyprint via adclib base32), so the
+# container no longer shells out to base32 and coreutils is dropped -
+# every command the entrypoint uses (cp -rT, tail -F, cmp -s, ...) is
+# provided by busybox. Dropping it also clears CVE-2016-2781.
+RUN apk add --no-cache openssl zlib ca-certificates tini libstdc++
 
 # Fixed image UID/GID. Operators who want their host bind-mount files
 # owned by their own UID override this at run time with `--user $(id
