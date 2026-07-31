@@ -3,7 +3,7 @@
 Local HTTP listener for hub state and admin actions. Plugin-extensible
 read/write API, designed as the substrate for a future WebUI.
 
-**Status:** shipped - the [#82](https://github.com/luadch-ng/luadch/issues/82)
+**Status:** shipped - the [#82](https://github.com/luadch-ng/luadch-ng/issues/82)
 HTTP-API arc is complete and on `master`; the endpoint catalog below is
 live. Implementation was phased - see
 [§13 Implementation phases](#13-implementation-phases). This document is
@@ -1483,7 +1483,7 @@ closed; details in their respective PRs / docs.
 
 ## 15. Related
 
-- Issue [#82](https://github.com/luadch-ng/luadch/issues/82)
+- Issue [#82](https://github.com/luadch-ng/luadch-ng/issues/82)
 - Phase 8 IO substrate: [`docs/phases/PHASE_8_IO.md`](phases/PHASE_8_IO.md)
 - Plugin model: [`docs/PLUGIN_API.md`](PLUGIN_API.md)
 - Security model: [`docs/SECURITY.md`](SECURITY.md) (loopback-only +

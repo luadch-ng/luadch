@@ -4,12 +4,12 @@ This page is for **plugin authors** whose plugins worked on luadch
 pre-2026-05-23 and may need fixes on master + future v3.2.x releases.
 Operators don't need this guide unless they author or modify plugins.
 
-[Issue #206](https://github.com/luadch-ng/luadch/issues/206)
+[Issue #206](https://github.com/luadch-ng/luadch-ng/issues/206)
 introduced a tightened plugin sandbox across Tier-1 (PR
-[#210](https://github.com/luadch-ng/luadch/pull/210)) and Tier-2 (PRs
-[#211](https://github.com/luadch-ng/luadch/pull/211),
-[#212](https://github.com/luadch-ng/luadch/pull/212),
-[#213](https://github.com/luadch-ng/luadch/pull/213)). The plugin
+[#210](https://github.com/luadch-ng/luadch-ng/pull/210)) and Tier-2 (PRs
+[#211](https://github.com/luadch-ng/luadch-ng/pull/211),
+[#212](https://github.com/luadch-ng/luadch-ng/pull/212),
+[#213](https://github.com/luadch-ng/luadch-ng/pull/213)). The plugin
 `_ENV` is now an explicit whitelist; everything else is unreachable.
 
 This guide lists **every primitive that became unreachable** and the
@@ -269,7 +269,7 @@ array-indexed `bans` list and `savetable` for its keyed `history`.
 
 ## See also
 
-- [Issue #206](https://github.com/luadch-ng/luadch/issues/206) - the
+- [Issue #206](https://github.com/luadch-ng/luadch-ng/issues/206) - the
   original sandbox-escape issue + closure record
 - [PLUGIN_API.md §2 Sandbox and environment](PLUGIN_API.md#2-sandbox-and-environment)
   for the live spec of what's available

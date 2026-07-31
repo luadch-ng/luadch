@@ -41,7 +41,7 @@ entrypoint can copy from it under any `--user` override.
 ## First-time setup
 
 ```sh
-git clone https://github.com/luadch-ng/luadch.git
+git clone https://github.com/luadch-ng/luadch-ng.git
 cd luadch
 cp .env.example .env
 # adjust PUID / PGID in .env if `id -u` on your host is not 1000
@@ -239,7 +239,7 @@ You should see an `eth0` line with an `fd00:cafe:beef:...` address.
 
 The hub's `cfg/cfg.tbl` has **separate port arrays** for v4 and v6.
 Since v3.2.x ([`core/server.lua`](../core/server.lua) registry is
-`(port, family)`-keyed, [#107](https://github.com/luadch-ng/luadch/issues/107)),
+`(port, family)`-keyed, [#107](https://github.com/luadch-ng/luadch-ng/issues/107)),
 the same port number can serve both stacks - HTTP/80-style
 dual-stack:
 

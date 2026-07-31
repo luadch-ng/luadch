@@ -388,7 +388,7 @@ local user = hub.find_online_by_firstnick( nick )   -- online human by firstnick
 > (a single-assignment `for _, u in pairs( hub.getusers() )` therefore
 > iterates humans-only). Use it for per-human iteration; reach for the
 > second/third table when you deliberately need bots or in-handshake
-> connections. ([#179](https://github.com/luadch-ng/luadch/issues/179),
+> connections. ([#179](https://github.com/luadch-ng/luadch-ng/issues/179),
 > which had bots leaking into the first table, is fixed.)
 
 > `hub.find_online_by_firstnick( nick )` resolves an online human by
@@ -398,9 +398,9 @@ local user = hub.find_online_by_firstnick( nick )   -- online human by firstnick
 > can miss a user whose nick was re-keyed by a prefix plugin such as
 > `usr_nick_prefix`: `hub.isnickonline( nick ) or hub.find_online_by_firstnick( nick )`.
 > A typed base nick then still resolves the prefixed online user (the
-> [#473](https://github.com/luadch-ng/luadch/issues/473) fix; centralised
+> [#473](https://github.com/luadch-ng/luadch-ng/issues/473) fix; centralised
 > from a dozen plugin-local copies in
-> [#537](https://github.com/luadch-ng/luadch/issues/537)).
+> [#537](https://github.com/luadch-ng/luadch-ng/issues/537)).
 
 #### Escaping
 
@@ -597,7 +597,7 @@ colon syntax (`user:method()` not `user.method(user)`).
 ([`core/adc.lua`](../core/adc.lua)) deliberately accepts any
 well-formed integer (including negative ones) so DC++ builds that
 emit the `DS-1` "unknown bandwidth" sentinel can still log in
-(Phase 7d closeout, [#65](https://github.com/luadch-ng/luadch/pull/65),
+(Phase 7d closeout, [#65](https://github.com/luadch-ng/luadch-ng/pull/65),
 upstream luadch/luadch#241). Negative values are NEVER semantically
 meaningful in ADC INF integer fields - they exist only as a wire-
 format compatibility hack. The accessors above normalise this on
@@ -930,7 +930,7 @@ the tail of `cfg.scripts`.
 the second/third tables, never the first - so a single-assignment
 `for _, u in pairs( hub.getusers() )` iterates humans-only. Use the second
 table when you deliberately need bots too. (The old
-[#179](https://github.com/luadch-ng/luadch/issues/179) bot-leak into the
+[#179](https://github.com/luadch-ng/luadch-ng/issues/179) bot-leak into the
 first table is fixed; the `if not user:isbot() then` guard is no longer
 needed for the first table, only harmless.)
 
@@ -956,8 +956,8 @@ that captured a direct reference to one of your tables keeps pointing at
 the OLD table the moment you rebind the local - which happens on every
 `+reload`/`onStart` reinit and on in-place resets like `bans = { }`. The
 consumer then reads stale/empty state with no error. This bit two
-plugins ([#238](https://github.com/luadch-ng/luadch/issues/238),
-[#239](https://github.com/luadch-ng/luadch/issues/239)).
+plugins ([#238](https://github.com/luadch-ng/luadch-ng/issues/238),
+[#239](https://github.com/luadch-ng/luadch-ng/issues/239)).
 
 Two safe patterns:
 

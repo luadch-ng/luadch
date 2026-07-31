@@ -337,7 +337,7 @@ consequence: if you re-point an *already-enabled* feed at a new URL, the new
 URL is not fetched until that feed's interval elapses. To force an immediate
 refresh, delete `scripts/data/etc_blocklist_feeds.tbl` and `+reload` (a
 `+blfeeds refresh` command is tracked in
-[#385](https://github.com/luadch-ng/luadch/issues/385)).
+[#385](https://github.com/luadch-ng/luadch-ng/issues/385)).
 
 ### Stealth
 
