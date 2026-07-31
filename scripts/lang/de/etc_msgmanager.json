@@ -1,29 +1,54 @@
 {
-  "help_desc":"Zeige geblockte User | zeige settings | blocke main chats | blocke pm chats | blocke beides | unblocke User",
-  "help_title":"etc_msgmanager.lua",
-  "help_usage":"[+!#]msgmanager showusers|showsettings|blockmain <NICK>|blockpm <NICK>|blockboth <NICK>|unblock <NICK>",
-  "msg_block":"[ MSGMANAGER ]--> Block User:  %s  |  Mode:  %s",
-  "msg_denied":"Du bist nicht befugt diesen Befehl zu nutzen.",
-  "msg_denied_main":"Du bist nicht befugt Nachrichten im Main zu senden.",
-  "msg_denied_pm":"Du bist nicht befugt PM Nachrichten zu senden.",
-  "msg_god":"Du bist nicht befugt diesen User zu blocken.",
-  "msg_isbot":"User ist ein Bot.",
-  "msg_mode_both":"main + pm",
-  "msg_mode_main":"main",
-  "msg_mode_pm":"pm",
-  "msg_notfound":"User nicht gefunden.",
-  "msg_notonline":"User ist offline.",
-  "msg_report_block":"[ MSGMANAGER ]--> User:  %s  |  hat folgenden User geblockt:  %s  |  IP:  %s  |  Mode:  %s",
-  "msg_report_unblock":"[ MSGMANAGER ]--> User:  %s  |  hob den Block von folgendem User auf:  %s  |  IP:  %s",
-  "msg_settings":"\n\n=== MESSAGE MANAGER =====================================\n\n   Skript ist aktiv:  %s\n\n   Geblockte MAIN Levels:\n\n%s\n   Geblockte PM Levels:\n\n%s\n===================================== MESSAGE MANAGER ===\n  ",
-  "msg_stillblocked":"Dieser User wurde schon geblockt.",
-  "msg_unblock":"[ MSGMANAGER ]--> Unblock User:  %s",
-  "msg_usage":"\n\n=== MESSAGE MANAGER ===========================================================\n\nGebrauch:\n\n    [+!#]msgmanager blockmain <NICK>  -- blockt user main messages\n    [+!#]msgmanager blockpm <NICK>  -- blockt user pm messages\n    [+!#]msgmanager blockboth <NICK>  -- blockt user main + pm messages\n    [+!#]msgmanager unblock <NICK>  -- unblockt user\n    [+!#]msgmanager showusers  -- zeigt alle blocked users\n    [+!#]msgmanager showsettings  -- zeigt settings aus der 'cfg.tbl'\n   \n=========================================================== MESSAGE MANAGER ===\n  ",
-  "msg_users":"\n\n=== MESSAGE MANAGER ================================\n\nGeblockte MAIN Levels:\n\n%s\nGeblockte PM Levels:\n\n%s\nGeblockte User:\n\n               Blockmode              Username\n  -------------------------------------------------------------------------------------\n\n%s\n  -------------------------------------------------------------------------------------\n               m = main   |   p = pm   |   b = both\n\n================================ MESSAGE MANAGER ===\n  ",
-  "ucmd_menu_ct1_1":["Hub","etc","Message Manager","zeige Einstellungen"],
-  "ucmd_menu_ct1_2":["Hub","etc","Message Manager","zeige geblockte User"],
-  "ucmd_menu_ct2_1":["Message Manager","block","main"],
-  "ucmd_menu_ct2_2":["Message Manager","block","pm"],
-  "ucmd_menu_ct2_3":["Message Manager","block","beides"],
-  "ucmd_menu_ct2_4":["Message Manager","unblock"]
+    "help_desc": "Zeige geblockte User | zeige settings | blocke main chats | blocke pm chats | blocke beides | unblocke User",
+    "help_title": "etc_msgmanager.lua",
+    "help_usage": "[+!#]msgmanager showusers|showsettings|blockmain <NICK>|blockpm <NICK>|blockboth <NICK>|unblock <NICK>",
+    "msg_block": "[ MSGMANAGER ]--> Block User:  %s  |  Mode:  %s",
+    "msg_denied": "Du bist nicht befugt diesen Befehl zu nutzen.",
+    "msg_denied_main": "Du bist nicht befugt Nachrichten im Main zu senden.",
+    "msg_denied_pm": "Du bist nicht befugt, private Nachrichten zu senden.",
+    "msg_god": "Du bist nicht befugt diesen User zu blocken.",
+    "msg_isbot": "User ist ein Bot.",
+    "msg_mode_both": "main + pm",
+    "msg_mode_main": "main",
+    "msg_mode_pm": "pm",
+    "msg_notfound": "User nicht gefunden.",
+    "msg_notonline": "User ist offline.",
+    "msg_report_block": "[ MSGMANAGER ]--> User:  %s  |  hat folgenden User geblockt:  %s  |  IP:  %s  |  Mode:  %s",
+    "msg_report_unblock": "[ MSGMANAGER ]--> User:  %s  |  hob den Block von folgendem User auf:  %s  |  IP:  %s",
+    "msg_settings": "\n\n=== MESSAGE MANAGER =====================================\n\n   Skript ist aktiv:  %s\n\n   Geblockte MAIN Levels:\n\n%s\n   Geblockte PM Levels:\n\n%s\n===================================== MESSAGE MANAGER ===\n  ",
+    "msg_stillblocked": "Dieser User wurde schon geblockt.",
+    "msg_unblock": "[ MSGMANAGER ]--> Unblock User:  %s",
+    "msg_usage": "\n\n=== MESSAGE MANAGER ===========================================================\n\nGebrauch:\n\n    [+!#]msgmanager blockmain <NICK>  -- blockt user main messages\n    [+!#]msgmanager blockpm <NICK>  -- blockt user pm messages\n    [+!#]msgmanager blockboth <NICK>  -- blockt user main + pm messages\n    [+!#]msgmanager unblock <NICK>  -- unblockt user\n    [+!#]msgmanager showusers  -- zeigt alle blocked users\n    [+!#]msgmanager showsettings  -- zeigt settings aus der 'cfg.tbl'\n   \n=========================================================== MESSAGE MANAGER ===\n  ",
+    "msg_users": "\n\n=== MESSAGE MANAGER ================================\n\nGeblockte MAIN Levels:\n\n%s\nGeblockte PM Levels:\n\n%s\nGeblockte User:\n\n               Blockmode              Username\n  -------------------------------------------------------------------------------------\n\n%s\n  -------------------------------------------------------------------------------------\n               m = main   |   p = pm   |   b = both\n\n================================ MESSAGE MANAGER ===\n  ",
+    "ucmd_menu_ct1_1": [
+        "Hub",
+        "etc",
+        "Message Manager",
+        "zeige Einstellungen"
+    ],
+    "ucmd_menu_ct1_2": [
+        "Hub",
+        "etc",
+        "Message Manager",
+        "zeige geblockte User"
+    ],
+    "ucmd_menu_ct2_1": [
+        "Message Manager",
+        "block",
+        "main"
+    ],
+    "ucmd_menu_ct2_2": [
+        "Message Manager",
+        "block",
+        "pm"
+    ],
+    "ucmd_menu_ct2_3": [
+        "Message Manager",
+        "block",
+        "beides"
+    ],
+    "ucmd_menu_ct2_4": [
+        "Message Manager",
+        "unblock"
+    ]
 }
