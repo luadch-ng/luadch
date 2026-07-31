@@ -1,18 +1,29 @@
 {
-  "help_desc":"Zeige/resette die Hub Runtime",
-  "help_title":"hub_runtime.lua",
-  "help_usage":"[+!#]runtime show|reset",
-  "msg_days":" Tage, ",
-  "msg_denied":"Du bist nicht befugt diesen Befehl zu nutzen.",
-  "msg_hours":" Stunden, ",
-  "msg_minutes":" Minuten, ",
-  "msg_reset_1":"Hub Runtime wurde zurückgesetzt.",
-  "msg_reset_2":"Hub Runtime wurde zurückgesetzt von: %s",
-  "msg_runtime":"\n\n=== RUNTIME ============================================================\n\n               Hub runtime - Session:   %s\n               Hub runtime - Complete: %s\n\n============================================================ RUNTIME ===\n  ",
-  "msg_seconds":" Sekunden",
-  "msg_unknown":"<UNBEKANNT>",
-  "msg_usage":"Gebrauch: [+!#]runtime show|reset",
-  "msg_years":" Jahre, ",
-  "ucmd_menu_reset":["Hub","Core","Hub runtime","zurücksetzen","OK"],
-  "ucmd_menu_show":["Hub","Core","Hub runtime","anzeigen"]
+    "help_desc": "Zeige/resette die Hub Runtime",
+    "help_title": "hub_runtime.lua",
+    "help_usage": "[+!#]runtime show|reset",
+    "msg_days": " Tage, ",
+    "msg_denied": "Du bist nicht befugt diesen Befehl zu nutzen.",
+    "msg_hours": " Stunden, ",
+    "msg_minutes": " Minuten, ",
+    "msg_reset_1": "Hub Runtime wurde zurückgesetzt.",
+    "msg_reset_2": "Hub Runtime wurde zurückgesetzt von: %s",
+    "msg_runtime": "\n\n=== LAUFZEiT ============================================================\n\n               Hub-Laufzeit - Session:   %s\n               Hub-Laufzeit - Gesamt:   %s\n\n============================================================ LAUFZEiT ===\n  ",
+    "msg_seconds": " Sekunden",
+    "msg_unknown": "<UNBEKANNT>",
+    "msg_usage": "Gebrauch: [+!#]runtime show|reset",
+    "msg_years": " Jahre, ",
+    "ucmd_menu_reset": [
+        "Hub",
+        "Core",
+        "Hub-Laufzeit",
+        "zurücksetzen",
+        "OK"
+    ],
+    "ucmd_menu_show": [
+        "Hub",
+        "Core",
+        "Hub-Laufzeit",
+        "anzeigen"
+    ]
 }
