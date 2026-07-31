@@ -60,6 +60,12 @@ local hbri = use "hbri"    -- #214 HBRI secondary-family validation
 
 local out_put = out.put
 
+-- ADC 1.0.1 requires the GPA password-challenge salt to be at least 24
+-- random bytes (base32 encoded). createsalt(n) emits n base32 chars, which
+-- hashpas (adclib) decodes as floor(n*5/8) bytes; 39 chars -> 24 bytes, the
+-- spec floor. The historical default of 10 chars (6 bytes) was below it (#551).
+local GPA_SALT_CHARS = 39
+
 -- Stable upvalues - resolved once at file load.
 local adclib_createsalt = adclib.createsalt
 local adclib_escape = adclib.escape
@@ -605,7 +611,7 @@ _identify = {
                 user:kill( "ISTA 223 " .. _i18n.max_bad_password .. diff .. "/" .. _cfg_bad_pass_timeout .. "\n" )
                 return true
             end ]]
-            user:salt( adclib_createsalt( ) )
+            user:salt( adclib_createsalt( GPA_SALT_CHARS ) )
             user.write( "IGPA " .. user.salt( ) .. "\n" )
             user:state "verify"
         else

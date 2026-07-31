@@ -135,6 +135,11 @@ Client: HPAS base32(Tiger(password || salt))
 Server: must compute Tiger(stored, salt) and match
 ```
 
+The salt is CSPRNG-backed (OpenSSL `RAND_bytes` via `adclib`) and freshly
+generated per login. Its length is **24 bytes** (39 base32 chars on the wire),
+the ADC 1.0.1 minimum ("at least 24 random bytes"); raised from an earlier
+6-byte default in [#551](https://github.com/luadch-ng/luadch/issues/551).
+
 For the server's hash to match the client's, **the stored value must
 equal the client's password input**. Any one-way KDF (Argon2id,
 bcrypt, scrypt, PBKDF2) makes the server unable to produce the same
