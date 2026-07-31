@@ -16,9 +16,12 @@
 #      to review and merge. It does NOT auto-merge (community content stays gated
 #      behind a maintainer).
 #
-# `schedule` fires from the default branch (master), so it activates once this
-# file reaches master via the next dev -> master promote; `workflow_dispatch` works
-# from `dev` immediately (Actions UI -> Run workflow -> branch: dev).
+# Both triggers require this file on the DEFAULT branch (master): GitHub only
+# registers `schedule` and shows the `workflow_dispatch` "Run workflow" button for
+# workflows present on the default branch. So this workflow is dormant until it
+# reaches master via the next dev -> master promote; after that, `schedule` fires
+# weekly and `workflow_dispatch` can be run (and can then target the `dev` branch,
+# which is what it always checks out and funnels into regardless).
 
 name: Weblate funnel
 

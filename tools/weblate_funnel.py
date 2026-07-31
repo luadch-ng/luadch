@@ -17,6 +17,12 @@ values actually differs from what `dev` already has. So:
     full file, preserving its format and its empty keys for untranslated
     strings, so Weblate's next sync sees no divergence).
 
+Weblate is the source of truth for translations: a file is imported whenever its
+non-empty content differs in EITHER direction, so a string removed/emptied in
+Weblate overwrites dev's version. Do not hand-edit translations in `dev` - they
+will be clobbered on the next funnel; translate in Weblate instead. The
+maintainer PR review is the backstop against an accidental mass-empty.
+
 Run from the repository root, on a checkout of the target branch (dev), with the
 source branch fetched (default `origin/weblate`). It only WRITES files into the
 working tree and prints a summary; it does not commit, push, or touch git refs.
@@ -32,10 +38,16 @@ source); "nothing to funnel" is a normal, successful outcome (changed=0).
 
 import json
 import os
+import re
 import subprocess
 import sys
 
 SOURCE_REF = os.environ.get("WEBLATE_FUNNEL_SOURCE", "origin/weblate")
+
+# Language subdir codes we accept (de, en, pt_BR, zh_Hans, ...). Anything else
+# is skipped: it keeps a malformed/hostile path (shell metacharacters, traversal)
+# out of the git commit / PR title even though git already quotes such paths.
+LANG_CODE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 def git(*args):
@@ -59,14 +71,20 @@ def source_files():
             lng = f.split("/")[2]
         else:
             continue
-        if lng == "en":
+        if lng == "en" or not LANG_CODE_RE.match(lng):
             continue
         out.append((lng, f))
     return out
 
 
-def source_text(path):
-    r = git("show", f"{SOURCE_REF}:{path}")
+def source_bytes(path):
+    """Raw bytes of the file on the source ref (byte-exact: no newline rewrite).
+
+    Reading text would apply universal-newline translation; writing the raw
+    bytes keeps a file identical to Weblate's so the funnel does not perpetually
+    re-import it over a CRLF/LF difference.
+    """
+    r = subprocess.run(["git", "show", f"{SOURCE_REF}:{path}"], capture_output=True)
     return r.stdout if r.returncode == 0 else None
 
 
@@ -107,8 +125,8 @@ def main():
     malformed = []         # source files that would not decode
 
     for lng, path in source_files():
-        src_text = source_text(path)
-        src = decode(src_text)
+        src_raw = source_bytes(path)
+        src = decode(src_raw.decode("utf-8", "replace")) if src_raw is not None else None
         if src is None:
             malformed.append(path)
             continue
@@ -120,11 +138,12 @@ def main():
         if nonempty_leaves(src) == nonempty_leaves(dev or {}):
             skipped_empty.add(lng)
             continue
-        # Real translation content differs -> write the source's full file as-is
-        # (preserving Weblate's format and its empty keys for untranslated strings).
+        # Real translation content differs -> write the source's raw bytes as-is
+        # (byte-exact: preserves Weblate's format, its empty keys for untranslated
+        # strings, and its exact line endings so the funnel does not re-import it).
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(src_text)
+        with open(path, "wb") as fh:
+            fh.write(src_raw)
         included.append((lng, path))
         langs.add(lng)
 

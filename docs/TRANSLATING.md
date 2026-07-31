@@ -72,6 +72,11 @@ That's it. Saving in Weblate is all that is required from a translator.
   the same order).
 - A maintainer reviews and merges that pull request (squash), so translations
   pass the same review as code.
+
+> **Translate in Weblate, not in `dev`.** Weblate is the source of truth for
+> translations; the funnel overwrites a `dev` language file with Weblate's
+> whenever their real content differs, so a hand-edit made directly in `dev`
+> will be clobbered on the next funnel run. Fix translations in Weblate.
 - From `dev` translations ride the normal `dev` -> `master` promotion; there
   is no separate translation release. A hub upgrade ships whatever
   translations exist at that point.

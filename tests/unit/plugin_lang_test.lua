@@ -158,7 +158,11 @@ end
 local function fmt_sig( s )
     s = ( s:gsub( "%%%%", "" ) )
     local out = { }
-    for spec in s:gmatch( "%%[%-+ #0-9.]*([%a])" ) do
+    -- No space in the flag class on purpose: a literal percent in free-form
+    -- translator text ("50% der Dateien") would otherwise parse as a phantom
+    -- "% d" spec and fail the placeholder check, stalling the funnel. luadch
+    -- uses no space-flag conversions; real specs (%s %d %-20s %.2f) are unaffected.
+    for spec in s:gmatch( "%%[%-+#0-9.]*([%a])" ) do
         out[ #out + 1 ] = spec
     end
     return table.concat( out )
@@ -205,7 +209,7 @@ check( string.format( "cfg.scripts lists at least %d plugins (found %d)",
 local EXTRA_CODES = { }
 do
     local extra = os.getenv( "LANG_TEST_EXTRA_CODES" )
-    if extra then
+    if extra and extra ~= "" then
         for lng in extra:gmatch( "[^,%s]+" ) do
             if lng ~= "en" and lng ~= "de" then EXTRA_CODES[ #EXTRA_CODES + 1 ] = lng end
         end

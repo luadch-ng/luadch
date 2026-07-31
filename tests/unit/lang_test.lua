@@ -135,7 +135,12 @@ end
 local function fmt_sig( s )
     s = ( s:gsub( "%%%%", "" ) )
     local out = { }
-    for spec in s:gmatch( "%%[%-+ #0-9.]*([%a])" ) do
+    -- No space in the flag class on purpose: luadch format strings use no
+    -- space-flag conversions, and allowing one makes a literal percent in
+    -- free-form translator text ("50% der Dateien") parse as a phantom "% d"
+    -- spec, so a legitimate translation would fail the placeholder check and
+    -- stall the whole funnel. Real specs (%s %d %-20s %.2f) are unaffected.
+    for spec in s:gmatch( "%%[%-+#0-9.]*([%a])" ) do
         out[ #out + 1 ] = spec
     end
     return table.concat( out )
