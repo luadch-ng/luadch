@@ -422,6 +422,14 @@ def _adc_login(sock, nick: str, password: str, ve: str | None = None,
     gpa = reader.recv_until(lambda f: f.startswith("IGPA "))
     salt_b32 = gpa.split(" ", 1)[1].strip()
     salt_bytes = _b32_decode(salt_b32)
+    # ADC 1.0.1: the GPA salt must be at least 24 random bytes (base32 encoded).
+    # Guards against a regression to a shorter salt (#551 raised it from a
+    # 6-byte / 10-char default to 24 bytes / 39 chars).
+    if len(salt_bytes) < 24:
+        raise TestFailure(
+            f"GPA salt too short: {len(salt_bytes)} bytes "
+            f"({len(salt_b32)} base32 chars); ADC 1.0.1 requires >= 24 bytes"
+        )
     response = _tiger.tiger(password.encode("utf-8") + salt_bytes)
     sock.sendall(f"HPAS {_b32_encode(response)}\n".encode("utf-8"))
 
