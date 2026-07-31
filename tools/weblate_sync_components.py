@@ -17,10 +17,10 @@ safe to run repeatedly - on CI when a new plugin lang file lands, or by hand.
 Environment:
   WEBLATE_URL        base URL, e.g. https://translate.dcvault.net   (required)
   WEBLATE_API_TOKEN  a Weblate API token (Settings -> API access)   (required)
-  WEBLATE_PROJECT    project slug                       (default: luadch)
-  WEBLATE_CORE_SLUG  Core component slug for the weblate:// link.
-                     Optional - auto-detected as the one component whose repo
-                     is a real VCS URL (not a weblate:// link) when omitted.
+  WEBLATE_PROJECT    project slug                    (default: luadch-ng)
+  WEBLATE_CORE_SLUG  Core component slug the new components link to via
+                     weblate://. Optional - defaults to 'core-hub'. Must be an
+                     existing component (checked before any create).
 
 Run from the repository root. Exit code 0 = all good, 1 = at least one failure.
 """
@@ -36,7 +36,10 @@ from glob import glob
 
 URL = os.environ.get("WEBLATE_URL", "").rstrip("/")
 TOKEN = os.environ.get("WEBLATE_API_TOKEN", "")
-PROJECT = os.environ.get("WEBLATE_PROJECT", "luadch")
+# `or "luadch-ng"` (not the .get default) so an env var set to the empty string
+# - as GitHub Actions passes an unset `vars.WEBLATE_PROJECT` - still falls back
+# to the real project slug on translate.dcvault.net.
+PROJECT = os.environ.get("WEBLATE_PROJECT") or "luadch-ng"
 CORE_SLUG = os.environ.get("WEBLATE_CORE_SLUG", "").strip()
 
 if not URL or not TOKEN:
@@ -45,11 +48,24 @@ if not URL or not TOKEN:
 COMPONENTS = f"{URL}/api/projects/{PROJECT}/components/"
 
 
+# A browser-like User-Agent. urllib's default ("Python-urllib/3.x") is an
+# instant bot signal for a Cloudflare-fronted instance (translate.dcvault.net)
+# and gets served the "Just a moment..." challenge instead of JSON. Overridable
+# via WEBLATE_USER_AGENT for tuning without a code change.
+USER_AGENT = os.environ.get(
+    "WEBLATE_USER_AGENT",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36",
+)
+
+
 def api(method, url, data=None):
     """Return (status_code, parsed_or_text). Never raises on HTTP errors."""
     body = urllib.parse.urlencode(data).encode() if data else None
     req = urllib.request.Request(url, data=body, method=method)
     req.add_header("Authorization", f"Token {TOKEN}")
+    req.add_header("User-Agent", USER_AGENT)
+    req.add_header("Accept", "application/json")
     if body:
         req.add_header("Content-Type", "application/x-www-form-urlencoded")
     try:
@@ -62,40 +78,35 @@ def api(method, url, data=None):
         return 0, str(e)
 
 
-# 1. Enumerate existing components (paginated). Collect the ones backed by a
-#    real VCS repo (not a weblate:// link) as Core candidates - normally exactly
-#    one (the Core component); the per-plugin components all link via weblate://.
+# The Core component whose repo the new plugin components link to via
+# `weblate://<project>/<core>`. It defaults to our instance's Core slug and is
+# overridable. We do NOT auto-detect it: Weblate's API returns the RESOLVED VCS
+# URL even for weblate://-linked components, so "which component has a real
+# repo" cannot distinguish the Core once linked plugin components exist.
+core = CORE_SLUG or "core-hub"
+
+# Enumerate existing component slugs (paginated) so we skip the ones already
+# there, and confirm the Core component itself exists before linking to it.
 existing = set()
-core_candidates = set()
 nxt = COMPONENTS + "?page_size=100"
 while nxt:
     status, page = api("GET", nxt)
+    if status == 404:
+        sys.exit(
+            f"error: project '{PROJECT}' not found (404) - check the project slug "
+            f"in the Weblate URL (/projects/<slug>/) and set WEBLATE_PROJECT"
+        )
     if status != 200 or not isinstance(page, dict):
         sys.exit(f"error: listing components failed ({status}): {page}")
     for comp in page.get("results", []):
         existing.add(comp["slug"])
-        repo = str(comp.get("repo", ""))
-        if repo and not repo.startswith("weblate://"):
-            core_candidates.add(comp["slug"])
     nxt = page.get("next")
 
-# Resolve the Core component slug. An explicit override always wins; otherwise
-# auto-detect, but FAIL LOUD on ambiguity rather than silently link the new
-# plugin components to an arbitrary one.
-core = CORE_SLUG
-if not core:
-    if len(core_candidates) == 1:
-        core = next(iter(core_candidates))
-    elif not core_candidates:
-        sys.exit(
-            "error: no Core component found (none has a real VCS repo) - create "
-            "the Core component first, or set WEBLATE_CORE_SLUG"
-        )
-    else:
-        sys.exit(
-            "error: multiple candidate Core components "
-            f"{sorted(core_candidates)} - set WEBLATE_CORE_SLUG to disambiguate"
-        )
+if core not in existing:
+    sys.exit(
+        f"error: Core component '{core}' not found among {len(existing)} "
+        f"components - create it first, or set WEBLATE_CORE_SLUG to its slug"
+    )
 
 # 2. Enumerate the plugins from the repo checkout.
 plugins = sorted(
