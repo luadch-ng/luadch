@@ -42,11 +42,11 @@ enum {
 enum {SIZE = 192/8};
 
 // Bounded buffer sizes for the Tiger hash inputs. The legitimate ADC
-// CID is exactly SIZE (24) bytes; the legitimate ADC salt is bounded by
-// adclib.createsalt's default of 10 base32 chars (~6 bytes). MAX_SALT_BYTES
-// is set well above that so any reasonable future tuning of createsalt
-// fits, while still preventing the attacker-sized VLA stack-DoS flagged
-// as F-C-1 in the Phase 7 audit.
+// CID is exactly SIZE (24) bytes; the legitimate ADC GPA salt is 39 base32
+// chars (24 bytes) per ADC 1.0.1, sent via adclib.createsalt(39) (#551).
+// MAX_SALT_BYTES is set well above that so any reasonable future tuning of
+// createsalt fits, while still preventing the attacker-sized VLA stack-DoS
+// flagged as F-C-1 in the Phase 7 audit.
 enum {MAX_SALT_BYTES = 64};
 
 // Push (nil, "<prefix>: <openssl-reason>") onto the Lua stack, drain
