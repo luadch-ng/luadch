@@ -15,7 +15,7 @@
 
 services:
   luadch:
-    image: ghcr.io/luadch-ng/luadch:latest
+    image: ghcr.io/luadch-ng/luadch-ng:latest
     container_name: luadch
     user: "${PUID:-1000}:${PGID:-1000}"
     environment:

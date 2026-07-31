@@ -467,14 +467,14 @@ project follows a standard maintenance-branch model:
 | Line | Where | Status | What it gets |
 |---|---|---|---|
 | **3.2.x** | `master` | active development (release substrate) | Tagged releases only. Feature PRs land here after dev testhub validation. |
-| **dev** | `dev` | testing staging | Long-lived. Every feature lands here first for testhub validation (`ghcr.io/luadch-ng/luadch:dev` auto-built on push). PR'd to master once green on the testhub. |
+| **dev** | `dev` | testing staging | Long-lived. Every feature lands here first for testhub validation (`ghcr.io/luadch-ng/luadch-ng:dev` auto-built on push). PR'd to master once green on the testhub. |
 | **3.1.x** | `release/3.1.x` | security fixes only | Critical CVE / severity-1 backports only. No features, no refactors, no Phase-8-anything. |
 | ≤ v3.0.x | (untagged history) | end of life | No updates of any kind. |
 
 ### Workflow
 
 - **New work** (GitFlow A): branch `feat/X` off `dev`, PR to `dev` when
-  ready. Docker auto-builds `ghcr.io/luadch-ng/luadch:dev` on merge.
+  ready. Docker auto-builds `ghcr.io/luadch-ng/luadch-ng:dev` on merge.
   Maintainer pulls + tests on the testhub. When green, second PR
   `dev -> master`. Master tag (e.g. `v3.2.0`) cuts from master HEAD.
 - **Security backport**: PR against master first (NOT dev - security

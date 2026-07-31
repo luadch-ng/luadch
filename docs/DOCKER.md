@@ -6,12 +6,12 @@ and published to GitHub Container Registry on every release tag, on
 
 | Tag pattern | Source |
 |---|---|
-| `ghcr.io/luadch-ng/luadch:vX.Y.Z` | exact release |
-| `ghcr.io/luadch-ng/luadch:vX.Y`   | latest patch in `vX.Y` line |
-| `ghcr.io/luadch-ng/luadch:vX`     | latest minor in `vX` line |
-| `ghcr.io/luadch-ng/luadch:latest` | latest released `vX.Y.Z` |
-| `ghcr.io/luadch-ng/luadch:master` | bleeding-edge (post-merge, pre-release) |
-| `ghcr.io/luadch-ng/luadch:dev`    | rolling `dev` branch - next-merge candidate, the testhub image |
+| `ghcr.io/luadch-ng/luadch-ng:vX.Y.Z` | exact release |
+| `ghcr.io/luadch-ng/luadch-ng:vX.Y`   | latest patch in `vX.Y` line |
+| `ghcr.io/luadch-ng/luadch-ng:vX`     | latest minor in `vX` line |
+| `ghcr.io/luadch-ng/luadch-ng:latest` | latest released `vX.Y.Z` |
+| `ghcr.io/luadch-ng/luadch-ng:master` | bleeding-edge (post-merge, pre-release) |
+| `ghcr.io/luadch-ng/luadch-ng:dev`    | rolling `dev` branch - next-merge candidate, the testhub image |
 
 Available platforms: `linux/amd64`, `linux/arm64`.
 
@@ -309,7 +309,7 @@ network stack directly:
 ```yaml
 services:
   luadch:
-    image: ghcr.io/luadch-ng/luadch:latest
+    image: ghcr.io/luadch-ng/luadch-ng:latest
     network_mode: host
     user: "${PUID:-1000}:${PGID:-1000}"
     # no ports: section in host mode
@@ -345,7 +345,7 @@ For `vX.Y.Z` releases pin the tag in `docker-compose.yml` so you don't
 get unexpected jumps:
 
 ```yaml
-image: ghcr.io/luadch-ng/luadch:v3.1.15
+image: ghcr.io/luadch-ng/luadch-ng:v3.1.15
 ```
 
 ### What gets updated automatically
