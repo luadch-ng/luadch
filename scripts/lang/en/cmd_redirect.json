@@ -1,5 +1,5 @@
 {
-  "help_desc":"Redirect user to url",
+  "help_desc":"Redirect user to URL",
   "help_title":"usr_redirect.lua",
   "help_usage":"[+!#]redirect <NICK> <URL>",
   "msg_denied":"You are not allowed to use this command.",
@@ -12,5 +12,5 @@
   "msg_usage":"Usage: [+!#]redirect <NICK> <URL>",
   "ucmd_menu_ct2_1":["Redirect","default URL"],
   "ucmd_menu_ct2_2":["Redirect","custom URL"],
-  "ucmd_url":"Redirect url:"
+  "ucmd_url":"Redirect URL:"
 }
