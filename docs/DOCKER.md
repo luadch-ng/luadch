@@ -517,6 +517,26 @@ won't pass.
 If you already replaced the cert with one from a public CA, drop the
 keyprint suffix from the URL.
 
+### Container shows `unhealthy`
+
+The HEALTHCHECK probes a single port with `nc -z`. It defaults to
+**5001**, the TLS-only default listener. If you changed the hub's
+listen port - running plain-only on 5000 (`tcp_ports = { 5000 }`, ssl
+disabled) or a custom port - the probe hits a dead port and the
+container reports `unhealthy` even though the hub serves fine. Point
+the probe at your actual port:
+
+```yaml
+environment:
+  - LUADCH_HEALTHCHECK_PORT=5000
+```
+
+(or in `.env`, then make sure the variable is listed in the service's
+`environment:` block - an `.env` entry alone only does compose
+interpolation, it does not reach the container). `docker inspect -f
+'{{.State.Health.Status}}' luadch` should read `healthy` within the
+`--interval` window after the next `docker compose up -d`.
+
 ## Building the image yourself
 
 ```sh
