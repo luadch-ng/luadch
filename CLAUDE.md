@@ -81,7 +81,8 @@ luadch is a DC++ **ADC** hub server written in Lua with a thin C launcher
   (see `core/const.lua`). The 3.1.x maintenance line keeps `PROGRAM_NAME = "Luadch"`.
 - **Latest release:** `v3.1.14` (2026-07-13, on `release/3.1.x`)
 - **Status:** the Phase 1-7 modernisation programme is content-complete; work is now
-  3.2.x feature development (Phase 8+) plus 3.1.x security-only maintenance (see §8).
+  3.2.x feature development (Phase 8+) plus 3.1.x security-only maintenance
+  until the `v3.2.0` tag (which EOLs the 3.1.x line - see §8).
 - **Open issues:** check `gh issue list --repo luadch-ng/luadch-ng` (never trust a
   count written into a doc).
 - **Testing:** a pure-Lua unit suite (`tests/unit/*_test.lua`) plus a protocol-level
@@ -468,7 +469,7 @@ project follows a standard maintenance-branch model:
 |---|---|---|---|
 | **3.2.x** | `master` | active development (release substrate) | Tagged releases only. Feature PRs land here after dev testhub validation. |
 | **dev** | `dev` | testing staging | Long-lived. Every feature lands here first for testhub validation (`ghcr.io/luadch-ng/luadch-ng:dev` auto-built on push). PR'd to master once green on the testhub. |
-| **3.1.x** | `release/3.1.x` | security fixes only | Critical CVE / severity-1 backports only. No features, no refactors, no Phase-8-anything. |
+| **3.1.x** | `release/3.1.x` | security fixes only, **until `v3.2.0`** | Critical CVE / severity-1 backports only, and only while `v3.2.0` is unreleased. No features, no refactors, no Phase-8-anything. **The `v3.2.0` tag EOLs this line** (see below). |
 | ≤ v3.0.x | (untagged history) | end of life | No updates of any kind. |
 
 ### Workflow
@@ -484,9 +485,13 @@ project follows a standard maintenance-branch model:
   truth for the backport chain.
 - **3.2.x first release** will be tagged `v3.2.0` when Phase 8 has
   enough content to merit a release. No fixed timeline.
-- **3.1.x EOL**: declared after v3.2.0 is released and has had 6-12
-  months in the wild without 3.2-regression complaints. From EOL
-  onward `release/3.1.x` gets no commits.
+- **3.1.x EOL**: declared **with the `v3.2.0` release tag**. The moment
+  `v3.2.0` ships, `release/3.1.x` reaches end of life and gets **no
+  further commits at all** - no security backports, nothing. There is
+  **no 6-12 month grace window**: the message to operators is upgrade to
+  the 3.2.x line. Until `v3.2.0` is tagged, 3.1.x still receives critical
+  security backports per the table below; after the tag, that table
+  lapses entirely.
 
 ### When to backport vs not
 
@@ -501,7 +506,10 @@ project follows a standard maintenance-branch model:
 | UX / cosmetic | yes | **no** |
 | Documentation | yes | **no** |
 
-The bar for 3.1.x backport is high. When in doubt, don't.
+The bar for 3.1.x backport is high. When in doubt, don't. And this whole
+table applies **only while `v3.2.0` is unreleased** - once the `v3.2.0`
+tag ships, 3.1.x is EOL and the answer is always **no**, regardless of
+severity.
 
 **Drop-in plugin patch as a lighter alternative to a 3.1.x release.**
 When a bug hits a plugin already shipped on 3.1.x but the fix does not
