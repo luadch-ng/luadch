@@ -79,7 +79,7 @@ luadch is a DC++ **ADC** hub server written in Lua with a thin C launcher
 
 - **Current source version:** `v3.2.0-dev` on `master`, `PROGRAM_NAME = "Luadch-NG"`
   (see `core/const.lua`). The 3.1.x maintenance line keeps `PROGRAM_NAME = "Luadch"`.
-- **Latest release:** `v3.1.14` (2026-07-13, on `release/3.1.x`)
+- **Latest release:** `v3.1.15` (2026-07-29, on `release/3.1.x`)
 - **Status:** the Phase 1-7 modernisation programme is content-complete; work is now
   3.2.x feature development (Phase 8+) plus 3.1.x security-only maintenance
   until the `v3.2.0` tag (which EOLs the 3.1.x line - see §8).
@@ -171,6 +171,11 @@ from `_core` is correct either way (it is a data file, not a module) - do not
 Two hard ceilings (both enforced by review, not tooling):
 
 - **1500 lines per code module** (Phase 6). If a module needs more, split it.
+  Two pre-existing modules are grandfathered over the line and NOT a licence to
+  add more: `core/hub.lua` (the main loop; a split fights its 200-locals budget,
+  see below) and `core/http_router.lua`. Check current sizes with
+  `wc -l core/*.lua` (`cfg_defaults.lua` is a data/defaults file, not code, so the
+  ceiling does not apply to it). New modules stay under 1500.
 - **`core/hub.lua`'s main chunk runs close to Lua's 200-locals-per-chunk cap.**
   File-scope locals there are scarce - the file has hit the wall before (Phase 8
   S4b + S5, #301). Prefer a lazy `use "X"` at the call site, or pack related

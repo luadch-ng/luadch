@@ -39,7 +39,7 @@ false` at runtime).
 
 ```sh
 git clone https://github.com/luadch-ng/luadch-ng.git
-cd luadch
+cd luadch-ng
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 cmake --install build
