@@ -867,7 +867,8 @@ not that the doc is behind.
 
 The protocol-level smoke harness lives in [`tests/smoke/run.py`](../tests/smoke/run.py).
 It runs on Linux and Windows via [`.github/workflows/smoke.yml`](../.github/workflows/smoke.yml)
-on every push.
+on pushes to `dev` and on every pull request (the `push:` trigger is scoped to
+`dev`, #511).
 
 Plugins that ship in `scripts/` are loaded for every smoke run, so a
 plugin that breaks login or trips a sandbox error is caught

@@ -233,8 +233,8 @@ http_api_tokens = {
   timing. Phase 1 ships a small `adclib.constant_time_eq( a, b )`
   in C (XOR-accumulate over equal-length strings, single branch on
   final accumulator). Interim Lua fallback while the C function is
-  in review: same algorithm in pure Lua with `bit32.bxor` /
-  `string.byte` (timing-leak-free at the Lua level; the JIT may
+  in review: same algorithm in pure Lua with Lua 5.4 native bitwise
+  (`~`/`|`) / `string.byte` (timing-leak-free at the Lua level; the JIT may
   still optimize, but our hub uses plain Lua 5.4 interpreter, not
   LuaJIT, so the constant-time property holds).
 
@@ -1339,7 +1339,7 @@ actionable operations.
 
 ## 12. Dependencies
 
-- `dkjson` (pure Lua, ~700 LoC): bundled as `lua_modules/dkjson.lua`,
+- `dkjson` (pure Lua, ~700 LoC): bundled as `dkjson/dkjson.lua`,
   registered via `core/init.lua` import block. Decision rationale:
   pure Lua keeps the build dep-free; performance is fine for an admin
   API (no 10k req/sec workload).
@@ -1355,7 +1355,7 @@ reviewable and shippable.
 
 ### Phase 1: core framework + read-only core endpoints
 
-- Bundle `dkjson` as `lua_modules/dkjson.lua`; wire it through
+- Bundle `dkjson` as `dkjson/dkjson.lua`; wire it through
   `core/init.lua`.
 - Extend `core/iostream.lua:newhttpstage` to permit a CL-bounded
   body for non-GET methods (S3 caps stay; body cap = 64 KiB).
@@ -1377,7 +1377,7 @@ reviewable and shippable.
   `/v1/stats`, `/v1/users` (paginated), `/v1/users/{sid}`,
   `/v1/endpoints`, `/v1/log/api`.
 - New cfg keys: `http_api_tokens` (table), `http_api_rate_read`
-  (default 60/min), `http_api_rate_admin` (default 60/min),
+  (default 120/min), `http_api_rate_admin` (default 60/min),
   `http_api_log_reads` (default false).
 - Smoke tests: token resolution + scope check, envelope shape, error
   codes (esp. 404 vs 405), idempotency-key behaviour + 5-min TTL +
