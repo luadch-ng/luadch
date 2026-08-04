@@ -42,7 +42,7 @@ entrypoint can copy from it under any `--user` override.
 
 ```sh
 git clone https://github.com/luadch-ng/luadch-ng.git
-cd luadch
+cd luadch-ng
 cp .env.example .env
 # adjust PUID / PGID in .env if `id -u` on your host is not 1000
 
