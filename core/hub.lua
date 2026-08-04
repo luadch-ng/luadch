@@ -174,6 +174,7 @@ local pairs = use "pairs"
 local error = use "error"
 local ipairs = use "ipairs"
 local tostring = use "tostring"
+local tonumber = use "tonumber"
 
 --// lua libs //--
 
