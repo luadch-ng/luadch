@@ -36,6 +36,7 @@ one-line summary from each entry; see the entry for commands and cfg keys.
 |---|---|
 | [cmd_accinfo](#cmd_accinfo) | Display extended account details for registered users |
 | [cmd_ban](#cmd_ban) | Ban / unban users by nick, CID, or IP with optional duration and reason |
+| [cmd_botflag](#cmd_botflag) | Toggle the bot icon (ADC CT bot bit) on a registered account, no privilege change |
 | [cmd_delreg](#cmd_delreg) | Delete registrations by nick |
 | [cmd_disconnect](#cmd_disconnect) | Forcefully disconnect a user with optional reason message |
 | [cmd_errors](#cmd_errors) | Display the hub error log to users with sufficient permissions |
@@ -209,6 +210,20 @@ reason. Maintains ban records with history and state tracking.
 **Config:** `cmd_ban_permission`, `cmd_ban_default_time`,
 `cmd_ban_report`, `cmd_ban_report_hubbot`, `cmd_ban_report_opchat`,
 `cmd_ban_llevel`, `cmd_unban_permission`
+
+### cmd_botflag
+
+Toggle the ADC `CT` bot bit on a registered account so it renders with the
+bot icon in DC++ / AirDC++ (e.g. an external announcer client), without any
+privilege change. `CT` is display-only - authorization gates on level, not
+`CT` - so this changes only the icon. Distinct from the in-hub `is_bot`
+flag (which `hub_bot_cleaner` would delete while offline). Takes effect on
+the account's next login. Ships disabled (`enabled = false`); enable it in
+`cfg/cfg.tbl` and set `cmd_botflag_permission`.
+
+**Commands:** `+botflag <nick> on|off`
+
+**Config:** `cmd_botflag_permission`
 
 ### cmd_delreg
 

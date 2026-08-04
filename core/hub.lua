@@ -521,6 +521,7 @@ _regex = {
         rank    = "^%d+$",
         level = "^%d+$",
         is_bot = "^%d+$",
+        show_as_bot = "^%d+$",    -- #571: display-only ADC CT bot-bit flag (scripts/cmd_botflag.lua); distinct from is_bot
         date = ".*",
         by = "^[^ \n]+$",
         badpassword = "^%d+$",
@@ -727,15 +728,28 @@ insertreglevel = function( user ) --> this function makes it unnecessary the use
         else
             user:inf( ):addnp( "RG", "1" )
         end
+        local ct
         if user_level == 100 then
-            user:inf( ):addnp( "CT", "16" )
+            ct = 16
         elseif ( user_level >= 80 ) then
-            user:inf( ):addnp( "CT", "8" )
+            ct = 8
         elseif ( user_level >= key_level ) then
-            user:inf( ):addnp( "CT", "4" )
+            ct = 4
         else
-            user:inf( ):addnp( "CT", "2" )
+            ct = 2
         end
+        -- #571: the show_as_bot profile flag ORs the ADC CT bot bit (1) so
+        -- a designated registered account (e.g. an external announcer
+        -- client) renders with the bot icon, WITHOUT any privilege change.
+        -- CT is display-only - authorization gates on user:level(), never
+        -- on CT - so this changes the icon and nothing else. Distinct from
+        -- is_bot (an in-hub bot object); toggled by scripts/cmd_botflag.lua.
+        -- Takes effect at next login (insertreglevel runs once per session).
+        local profile = user:profile( )
+        if profile and tonumber( profile.show_as_bot ) == 1 then
+            ct = ct + 1
+        end
+        user:inf( ):addnp( "CT", tostring( ct ) )
     end
 end
 
