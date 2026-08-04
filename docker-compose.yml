@@ -23,6 +23,11 @@ services:
       # the mounted scripts/ on every container start. See .env.example
       # for the full explanation. Default ON (1).
       LUADCH_AUTOSYNC_SCRIPTS: "${LUADCH_AUTOSYNC_SCRIPTS:-1}"
+      # Port the container HEALTHCHECK probes with `nc -z` (#567).
+      # Defaults to 5001, the TLS-only default listener. If you run
+      # plain-only (tcp_ports = {5000}, ssl disabled) or a custom port,
+      # set it to match so `docker inspect` health status stays accurate.
+      LUADCH_HEALTHCHECK_PORT: "${LUADCH_HEALTHCHECK_PORT:-5001}"
       # Backup passphrase for the bundled etc_backup plugin (#480). The
       # plugin ships enabled-but-inert; it activates once this is set AND
       # etc_backup.lua is in cfg.scripts. Set the value in .env - it MUST
