@@ -178,6 +178,35 @@ def override_test_ports(staging_dir: Path):
         f"plain_v6={TEST_PORT_PLAIN_V6}, tls_v6={TEST_PORT_TLS_V6}")
 
 
+def seed_dummy_botflag(staging_dir: Path):
+    """#571 regression setup: add the `show_as_bot` profile flag to the
+    default `dummy` account in the staged cfg/user.tbl, so
+    test_botflag_ct_bit can assert the ADC CT bot bit (1) is OR-ed into
+    dummy's level-derived CT (16 -> 17) at login.
+
+    This also exercises the _regex.reguser schema add in core/hub.lua: if
+    `show_as_bot` is not a known reguser key, updateusers() rejects the
+    unknown key at boot and wipes user.tbl ("corrupt database, creating new
+    one") - dummy then no longer exists and every dummy login (this test
+    plus the login battery) fails. That is the fail-pre-fix signal for the
+    schema line the #571 issue calls out as the single most important
+    change to guard. Nothing reads CT for authorization, so flagging dummy
+    changes only its icon bit - no other smoke test asserts CT.
+
+    NOTE for future test authors: dummy now carries the CT bot bit (17, not
+    16) for the ENTIRE shared-hub run. A new smoke test that asserts dummy's
+    exact CT must account for this seed (or run against its own staged tree,
+    which is not seeded)."""
+    user_tbl = staging_dir / "cfg" / "user.tbl"
+    text = user_tbl.read_text(encoding="utf-8")
+    new_text, count = re.subn(r'(nick = "dummy",)', r"\1 show_as_bot = 1,",
+                              text, count=1)
+    if count != 1:
+        raise RuntimeError("could not seed show_as_bot on the dummy account in user.tbl")
+    user_tbl.write_text(new_text, encoding="utf-8")
+    log("seeded show_as_bot=1 on the dummy account (#571)")
+
+
 def start_hub(staging_dir: Path):
     """
     Launch luadch from a CWD outside the staging tree. The hub anchors
@@ -444,6 +473,12 @@ def _adc_login(sock, nick: str, password: str, ve: str | None = None,
     if final.startswith("ISTA "):
         raise TestFailure(f"login failed: hub returned {final!r}")
 
+    # Stash the hub's broadcast BINF for our own SID (the augmented INF the
+    # hub sends via sendtoall AFTER insertreglevel appends OP/RG + CT) so a
+    # caller can inspect the hub-assigned fields (e.g. CT) without changing
+    # this helper's (sid, reader) return contract. #571 uses this.
+    reader.login_binf = final
+
     return sid, reader
 
 
@@ -588,6 +623,39 @@ def test_full_login_tls():
             raise TestFailure(f"unexpected SID format from hub: {sid!r}")
     finally:
         sock.close()
+
+
+def test_botflag_ct_bit():
+    """#571: a registered account carrying the `show_as_bot` profile flag
+    logs in with the ADC CT bot bit (1) OR-ed into its level-derived CT,
+    and nothing else changes. seed_dummy_botflag() set show_as_bot=1 on the
+    level-100 `dummy` account, so insertreglevel() must emit CT (16 | 1) =
+    17.
+
+    FAIL-PRE-FIX two ways:
+      - without the `show_as_bot` line in core/hub.lua's _regex.reguser
+        schema, updateusers() wipes user.tbl at boot (unknown key) and
+        `dummy` no longer exists -> _adc_login below fails outright.
+      - without the insertreglevel() change, CT stays 16 (no bot bit) ->
+        the bot-bit assertion below fails.
+    """
+    with socket.create_connection((HUB_HOST, TEST_PORT_PLAIN), timeout=PROTOCOL_TIMEOUT_SEC) as sock:
+        sid, reader = _adc_login(sock, "dummy", "test")
+        binf = getattr(reader, "login_binf", "") or ""
+        m = re.search(r"\bCT(\d+)\b", binf)
+        if not m:
+            raise TestFailure(f"no CT field in dummy's login BINF: {binf!r}")
+        ct = int(m.group(1))
+        if ct & 1 != 1:
+            raise TestFailure(
+                f"CT bot bit (1) not set: got CT{ct}; the show_as_bot flag "
+                f"did not reach insertreglevel()"
+            )
+        if ct != 17:
+            raise TestFailure(
+                f"expected CT17 (16 | 1) for the flagged level-100 dummy "
+                f"account, got CT{ct}"
+            )
 
 
 def test_command_routing():
@@ -12894,6 +12962,7 @@ TESTS = [
     ("TLS ADC handshake", test_tls_handshake),
     ("plain ADC full login (dummy/test)", test_full_login_plain),
     ("TLS ADC full login (dummy/test)", test_full_login_tls),
+    ("botflag: show_as_bot ORs CT bot bit (#571)", test_botflag_ct_bit),
     ("+cmd routing (post-login +help)", test_command_routing),
     ("alias resolver fallback dispatch (#327)", test_aliases_adc_dispatch),
     ("cmd_ban rejects bantime < 1", test_cmd_ban_rejects_bad_time),
@@ -13244,6 +13313,7 @@ def main():
     log_file = None
     try:
         override_test_ports(staging_dir)
+        seed_dummy_botflag(staging_dir)   # #571: flag dummy for test_botflag_ct_bit
         # As of v3.1.6 the hub auto-generates a self-signed P-256
         # ECDSA cert on first boot via core/cert_bootstrap.lua when
         # no cert exists. Default cfg.tbl ships TLS-only (#77).
