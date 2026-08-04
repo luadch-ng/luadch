@@ -91,7 +91,17 @@ EXPOSE 5000 5001
 # well before the smoke tests' START_TIMEOUT_SEC. We do NOT drive an
 # ADC handshake here; that would pollute auth state and badpassword
 # counters on every healthcheck tick.
+#
+# The probed port is LUADCH_HEALTHCHECK_PORT, defaulting to 5001 - the
+# TLS listener the default cfg ships (ssl_ports = {5001}, tcp_ports
+# empty). The old hardcoded 5000 never came up on a default install, so
+# the container was permanently `unhealthy` (#567). Operators who run
+# plain-only (tcp_ports = {5000}, ssl disabled) or a custom port set
+# LUADCH_HEALTHCHECK_PORT to match in their compose `environment:` block.
+# The HEALTHCHECK CMD runs via /bin/sh -c, so the var expands at check
+# time and a runtime `-e` override takes effect without a rebuild.
+ENV LUADCH_HEALTHCHECK_PORT=5001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD nc -z localhost 5000 || exit 1
+    CMD nc -z localhost "${LUADCH_HEALTHCHECK_PORT:-5001}" || exit 1
 
 ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
