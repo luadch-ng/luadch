@@ -740,6 +740,24 @@ return { -- the settings are a lua table, do not tough this!
     cmd_setpass_advanced_rc = false,  -- warning: this feature adds a complete list of all regusers to the rightclick, this could brings problems in bigger (60+) hubs!
 
     ---------------------------------------------------------------------------------------------------------------------------------
+    --// cmd_botflag.lua settings | toggle the ADC CT bot-icon bit on a registered account (e.g. an external announcer); display-only, no privilege change (#571)
+
+    cmd_botflag_permission = {  -- who is allowed to use this command? (according permission table) (array of boolean)
+
+        [ 0 ] = false,  -- unreg
+        [ 10 ] = false,  -- guest
+        [ 20 ] = false,  -- reg
+        [ 30 ] = false,  -- vip
+        [ 40 ] = false,  -- svip
+        [ 50 ] = false,  -- server
+        [ 55 ] = false,  -- sbot
+        [ 60 ] = false,  -- operator
+        [ 70 ] = false,  -- supervisor
+        [ 80 ] = false,  -- admin
+        [ 100 ] = true,  -- hubowner (default = only the hubowner may flag accounts)
+    },
+
+    ---------------------------------------------------------------------------------------------------------------------------------
     --// cmd_nickchange.lua settings | this script adds a command "nickchange" to change the nick of your own / or others (oplevel)
 
     nick_change = true,  -- activate this script? (boolean)
@@ -1624,6 +1642,7 @@ return { -- the settings are a lua table, do not tough this!
         "cmd_slots.lua",
         "cmd_accinfo.lua",
         "cmd_setpass.lua",
+        { "cmd_botflag.lua", enabled = false },  -- #571 toggle the ADC CT bot-icon bit on a registered announcer account (display-only, no privilege change). Ships disabled: niche owner tool. Enable here + set cmd_botflag_permission.
         "cmd_nickchange.lua",  -- using report import
         "cmd_mass.lua",
         "cmd_talk.lua",
