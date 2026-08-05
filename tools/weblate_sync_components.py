@@ -108,6 +108,27 @@ if core not in existing:
         f"components - create it first, or set WEBLATE_CORE_SLUG to its slug"
     )
 
+# 1b. Refresh the Core component's server-side checkout BEFORE creating linked
+# components. A linked component (repo = weblate://<project>/<core>) has its
+# `template` validated against the Core's checkout at create time; our Weblate
+# does NOT reliably auto-pull `dev` on push, so a lang file that is present on
+# dev can still 400 with `template: "File does not exist"` - even hours later
+# (the cmd_botflag #571 failure: the create races the webhook pull, and a
+# re-run 14h on still saw a stale checkout). A forced pull closes the race. It
+# is idempotent and non-destructive (git fetch + fast-forward of the checkout).
+# Best-effort: on any non-2xx we warn and fall through so the create attempts
+# still report the real state rather than masking it.
+pull_status, pull_resp = api(
+    "POST", f"{URL}/api/components/{PROJECT}/{core}/repository/",
+    {"operation": "pull"},
+)
+if pull_status in (200, 201):
+    print(f"pulled   {core} (checkout refreshed before create)")
+else:
+    print(f"warning: repository pull on {core} returned {pull_status}: "
+          f"{pull_resp} - continuing; a new component may 400 if its template "
+          f"is not yet in Weblate's checkout")
+
 # 2. Enumerate the plugins from the repo checkout.
 plugins = sorted(
     os.path.basename(p)[:-5] for p in glob("scripts/lang/en/*.json")
