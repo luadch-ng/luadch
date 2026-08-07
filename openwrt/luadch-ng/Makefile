@@ -22,7 +22,11 @@ PKG_VERSION?=3.2.0
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_SOURCE_URL:=https://codeload.github.com/luadch-ng/luadch-ng/tar.gz/refs/tags
+# codeload puts the git ref in the URL path (release tags are vX.Y.Z); the
+# trailing "?" turns the "/$(PKG_SOURCE)" that the fetcher appends into a query
+# string so the ref still resolves to the tag. CI can also pre-stage the
+# tarball in dl/ (then the download is skipped entirely).
+PKG_SOURCE_URL:=https://codeload.github.com/luadch-ng/luadch-ng/tar.gz/refs/tags/v$(PKG_VERSION)?
 # Our own CI-built package from a pinned tag; skip the upstream-style hash pin.
 PKG_HASH:=skip
 

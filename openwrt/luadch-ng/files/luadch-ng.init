@@ -15,14 +15,18 @@ STATEDIR=/etc/luadch-ng
 
 seed_state() {
 	mkdir -p "$STATEDIR/cfg" "$STATEDIR/certs" "$STATEDIR/log" "$STATEDIR/data"
-	# First start: lay down the default config + plugin data. Never overwrite
-	# existing ones, so operator edits (and the generated master.key / user.tbl /
-	# accumulated plugin state) survive restarts and package upgrades.
-	if [ ! -f "$STATEDIR/cfg/cfg.tbl" ]; then
-		cp -a "$APPDIR/defaults/cfg/." "$STATEDIR/cfg/"
-	fi
-	if [ -z "$(ls -A "$STATEDIR/data" 2>/dev/null)" ]; then
+	# One-shot seed of the default config + plugin data, guarded by a single
+	# sentinel written LAST. Keying the whole seed on one marker (not on
+	# individual files) is crash-safe: a power loss mid-copy leaves no sentinel,
+	# so the next start re-seeds from scratch - and once seeded we never touch
+	# operator state again, so edits, the generated master.key / user.tbl and
+	# accumulated plugin data survive restarts and package upgrades. (A default
+	# data file added in a later release is not retro-seeded; bundled plugins
+	# self-seed a missing .tbl.)
+	if [ ! -f "$STATEDIR/.seeded" ]; then
+		cp -a "$APPDIR/defaults/cfg/."  "$STATEDIR/cfg/"
 		cp -a "$APPDIR/defaults/data/." "$STATEDIR/data/"
+		touch "$STATEDIR/.seeded"
 	fi
 }
 
