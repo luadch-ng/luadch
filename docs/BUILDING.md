@@ -212,6 +212,138 @@ Pi 4 / Pi 5 / Apple Silicon Linux / AWS Graviton, etc.). Verify with
 
 ---
 
+## 📡 OpenWRT (routers)
+
+luadch runs on OpenWRT routers - confirmed on a Linksys WRT3200ACM
+(`mvebu/cortexa9`, ARMv7, OpenWRT 25.12). You **cross-compile on a PC**
+using the OpenWRT SDK and copy the result to the router; you do **not**
+build on the router (routers lack the space/RAM for a toolchain, and
+there is no cmake package for OpenWRT because it is not meant to compile
+on-device).
+
+### Will it run on my router?
+
+Two hard requirements decide it:
+
+1. **Little-endian CPU.** luadch's Tiger password/CID hashing is
+   little-endian only; on a big-endian CPU logins would silently fail.
+   This **rules out big-endian MIPS** (`ath79` / `ar71xx`, many older
+   Atheros devices) and PowerPC (`mpc85xx`). Fine: `ramips` (mt7620/21/76x8,
+   little-endian MIPS), **all ARM / ARM64** (mvebu, ipq40xx, filogic,
+   bcm27xx, rockchip, ...), and x86/64. Check with `ubus call system board`
+   - the `target` field names your arch.
+2. **OpenWRT ≥ 22.03** (real OpenSSL 3.x). LuaSec + adclib need OpenSSL
+   3.x; OpenWRT's default mbedTLS is not enough, and pre-22.03 shipped the
+   unsupported OpenSSL 1.1.
+
+Flash/RAM: the runtime tree is ~6 MB plus the shared libs, so an 8/16 MB
+router needs **extroot** (USB/SD); a 128 MB+ device (like the WRT3200ACM)
+has ample room.
+
+### Cross-compile with the OpenWRT SDK
+
+Build-host prerequisites (Debian/Ubuntu), needed by the SDK's package
+build system:
+
+```sh
+sudo apt-get install -y build-essential cmake git wget \
+    libncurses-dev zlib1g-dev gawk unzip file python3 rsync zstd
+```
+
+```sh
+# 1. Download + extract the SDK for your EXACT target + release. Find both
+#    with `ubus call system board` (target + release.version). Example:
+#    WRT3200ACM -> mvebu/cortexa9, OpenWRT 25.12.x.
+#    <=24.10 ships the SDK as .tar.xz; 25.x ships .tar.zst (needs zstd).
+SDK=openwrt-sdk-25.12.5-mvebu-cortexa9_gcc-14.3.0_musl_eabi.Linux-x86_64
+wget https://downloads.openwrt.org/releases/25.12.5/targets/mvebu/cortexa9/$SDK.tar.zst
+tar --zstd -xf $SDK.tar.zst        # on a .tar.xz SDK: tar -xf $SDK.tar.xz
+
+# 2. Cross-build the two runtime libs luadch links (OpenSSL + zlib) so
+#    their headers/libs land in the SDK's staging tree.
+cd $SDK
+export STAGING_DIR="$PWD/staging_dir"   # OpenWRT's gcc refuses to run without this
+./scripts/feeds update base
+./scripts/feeds install libopenssl zlib
+make defconfig
+make package/openssl/compile package/zlib/compile -j"$(nproc)"
+cd ..
+
+# 3. A CMake toolchain file. This one is generic - it discovers the SDK's
+#    toolchain + target dirs, so the same file works for ANY OpenWRT target.
+cat > openwrt.cmake <<'EOF'
+set(CMAKE_SYSTEM_NAME Linux)
+if(NOT OPENWRT_SDK)
+  set(OPENWRT_SDK "$ENV{OPENWRT_SDK}")
+endif()
+file(GLOB _tc "${OPENWRT_SDK}/staging_dir/toolchain-*")
+file(GLOB _tg "${OPENWRT_SDK}/staging_dir/target-*")
+file(GLOB _gcc "${_tc}/bin/*-openwrt-linux-gcc")
+string(REGEX REPLACE "-gcc$" "" _prefix "${_gcc}")
+set(CMAKE_C_COMPILER   "${_prefix}-gcc")
+set(CMAKE_CXX_COMPILER "${_prefix}-g++")
+set(CMAKE_FIND_ROOT_PATH "${_tg};${_tc}")
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+EOF
+
+# 4. Configure + build luadch against the SDK. Keep STAGING_DIR exported.
+TARGET=$(echo "$PWD/$SDK"/staging_dir/target-*/usr)
+cmake -B build-owrt \
+    -DCMAKE_TOOLCHAIN_FILE="$PWD/openwrt.cmake" \
+    -DOPENWRT_SDK="$PWD/$SDK" \
+    -DOPENSSL_ROOT_DIR="$TARGET" -DZLIB_ROOT="$TARGET" \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build-owrt -j"$(nproc)"
+cmake --install build-owrt
+```
+
+Verify the arch: `file build-owrt/install/luadch/luadch` should report
+your target (e.g. `ELF 32-bit LSB executable, ARM`), not x86-64.
+
+> If `make` in step 2 aborts with a host-tool prereq error you cannot
+> satisfy (e.g. a locked-down build box without `ncurses`), and that tool
+> is only used by `menuconfig`, you can skip the check with
+> `touch $SDK/host/.prereq-build` before the `make` (`FORCE=1` does **not**
+> skip a "build dependency" failure).
+
+### Install on the router
+
+Copy the tree over (onto extroot if flash is tight) and install the
+runtime libraries. **The package manager and library names differ by
+OpenWRT version:**
+
+```sh
+# OpenWRT 25.x and newer (apk):
+apk update && apk add libopenssl3 zlib libstdcpp6
+
+# OpenWRT <= 24.10 (opkg):
+opkg update && opkg install libopenssl libstdcpp zlib
+```
+
+On 25.x the runtime libs carry their soname version in the package name
+(`libopenssl3`, `libstdcpp6`), which trips up a copy-pasted `libopenssl`.
+`libc` and `libgcc` are part of the base system. On **little-endian MIPS**
+(ramips) `libcrypto` additionally needs `libatomic` (`apk add libatomic1`
+/ `opkg install libatomic`); ARM does not.
+
+Then run it:
+
+```sh
+tar xzf luadch-<...>.tar.gz -C /opt      # or any dir with space
+cd /opt/luadch && ./luadch               # TLS-only: adcs://<router-ip>:5001
+```
+
+First boot auto-generates the TLS cert + key (see First-time login below).
+
+> Not a native OpenWRT package yet: `apk add luadch` / `opkg install
+> luadch` (with the dependencies pulled in automatically) would need an
+> OpenWRT package Makefile + a package feed - a possible future step.
+
+---
+
 ## First-time login
 
 Whichever platform you built on (TLS-only by default; the certificate is
