@@ -171,6 +171,36 @@ GCM authentication is the security-critical signal: a tampered file
 fails the tag check and `loadusers` returns an error. The hub does
 not silently accept tampered input.
 
+`cfg/user.tbl` is **not** a SQLite database (a SQLite GUI cannot open
+it and there is no "password" - the secret is the 32-byte key file).
+It is a Lua table (`return { ... }`); the LDC1 layer just encrypts
+that same serialized form.
+
+### Inspecting / editing user.tbl offline
+
+To read or edit the registered-user database by hand (account
+recovery, bulk edit) while keeping encryption on, decrypt it offline
+with the matching `master.key` using [`tools/usertbl.py`](../tools/usertbl.py):
+
+```sh
+python tools/usertbl.py decrypt cfg/user.tbl cfg/master.key -o user.plain.lua
+#   ... edit user.plain.lua (plain Lua) in a text editor ...
+python tools/usertbl.py encrypt user.plain.lua cfg/master.key -o cfg/user.tbl
+```
+
+- **Stop the hub first.** A running hub holds `user.tbl` in RAM and
+  rewrites it from that copy on the next save, silently clobbering an
+  offline edit.
+- The decrypted plaintext holds password-equivalent secrets; treat it
+  and `master.key` like the TLS private key (`0600`, delete the
+  plaintext when done).
+- `master.key` and the `user.tbl` it sealed are a **matched pair** -
+  back them up **together**. An old `user.tbl` snapshot without its
+  contemporaneous key is unrecoverable by design.
+- If you would rather avoid the key requirement entirely, use the
+  `encrypt_usertbl = false` opt-out below instead - the hub then writes
+  plaintext Lua directly, no tool needed.
+
 ### Master key
 
 - **Default path:** `cfg/master.key` (set the `master_key_path` cfg
