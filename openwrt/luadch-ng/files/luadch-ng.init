@@ -24,8 +24,11 @@ seed_state() {
 	# data file added in a later release is not retro-seeded; bundled plugins
 	# self-seed a missing .tbl.)
 	if [ ! -f "$STATEDIR/.seeded" ]; then
-		cp -a "$APPDIR/defaults/cfg/."  "$STATEDIR/cfg/"
-		cp -a "$APPDIR/defaults/data/." "$STATEDIR/data/"
+		# Chain with && so the sentinel is written ONLY if both copies
+		# succeeded - a cp that errors (e.g. ENOSPC) without killing the
+		# process then leaves no sentinel and the next start re-seeds.
+		cp -a "$APPDIR/defaults/cfg/."  "$STATEDIR/cfg/" &&
+		cp -a "$APPDIR/defaults/data/." "$STATEDIR/data/" &&
 		touch "$STATEDIR/.seeded"
 	fi
 }
