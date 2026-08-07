@@ -6,6 +6,7 @@
 # Windows checkouts. Otherwise the shebang (#!/bin/sh\r) breaks the WSL build.
 *.sh        text eol=lf
 *.py        text eol=lf
+*.init      text eol=lf
 compile     text eol=lf
 cleanall    text eol=lf
 Makefile    text eol=lf
