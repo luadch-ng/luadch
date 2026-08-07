@@ -114,8 +114,17 @@ def _write_out(data, out_path, default_stream, binary):
     # icacls guidance in docs/SECURITY.md there.
     try:
         fd = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        if hasattr(os, "fchmod"):
+    except OSError as e:
+        _die("cannot write %s: %s" % (out_path, e))
+    # Tighten an existing looser file. Best-effort: a mount without POSIX perms
+    # (vfat / some CIFS) rejects fchmod, but it has no group/other bits to leak
+    # on anyway - so don't abort the (already O_TRUNC'd) write over it.
+    if hasattr(os, "fchmod"):
+        try:
             os.fchmod(fd, 0o600)
+        except OSError:
+            pass
+    try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
     except OSError as e:
