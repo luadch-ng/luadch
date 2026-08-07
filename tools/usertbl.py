@@ -105,8 +105,27 @@ def _write_out(data, out_path, default_stream, binary):
     # so we allow it - but never clobber silently; warn on stderr first.
     if os.path.exists(out_path):
         sys.stderr.write("note: overwriting existing %s\n" % out_path)
+    # Create the output at 0600 on POSIX. The decrypted plaintext is
+    # password-equivalent (and a re-sealed user.tbl the hub keeps at 0600), so
+    # it must not be group/world-readable even for the brief edit window - this
+    # matches cfg_secret's chmod-600 discipline for exactly these files.
+    # os.open honors the mode on create; fchmod also tightens an existing
+    # looser target. Windows ignores the POSIX mode (no fchmod) - rely on the
+    # icacls guidance in docs/SECURITY.md there.
     try:
-        with open(out_path, "wb") as f:
+        fd = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    except OSError as e:
+        _die("cannot write %s: %s" % (out_path, e))
+    # Tighten an existing looser file. Best-effort: a mount without POSIX perms
+    # (vfat / some CIFS) rejects fchmod, but it has no group/other bits to leak
+    # on anyway - so don't abort the (already O_TRUNC'd) write over it.
+    if hasattr(os, "fchmod"):
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:
+            pass
+    try:
+        with os.fdopen(fd, "wb") as f:
             f.write(data)
     except OSError as e:
         _die("cannot write %s: %s" % (out_path, e))
